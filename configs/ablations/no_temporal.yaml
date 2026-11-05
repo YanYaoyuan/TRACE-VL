@@ -1,0 +1,3 @@
+extends: ../tiny.yaml
+model:
+  st_layers: 0

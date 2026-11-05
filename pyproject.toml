@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trace-vl"
+version = "0.1.0"
+description = "Causal spatio-temporal video modeling with bounded transition evidence memory"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = ["torch==2.8.0", "numpy>=1.24", "Pillow>=10", "PyYAML>=6", "opencv-python-headless>=4.8"]
+
+[project.optional-dependencies]
+hf = ["transformers>=4.57,<6", "accelerate>=1.0", "safetensors>=0.4", "huggingface-hub>=0.26"]
+data = ["datasets>=3.0", "huggingface-hub>=0.26"]
+lora = ["peft>=0.13"]
+dev = ["pytest>=8", "ruff>=0.9"]
+
+[project.scripts]
+trace-vl = "trace_vl.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true

@@ -1,0 +1,22 @@
+# Unmeasured starting point: run 5 steps on one GPU before a 100-step pilot.
+extends: reference_2b.yaml
+model:
+  text_limit: 256
+data:
+  manifest: data/processed/llava-pilot.jsonl
+  sampling_fps: 1
+  max_frames: 4
+training:
+  batch_size: 1
+  grad_accum: 4
+  max_steps: 100
+  save_every: 100
+  detach_every: 0
+  workers: 0
+  loss_weights:
+    answer: 1.0
+    alert: 0.0
+    write: 0.0
+    utility: 0.0
+evaluation:
+  max_new_tokens: 32

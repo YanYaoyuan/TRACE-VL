@@ -1,0 +1,4 @@
+extends: ../tiny.yaml
+model:
+  memory_mode: summary
+  capsule_tokens: 1

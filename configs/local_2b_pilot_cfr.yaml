@@ -1,0 +1,4 @@
+# Baseline architecture; seven MKV source videos normalized to CFR H.264 for reliable seeking.
+extends: local_2b_pilot_offline.yaml
+data:
+  manifest: data/processed/llava-pilot-cfr.jsonl

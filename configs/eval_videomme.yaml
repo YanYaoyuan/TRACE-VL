@@ -1,0 +1,7 @@
+extends: reference_2b.yaml
+data:
+  manifest: data/processed/videomme.jsonl
+  sampling_fps: 1
+  max_frames: 128
+evaluation:
+  max_new_tokens: 16

@@ -1,0 +1,9 @@
+# Continue the 450-step baseline to 2250 total steps (five dataset passes by sample count).
+# Global batch = 2 ranks * 1 sample * accumulation 2 = 4, matching the single-GPU baseline.
+extends: local_2b_pilot_cfr.yaml
+training:
+  batch_size: 1
+  grad_accum: 2
+  max_steps: 2250
+  save_every: 450
+  keep_steps: [900, 2250]

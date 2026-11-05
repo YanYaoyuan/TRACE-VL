@@ -1,0 +1,16 @@
+{
+  "status": "exact_new_module_shapes_on_meta_device_no_pretrained_weights_loaded",
+  "new_components": {
+    "rgb_bridge": 787200,
+    "xy_embedding": 592896,
+    "motion": 2665728,
+    "blocks": 33087536,
+    "memory": 10656002,
+    "reader": 12482304,
+    "projector": 5771264,
+    "alert_head": 1772545,
+    "token_types": 1536
+  },
+  "new_parameters": 67817011,
+  "note": "New modules and direct parameters (including token_types) are counted exactly. Vision/language placeholders are excluded. Full parameter count must be audited after loading real HF backbones."
+}

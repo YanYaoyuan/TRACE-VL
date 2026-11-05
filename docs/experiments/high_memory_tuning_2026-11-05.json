@@ -1,0 +1,345 @@
+{
+  "date": "2026-11-05",
+  "rows": [
+    {
+      "name": "baseline-4frames",
+      "em": 0.305,
+      "f1": 0.33292857142857135,
+      "generation_control": {
+        "matched_exact_match": 0.305,
+        "mismatched_exact_match": 0.305,
+        "matched_token_f1": 0.33292857142857146,
+        "mismatched_token_f1": 0.3349285714285714,
+        "fraction_answer_changed": 0.03
+      },
+      "loss_increase": 0.0005165665596723556,
+      "visual_bootstrap": {
+        "matched_minus_mismatched_em": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "resampling_unit": "video",
+        "videos": 20,
+        "resamples": 5000,
+        "seed": 7
+      },
+      "baseline_bootstrap": {
+        "matched_minus_mismatched_em": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "resampling_unit": "video",
+        "videos": 20,
+        "resamples": 5000,
+        "seed": 7
+      },
+      "checkpoint_sha256": "889f4962fc467aa9e91556d2c74a47cc524271287bdd99597cad1cbac25fdf45",
+      "manifest_sha256": "5b14a09cca48b8e208703562e6524ac107c4ee5addf4d3bfc013323345a3ce95"
+    },
+    {
+      "name": "lr1e4",
+      "em": 0.295,
+      "f1": 0.31726190476190474,
+      "generation_control": {
+        "matched_exact_match": 0.295,
+        "mismatched_exact_match": 0.29,
+        "matched_token_f1": 0.31726190476190474,
+        "mismatched_token_f1": 0.31476190476190474,
+        "fraction_answer_changed": 0.025
+      },
+      "loss_increase": -0.0031536360085010528,
+      "visual_bootstrap": {
+        "matched_minus_mismatched_em": 0.005,
+        "ci95": [
+          0.0,
+          0.015
+        ],
+        "resampling_unit": "video",
+        "videos": 20,
+        "resamples": 5000,
+        "seed": 7
+      },
+      "baseline_bootstrap": {
+        "matched_minus_mismatched_em": -0.01,
+        "ci95": [
+          -0.035,
+          0.015
+        ],
+        "resampling_unit": "video",
+        "videos": 20,
+        "resamples": 5000,
+        "seed": 7
+      },
+      "checkpoint_sha256": "d701cda234d9285cf4d55b22855db863b41fdbb1cdcd92893516c02f5320b6ee",
+      "manifest_sha256": "5b14a09cca48b8e208703562e6524ac107c4ee5addf4d3bfc013323345a3ce95",
+      "checkpoint": "outputs/tuning-20261105/lr1e4/last.pt",
+      "learning_rates": [
+        0.0001
+      ],
+      "initialization": {
+        "checkpoint": "outputs/llava-2b-ddp-5epochs-20261105/best.pt",
+        "checkpoint_sha256": "889f4962fc467aa9e91556d2c74a47cc524271287bdd99597cad1cbac25fdf45",
+        "source_step": 2250,
+        "changed_context_settings": [
+          "normalize_memory",
+          "spatial_tokens",
+          "text_limit"
+        ],
+        "optimizer_restored": false
+      },
+      "resources": {
+        "device": "cuda:0",
+        "world_size": 2,
+        "rank0_peak_allocated_bytes": 30232692224,
+        "rank0_peak_reserved_bytes": 30918311936,
+        "seconds": 720.3572487909987,
+        "ranks": [
+          {
+            "rank": 0,
+            "device": "cuda:0",
+            "peak_allocated_bytes": 30232692224,
+            "peak_reserved_bytes": 30918311936,
+            "seconds": 720.3559958580008
+          },
+          {
+            "rank": 1,
+            "device": "cuda:1",
+            "peak_allocated_bytes": 30216404480,
+            "peak_reserved_bytes": 30903631872,
+            "seconds": 720.3591394159885
+          }
+        ]
+      },
+      "last50_mean_loss": 1.749126029610634
+    },
+    {
+      "name": "lr3e5",
+      "em": 0.29,
+      "f1": 0.31199999999999994,
+      "generation_control": {
+        "matched_exact_match": 0.29,
+        "mismatched_exact_match": 0.29,
+        "matched_token_f1": 0.312,
+        "mismatched_token_f1": 0.3145,
+        "fraction_answer_changed": 0.03
+      },
+      "loss_increase": -0.00062903992831707,
+      "visual_bootstrap": {
+        "matched_minus_mismatched_em": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "resampling_unit": "video",
+        "videos": 20,
+        "resamples": 5000,
+        "seed": 7
+      },
+      "baseline_bootstrap": {
+        "matched_minus_mismatched_em": -0.015,
+        "ci95": [
+          -0.04,
+          0.01
+        ],
+        "resampling_unit": "video",
+        "videos": 20,
+        "resamples": 5000,
+        "seed": 7
+      },
+      "checkpoint_sha256": "b4040c32ad2888444428cb560bf96f7d9d5b694ccfbbe4d2d3136a4a72117f05",
+      "manifest_sha256": "5b14a09cca48b8e208703562e6524ac107c4ee5addf4d3bfc013323345a3ce95",
+      "checkpoint": "outputs/tuning-20261105/lr3e5/last.pt",
+      "learning_rates": [
+        3e-05
+      ],
+      "initialization": {
+        "checkpoint": "outputs/llava-2b-ddp-5epochs-20261105/best.pt",
+        "checkpoint_sha256": "889f4962fc467aa9e91556d2c74a47cc524271287bdd99597cad1cbac25fdf45",
+        "source_step": 2250,
+        "changed_context_settings": [
+          "normalize_memory",
+          "spatial_tokens",
+          "text_limit"
+        ],
+        "optimizer_restored": false
+      },
+      "resources": {
+        "device": "cuda:0",
+        "world_size": 2,
+        "rank0_peak_allocated_bytes": 30232692224,
+        "rank0_peak_reserved_bytes": 30918311936,
+        "seconds": 727.3805498779984,
+        "ranks": [
+          {
+            "rank": 0,
+            "device": "cuda:0",
+            "peak_allocated_bytes": 30232692224,
+            "peak_reserved_bytes": 30918311936,
+            "seconds": 727.3795489759941
+          },
+          {
+            "rank": 1,
+            "device": "cuda:1",
+            "peak_allocated_bytes": 30216404480,
+            "peak_reserved_bytes": 30903631872,
+            "seconds": 727.3820946479973
+          }
+        ]
+      },
+      "last50_mean_loss": 1.7118791025876998
+    }
+  ],
+  "capacity": [
+    {
+      "file": "outputs/tuning-20261105/capacity-b2-f16-n192-detach8.json",
+      "batch_size": 2,
+      "frames": 16,
+      "spatial_tokens": 192,
+      "normalize_memory": false,
+      "precision": "bf16",
+      "detach_every": 8,
+      "status": "nonfinite_gradient",
+      "peak_allocated_gib": 13.123645782470703,
+      "peak_reserved_gib": 13.3203125,
+      "seconds_per_step": 0.5087411080021411
+    },
+    {
+      "file": "outputs/tuning-20261105/capacity-b2-f16-n192-fp32.json",
+      "batch_size": 2,
+      "frames": 16,
+      "spatial_tokens": 192,
+      "normalize_memory": false,
+      "precision": "fp32",
+      "detach_every": 0,
+      "status": "nonfinite_gradient",
+      "peak_allocated_gib": 19.75286340713501,
+      "peak_reserved_gib": 19.958984375,
+      "seconds_per_step": 0.5836952499957988
+    },
+    {
+      "file": "outputs/tuning-20261105/capacity-b2-f16-n192-norm.json",
+      "batch_size": 2,
+      "frames": 16,
+      "spatial_tokens": 192,
+      "normalize_memory": true,
+      "precision": "bf16",
+      "detach_every": 0,
+      "status": "ok",
+      "peak_allocated_gib": 13.63977575302124,
+      "peak_reserved_gib": 13.849609375,
+      "seconds_per_step": 0.6987423849932384
+    },
+    {
+      "file": "outputs/tuning-20261105/capacity-b2-f16-n192.json",
+      "batch_size": 2,
+      "frames": 16,
+      "spatial_tokens": 192,
+      "normalize_memory": false,
+      "precision": "bf16",
+      "detach_every": 0,
+      "status": "nonfinite_gradient",
+      "peak_allocated_gib": 13.133835792541504,
+      "peak_reserved_gib": 13.3203125,
+      "seconds_per_step": 0.4728475915035233
+    },
+    {
+      "file": "outputs/tuning-20261105/capacity-b2-f16-n96-detach8.json",
+      "batch_size": 2,
+      "frames": 16,
+      "spatial_tokens": 96,
+      "normalize_memory": false,
+      "precision": "bf16",
+      "detach_every": 8,
+      "status": "nonfinite_gradient",
+      "peak_allocated_gib": 8.434919357299805,
+      "peak_reserved_gib": 8.603515625,
+      "seconds_per_step": 0.48264885850949213
+    },
+    {
+      "file": "outputs/tuning-20261105/capacity-b2-f32-n224-norm.json",
+      "batch_size": 2,
+      "frames": 32,
+      "spatial_tokens": 224,
+      "normalize_memory": true,
+      "precision": "bf16",
+      "detach_every": 0,
+      "status": "ok",
+      "peak_allocated_gib": 27.871992588043213,
+      "peak_reserved_gib": 28.306640625,
+      "seconds_per_step": 1.0680600485065952
+    },
+    {
+      "file": "outputs/tuning-20261105/capacity-b2-f4-n96.json",
+      "batch_size": 2,
+      "frames": 4,
+      "spatial_tokens": 96,
+      "normalize_memory": false,
+      "precision": "bf16",
+      "detach_every": 0,
+      "status": "ok",
+      "peak_allocated_gib": 6.609086513519287,
+      "peak_reserved_gib": 6.75390625,
+      "seconds_per_step": 0.4996762900118483
+    },
+    {
+      "file": "outputs/tuning-20261105/capacity-b4-f16-n192-norm.json",
+      "batch_size": 4,
+      "frames": 16,
+      "spatial_tokens": 192,
+      "normalize_memory": true,
+      "precision": "bf16",
+      "detach_every": 0,
+      "status": "ok",
+      "peak_allocated_gib": 21.90225648880005,
+      "peak_reserved_gib": 22.328125,
+      "seconds_per_step": 0.9871614200092154
+    },
+    {
+      "file": "outputs/tuning-20261105/capacity-b4-f16-n256-norm.json",
+      "batch_size": 4,
+      "frames": 16,
+      "spatial_tokens": 256,
+      "normalize_memory": true,
+      "precision": "bf16",
+      "detach_every": 0,
+      "status": "oom",
+      "peak_allocated_gib": 28.686885833740234,
+      "peak_reserved_gib": 28.85546875,
+      "seconds_per_step": null
+    },
+    {
+      "file": "outputs/tuning-20261105/capacity-b5-f16-n192-norm.json",
+      "batch_size": 5,
+      "frames": 16,
+      "spatial_tokens": 192,
+      "normalize_memory": true,
+      "precision": "bf16",
+      "detach_every": 0,
+      "status": "ok",
+      "peak_allocated_gib": 25.940231323242188,
+      "peak_reserved_gib": 26.318359375,
+      "seconds_per_step": 1.1269272920035291
+    },
+    {
+      "file": "outputs/tuning-20261105/capacity-b8-f16-n192-norm.json",
+      "batch_size": 8,
+      "frames": 16,
+      "spatial_tokens": 192,
+      "normalize_memory": true,
+      "precision": "bf16",
+      "detach_every": 0,
+      "status": "oom",
+      "peak_allocated_gib": 28.37236976623535,
+      "peak_reserved_gib": 28.75390625,
+      "seconds_per_step": null
+    }
+  ],
+  "best_new_arm": "lr1e4",
+  "selection": "validation EM, token F1, then lower learning rate; not independent test",
+  "checks": {
+    "pytest": "46 passed, 2 skipped",
+    "ruff": "passed"
+  }
+}

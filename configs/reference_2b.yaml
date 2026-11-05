@@ -1,0 +1,42 @@
+# Architecture target. Requires pretrained downloads and alignment training.
+extends: tiny.yaml
+model:
+  backend: hf
+  dim: 768
+  vision_dim: 1024
+  language_dim: 2048
+  heads: 12
+  st_layers: 4
+  ffn_ratio: 3
+  spatial_tokens: 96
+  motion_tokens: 16
+  cache_frames: 8
+  cache_seconds: 4.0
+  state_slots: 32
+  event_capacity: 128
+  capsule_tokens: 4
+  read_events: 16
+  read_tokens: 96
+  reader_layers: 2
+  image_size: 384
+  freeze_vision: true
+  freeze_language: true
+  language_model: Qwen/Qwen3-1.7B
+  vision_model: google/siglip2-large-patch16-384
+  query_encoding: embedding_mean
+  text_limit: 512
+data:
+  manifest: data/processed/trainval.jsonl
+  sampling_fps: 2
+  max_frames: 16
+training:
+  precision: bf16
+  batch_size: 1
+  grad_accum: 8
+  lr: 0.0001
+  max_steps: 1000
+  save_every: 250
+  detach_every: 8
+evaluation:
+  precision: bf16
+  max_new_tokens: 64

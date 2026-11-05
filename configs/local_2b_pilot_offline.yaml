@@ -1,0 +1,4 @@
+# Same baseline architecture and training settings; use already cached backbones only.
+extends: local_2b_pilot.yaml
+model:
+  local_files_only: true

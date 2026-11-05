@@ -1,0 +1,18 @@
+extends: ../local_2b_pilot_offline.yaml
+model:
+  spatial_tokens: 224
+  text_limit: 512
+  normalize_memory: true
+data:
+  manifest: data/processed/llava-pilot-tuning-cfr.jsonl
+  max_frames: 32
+  sampling_fps: 4
+training:
+  batch_size: 2
+  grad_accum: 1
+  max_steps: 450
+  save_every: 450
+  workers: 2
+  detach_every: 0
+evaluation:
+  reuse_video_state: true

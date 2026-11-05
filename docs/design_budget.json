@@ -1,0 +1,37 @@
+{
+  "status": "design_estimate_not_loaded_model",
+  "language_backbone": "Qwen/Qwen3-1.7B",
+  "vision_backbone": "google/siglip2-large-patch16-384 (patch tower only)",
+  "language_params_formula": 1720574976,
+  "vision_patch_tower_params_formula": 303688704,
+  "new_component_parameters": {
+    "rgb_bridge": 787200,
+    "motion_scout_and_encoder_budget": 2000000,
+    "causal_spatiotemporal_transformer_4_blocks": 33085440,
+    "recurrent_state_writer": 5907456,
+    "evidence_reader_2_blocks": 11888640,
+    "language_projector": 5771264,
+    "routing_temporal_heads_and_embeddings_budget": 500000
+  },
+  "new_component_parameters_total": 59940000,
+  "inference_parameters_estimate": 2084203680,
+  "parameter_count_notes": [
+    "Backbone counts derived from published configurations and standard layer definitions; verify with actual loaded unique parameters.",
+    "No auxiliary teacher, SigLIP text tower or pooling head included.",
+    "LoRA is additional during adaptation; report separately and merge before final inference parameter audit.",
+    "Motion encoder and small heads are explicit budget allocations, not implementation counts."
+  ],
+  "per_stream_bf16_bytes": {
+    "working_state": 49152,
+    "episode_capsules": 786432,
+    "recent_hidden_features": 1376256,
+    "st_temporal_kv": 11010048
+  },
+  "per_stream_bytes_excludes": [
+    "weights",
+    "LLM KV and activations",
+    "video decode surfaces and raw-frame buffers",
+    "external evidence archive",
+    "allocator overhead"
+  ]
+}

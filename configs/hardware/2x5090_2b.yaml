@@ -1,0 +1,8 @@
+# Starting point, not a measured memory guarantee. DDP replicates weights on each GPU.
+extends: ../reference_2b.yaml
+training:
+  batch_size: 1
+  grad_accum: 8
+  detach_every: 4
+data:
+  max_frames: 8

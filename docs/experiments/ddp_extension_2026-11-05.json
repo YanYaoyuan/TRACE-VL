@@ -1,0 +1,300 @@
+{
+  "date": "2026-11-05",
+  "model_changed": false,
+  "jepa": false,
+  "start_step": 450,
+  "end_step": 2250,
+  "new_optimizer_steps": 1800,
+  "global_batch": 4,
+  "world_size": 2,
+  "runs": [
+    {
+      "step": 450,
+      "checkpoint": "outputs/llava-2b-baseline-cfr-epoch1-20261105/last.pt",
+      "qa_exact_match": 0.285,
+      "qa_token_f1": 0.30483333333333335,
+      "canonical_minus_control_matched_em": 0.004999999999999949,
+      "generation_control": {
+        "matched_exact_match": 0.28,
+        "mismatched_exact_match": 0.285,
+        "matched_token_f1": 0.29983333333333334,
+        "mismatched_token_f1": 0.30483333333333335,
+        "fraction_answer_changed": 0.075
+      },
+      "matched_answer_loss": 2.1465361816436053,
+      "mismatched_answer_loss": 2.1462667398899793,
+      "answer_loss_gap": -0.00026944175362586976,
+      "paired_video_bootstrap": {
+        "matched_minus_mismatched_em": -0.005,
+        "ci95": [
+          -0.02,
+          0.01
+        ],
+        "resampling_unit": "video",
+        "videos": 20,
+        "resamples": 5000,
+        "seed": 7
+      },
+      "canonical_improvement_vs_step450": {
+        "matched_minus_mismatched_em": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "resampling_unit": "video",
+        "videos": 20,
+        "resamples": 5000,
+        "seed": 7
+      },
+      "checkpoint_sha256": "118cb7c398ea820f0ffc9e2121ccaefc110c28eadd53e2db97d051b5cf17363d",
+      "manifest_sha256": "0ed0758fe40bfd34a0c076bd83bc6c1093ca8d7188282f9448c95d32d1a80a27"
+    },
+    {
+      "step": 900,
+      "checkpoint": "outputs/llava-2b-ddp-5epochs-20261105/step-00900.pt",
+      "qa_exact_match": 0.28,
+      "qa_token_f1": 0.2925952380952381,
+      "canonical_minus_control_matched_em": 0.0,
+      "generation_control": {
+        "matched_exact_match": 0.28,
+        "mismatched_exact_match": 0.28,
+        "matched_token_f1": 0.2925952380952381,
+        "mismatched_token_f1": 0.29703968253968255,
+        "fraction_answer_changed": 0.06
+      },
+      "matched_answer_loss": 2.0368895130511375,
+      "mismatched_answer_loss": 2.0380098583875226,
+      "answer_loss_gap": 0.0011203453363850713,
+      "paired_video_bootstrap": {
+        "matched_minus_mismatched_em": 0.0,
+        "ci95": [
+          -0.015,
+          0.015
+        ],
+        "resampling_unit": "video",
+        "videos": 20,
+        "resamples": 5000,
+        "seed": 7
+      },
+      "canonical_improvement_vs_step450": {
+        "matched_minus_mismatched_em": -0.005,
+        "ci95": [
+          -0.04,
+          0.025
+        ],
+        "resampling_unit": "video",
+        "videos": 20,
+        "resamples": 5000,
+        "seed": 7
+      },
+      "checkpoint_sha256": "1d65c060456b8cac22be79a46bff7166f422eaf63d396441ebf31b288e47e6d5",
+      "manifest_sha256": "0ed0758fe40bfd34a0c076bd83bc6c1093ca8d7188282f9448c95d32d1a80a27"
+    },
+    {
+      "step": 2250,
+      "checkpoint": "outputs/llava-2b-ddp-5epochs-20261105/step-02250.pt",
+      "qa_exact_match": 0.305,
+      "qa_token_f1": 0.33292857142857135,
+      "canonical_minus_control_matched_em": 0.0,
+      "generation_control": {
+        "matched_exact_match": 0.305,
+        "mismatched_exact_match": 0.305,
+        "matched_token_f1": 0.33292857142857146,
+        "mismatched_token_f1": 0.3349285714285714,
+        "fraction_answer_changed": 0.035
+      },
+      "matched_answer_loss": 1.9403705815970897,
+      "mismatched_answer_loss": 1.9413119803741574,
+      "answer_loss_gap": 0.0009413987770676613,
+      "paired_video_bootstrap": {
+        "matched_minus_mismatched_em": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "resampling_unit": "video",
+        "videos": 20,
+        "resamples": 5000,
+        "seed": 7
+      },
+      "canonical_improvement_vs_step450": {
+        "matched_minus_mismatched_em": 0.02,
+        "ci95": [
+          -0.02,
+          0.055
+        ],
+        "resampling_unit": "video",
+        "videos": 20,
+        "resamples": 5000,
+        "seed": 7
+      },
+      "checkpoint_sha256": "889f4962fc467aa9e91556d2c74a47cc524271287bdd99597cad1cbac25fdf45",
+      "manifest_sha256": "0ed0758fe40bfd34a0c076bd83bc6c1093ca8d7188282f9448c95d32d1a80a27"
+    }
+  ],
+  "best_checkpoint": {
+    "step": 2250,
+    "checkpoint": "outputs/llava-2b-ddp-5epochs-20261105/step-02250.pt",
+    "sha256": "889f4962fc467aa9e91556d2c74a47cc524271287bdd99597cad1cbac25fdf45",
+    "rule": "Highest local validation EM among 450/900/2250, then token F1, then earlier step; not independent test selection."
+  },
+  "last50_training_loss": 2.06534499168396,
+  "epoch_mean_answer_ce": {
+    "2": 1.9304316641555892,
+    "3": 2.1955177310854195,
+    "4": 2.114628243115213,
+    "5": 1.845979819231563
+  },
+  "resources": {
+    "device": "cuda:0",
+    "world_size": 2,
+    "rank0_peak_allocated_bytes": 6911492608,
+    "rank0_peak_reserved_bytes": 7038042112,
+    "seconds": 1133.6012299479917,
+    "ranks": [
+      {
+        "rank": 0,
+        "device": "cuda:0",
+        "peak_allocated_bytes": 6911492608,
+        "peak_reserved_bytes": 7038042112,
+        "seconds": 1133.6001459220133
+      },
+      {
+        "rank": 1,
+        "device": "cuda:1",
+        "peak_allocated_bytes": 6906471936,
+        "peak_reserved_bytes": 7040139264,
+        "seconds": 1133.5999232240138
+      }
+    ]
+  },
+  "run": {
+    "config": {
+      "seed": 7,
+      "model": {
+        "backend": "hf",
+        "dim": 768,
+        "vision_dim": 1024,
+        "language_dim": 2048,
+        "heads": 12,
+        "st_layers": 4,
+        "ffn_ratio": 3,
+        "spatial_tokens": 96,
+        "motion_tokens": 16,
+        "cache_frames": 8,
+        "cache_seconds": 4.0,
+        "state_slots": 32,
+        "event_capacity": 128,
+        "capsule_tokens": 4,
+        "read_events": 16,
+        "read_tokens": 96,
+        "reader_layers": 2,
+        "image_size": 384,
+        "memory_mode": "capsule",
+        "write_policy": "every_frame",
+        "write_threshold": 0.5,
+        "retention_policy": "fifo",
+        "freeze_vision": true,
+        "freeze_language": true,
+        "vision_model": "google/siglip2-large-patch16-384",
+        "language_model": "Qwen/Qwen3-1.7B",
+        "local_files_only": true,
+        "query_encoding": "embedding_mean",
+        "lora_rank": 0,
+        "dropout": 0.0,
+        "text_limit": 256
+      },
+      "data": {
+        "manifest": "data/processed/llava-pilot-cfr.jsonl",
+        "sampling_fps": 1,
+        "max_frames": 4
+      },
+      "training": {
+        "device": "auto",
+        "precision": "bf16",
+        "batch_size": 1,
+        "grad_accum": 2,
+        "lr": 0.0001,
+        "weight_decay": 0.01,
+        "max_steps": 2250,
+        "save_every": 450,
+        "detach_every": 0,
+        "workers": 0,
+        "cpu_threads": 2,
+        "loss_weights": {
+          "answer": 1.0,
+          "alert": 0.0,
+          "write": 0.0,
+          "utility": 0.0
+        },
+        "keep_steps": [
+          900,
+          2250
+        ]
+      },
+      "evaluation": {
+        "device": "auto",
+        "precision": "bf16",
+        "alert_threshold": 0.5,
+        "cooldown_seconds": 1.0,
+        "max_new_tokens": 32,
+        "cpu_threads": 2
+      }
+    },
+    "environment": {
+      "torch": "2.8.0+cu128",
+      "cuda_runtime": "12.8",
+      "git_revision": null,
+      "gpus": [
+        "NVIDIA GeForce RTX 5090",
+        "NVIDIA GeForce RTX 5090"
+      ]
+    },
+    "manifest_sha256": "0ed0758fe40bfd34a0c076bd83bc6c1093ca8d7188282f9448c95d32d1a80a27",
+    "parameters": {
+      "total": 2104675891,
+      "trainable": 67817011,
+      "components": {
+        "vision": 316283904,
+        "language": 1720574976,
+        "rgb_bridge": 787200,
+        "xy_embedding": 592896,
+        "motion": 2665728,
+        "blocks": 33087536,
+        "memory": 10656002,
+        "reader": 12482304,
+        "projector": 5771264,
+        "alert_head": 1772545
+      }
+    },
+    "world_size": 2,
+    "resume": "outputs/llava-2b-baseline-cfr-epoch1-20261105/last.pt"
+  },
+  "timing_note": "Intermediate and baseline diagnostic evaluations overlapped training on GPU0; elapsed time includes contention and is not a DDP throughput benchmark.",
+  "resume_note": "Weights, AdamW state and optimizer step restored at a dataset-pass boundary. RNG/data iterator not restored; DDP uses its own seeded DistributedSampler.",
+  "source_sha256": {
+    "src/trace_vl/__init__.py": "96c142a476088383064b0f33a27b804abd82c06a3500d45d448101dfa8a8d67c",
+    "src/trace_vl/__main__.py": "3129adff95e0f38b87ab34cddfc27082c7892bcaec267ff5d40f160fdf55b44a",
+    "src/trace_vl/cli.py": "2bab195a8435989942cdaab0124972f26cd25a38fe81643be8b066b16d962ef0",
+    "src/trace_vl/config.py": "95939785997d08ebbbd0b99d4de4264f72ec15fd4ddfa2a3537eeb04b51c47e2",
+    "src/trace_vl/data/__init__.py": "38ead22928d38d91f630e0722c81930cf5116c67764fa6f92dcb0d8b37b7ebd5",
+    "src/trace_vl/data/adapters.py": "13814362c97e36788d5c96c99b89d7fe61afeefd7624bf2219ce62ddc68dcbb7",
+    "src/trace_vl/data/dataset.py": "1678a6700560826fdb7d5cc932f69c725d1de790233bd5e2c217b67529ec67fa",
+    "src/trace_vl/data/llava.py": "7b6c96aa882b15746602d5d32d7195ae988a0da7d6072157de6a531d91f6f482",
+    "src/trace_vl/data/registry.py": "afd9ae3f1db2e65f52e93d15cb6c38a06b2e12c96621e4efac3ac3ce1ef1c620",
+    "src/trace_vl/data/schema.py": "227357f2475ee139357bef64f73e44d348159580607e2f94a1c5a9820cf0ce3e",
+    "src/trace_vl/data/synthetic.py": "30af67741207d66b4f5117e027bd0921034a5f5dc158357dda609339b77f68c3",
+    "src/trace_vl/data/video.py": "cf8ba642104822056dc2e1dfbd5f813a9c2666d513f1a2cfa302b91235b41f39",
+    "src/trace_vl/evaluation/__init__.py": "f84ef5b29afed831905f5bae5755f269ebff91716d1b776f7c76f523238a415d",
+    "src/trace_vl/evaluation/metrics.py": "28b040044b42f38c991bd72ef47685acadc2abf821ff965a1f34e1d7f3ecfd64",
+    "src/trace_vl/inference.py": "d20123c163233a51f40010c331ec3f49ba4b7c506a9ec2b7f0878730cd3ca4ac",
+    "src/trace_vl/models/__init__.py": "aac3e630b5b2b28fde4f1e9e59a94692a68eb14f5513a1b1ca59452ec1e1c2c7",
+    "src/trace_vl/models/attention.py": "b2edce3f7a09d84cec496f7fa5e3aef56790480db803ec6aac1409e4fbf6028c",
+    "src/trace_vl/models/backbones.py": "0e12025a0d1e166d5a525610b342fd5e5a0c200344590ea2be3df3a9c7febb95",
+    "src/trace_vl/models/memory.py": "53a6d617d2d663b7d09a72a96a8105f4428ce98ca99052fd331c2d0b0f114624",
+    "src/trace_vl/models/model.py": "d02c1648d44517d7cb6a830091d8eb32d292d33baf0cbfa318509ef40aa46913",
+    "src/trace_vl/profiling.py": "d8a7f705486ddcb56c46d391822969b070b381cdca5de495e61af1eac79cb73a",
+    "src/trace_vl/runtime.py": "5b11cbc80505663517850543607f50b897b57f7c421068fbd59404421cabde8b",
+    "src/trace_vl/training.py": "7814960780c754948b6451d10a2d37026640b02d44ec93c83748e19d3a886153"
+  }
+}

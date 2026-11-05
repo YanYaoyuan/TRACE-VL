@@ -1,0 +1,47 @@
+[
+  {
+    "file": "after_unattended.png",
+    "size": [
+      1536,
+      1024
+    ],
+    "sha256": "d39ea7894a85bb47a24b65aa476406dae480f93f6c23e1c6a65db6025f2e96bc",
+    "provenance": "AI-generated illustrative scene"
+  },
+  {
+    "file": "before_carrying.png",
+    "size": [
+      1536,
+      1024
+    ],
+    "sha256": "63176ce0f3dbd4aeb5a7bf75a84dccffebda2316e1dffea34c48b269d3238440",
+    "provenance": "AI-generated illustrative scene"
+  },
+  {
+    "file": "change_placing.png",
+    "size": [
+      1536,
+      1024
+    ],
+    "sha256": "83222c6560a6f57162003c50ac5c7ac680de439e0ce6ce5fbe76045b1b098114",
+    "provenance": "AI-generated illustrative scene"
+  },
+  {
+    "file": "detail_bag.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "sha256": "4e2aaf59bcea37c1ef10c4a1e9e8c92bb30cf6b6aee9383392d02f022241340f",
+    "provenance": "AI-generated illustrative scene"
+  },
+  {
+    "file": "return_pickup.png",
+    "size": [
+      1536,
+      1024
+    ],
+    "sha256": "6dbe1f18bc73e5750e15206a723ed5dc2b09db59929c43a0fcdaa3a9fe2894c8",
+    "provenance": "AI-generated illustrative scene"
+  }
+]

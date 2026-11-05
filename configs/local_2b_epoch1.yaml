@@ -1,0 +1,5 @@
+# One complete pass: 1800 training QA / (batch 1 * accumulation 4) = 450 steps.
+extends: local_2b_pilot_cfr.yaml
+training:
+  max_steps: 450
+  save_every: 450

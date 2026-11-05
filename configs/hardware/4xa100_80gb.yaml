@@ -1,0 +1,5 @@
+extends: ../reference_2b.yaml
+training:
+  batch_size: 2
+  grad_accum: 2
+  detach_every: 8

@@ -1,0 +1,138 @@
+# Evaluation specification only; do not pass this file to trace-vl train/evaluate.
+schema_version: 1
+status: protocol_specification_only_not_an_executable_runner
+checked_date: '2026-11-05'
+download_policy: no_dataset_or_weight_downloads_in_this_step
+primary_benchmarks:
+- id: ovo
+  name: OVO-Bench
+  dataset_id: JoeLeelyf/OVO-Bench
+  dataset_revision: fec29e3385747b5642d995370143ba92d2819bd2
+  official_code: https://github.com/JoeLeelyf/OVO-Bench
+  code_revision: c34093f9a072d93f9e1c6b923446dfba71f4528e
+  report_groups:
+  - backward_tracing
+  - real_time_visual_perception
+  - forward_active_responding
+  protocol_note: Follow pinned official per-task aggregation and three-mode aggregate;
+    no silent task omissions.
+  adapter_status: not_implemented
+  results: null
+- id: streamingbench
+  name: StreamingBench
+  dataset_id: mjuicem/StreamingBench
+  dataset_revision: 48872fa707124474ce4c5172ddc58efb8bc88058
+  official_code: https://github.com/THUNLP-MT/StreamingBench
+  code_revision: 89299232c4cc1cc3721951173c5f107b48cf6877
+  report_groups:
+  - real_time_visual
+  - contextual_understanding
+  - proactive_output
+  protocol_note: Report visual subsets and proactive timing separately; no audio/omni
+    overall claim from visual-only evaluation.
+  adapter_status: not_implemented
+  results: null
+- id: videomme
+  name: Video-MME
+  dataset_id: lmms-eval/Video-MME
+  dataset_revision: ead1408f75b618502df9a1d8e0950166bf0a2a0b
+  official_code: https://github.com/MME-Benchmarks/Video-MME
+  code_revision: 06c2315b892f88578f81d73205d07cf576f292b9
+  report_groups:
+  - short
+  - medium
+  - long
+  protocol_note: Official multiple-choice accuracy; visual-only without subtitles/audio.
+  adapter_status: annotation_import_and_local_mcq_only
+  results: null
+specialist_benchmarks:
+- id: cuva
+  dataset_id: fesvhtr/CUVA
+  dataset_revision: b9cc0d4e0079ae5cc6d6725f1ff033a649f1cd86
+  purpose: surveillance anomaly explanation
+  priority: after_primary
+  adapter_status: not_implemented
+  results: null
+optional_benchmarks:
+- id: fastbench
+  purpose: high_dynamic_perception
+- id: streamarena
+  purpose: hour_scale_memory_required_if_claimed
+baseline_models:
+- model_id: Qwen/Qwen3-VL-2B-Instruct
+  group: small_model_main
+  model_revision: null
+  status: official_model_card_verified_adapter_and_execution_pending
+  results: null
+- model_id: OpenGVLab/InternVL3_5-2B
+  group: small_model_main
+  model_revision: null
+  status: official_model_card_verified_adapter_and_execution_pending
+  results: null
+- model_id: HuggingFaceTB/SmolVLM2-2.2B-Instruct
+  group: small_model_main
+  model_revision: null
+  status: official_model_card_verified_adapter_and_execution_pending
+  results: null
+- model_id: Qwen/Qwen3-VL-4B-Instruct
+  group: larger_reference
+  model_revision: null
+  status: official_model_card_verified_adapter_and_execution_pending
+  results: null
+- model_id: microsoft/Mage-VL
+  group: streaming_reference
+  model_revision: null
+  status: official_model_card_verified_adapter_and_execution_pending
+  results: null
+- model_id: jdopensource/JoyAI-VL-Interaction
+  group: larger_streaming_reference
+  model_revision: null
+  status: official_model_card_verified_adapter_and_execution_pending
+  results: null
+decision_baseline:
+  model_id: akhilaaa3/Jev-Omni
+  status: optional_closed_choice_subtasks_only
+  restriction: Keep original choices. No claim of full open-ended benchmark coverage.
+internal_controls:
+- same_backbones_without_new_st
+- recent_window_without_persistent_memory
+- equal_latent_token_summary
+- capsule_memory_fifo
+- capsule_memory_learned_write
+- single_rule_mlp_vs_candidate_conditioned_decisions
+comparison_tracks:
+  controlled_budget:
+    frame_caps_proposed:
+    - 32
+    - 64
+    - 128
+    requires: same visible source timeline and documented sampling; report actual
+      pixels/tokens and preprocessing
+  native_protocol:
+    requires: author settings and supported tasks explicitly reported; separate from
+      controlled-budget table
+temporal_rules:
+  ovo: Official current edition. Forward tasks advance the stream; each attempt sees
+    only frames available at its decision time.
+  streamingbench_60s: Reset all state at max(0, query_time - 60). Old latent memory
+    must not carry older evidence.
+  streamingbench_full_history: Separate track with prefix state through current decision
+    time.
+  videomme: Offline full-video cutoff; no subtitles/audio in primary track.
+reporting:
+  baseline_scores: separate reproduced and paper-reported panels; never invent missing
+    scores
+  missing_tasks: N/A plus coverage; never silently drop tasks from total
+  timing:
+  - video_ingest_compute
+  - query_latency_p50_p95
+  - end_to_end_latency_with_decode_separate
+  - total_compute_per_video_across_all_queries
+  resources:
+  - gpu_model
+  - peak_allocated_and_reserved_bytes
+  - actual_visual_token_count
+  - sampled_frames_and_resolution
+  - stream_state_bytes
+  uncertainty: Paired bootstrap by source video; independent training seeds for trainable
+    variants.

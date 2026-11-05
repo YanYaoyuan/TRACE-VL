@@ -1,0 +1,5 @@
+extends: tiny.yaml
+training:
+  device: cpu
+evaluation:
+  device: cpu

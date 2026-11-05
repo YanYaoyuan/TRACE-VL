@@ -1,0 +1,7 @@
+# Equal event-latent token budget (32) and retrieval-token budget (8), not equal metadata bytes.
+extends: ../tiny.yaml
+model:
+  memory_mode: summary
+  capsule_tokens: 1
+  event_capacity: 32
+  read_events: 8

@@ -1,0 +1,44 @@
+seed: 7
+model:
+  backend: tiny
+  dim: 64
+  vision_dim: 64
+  language_dim: 64
+  heads: 4
+  st_layers: 2
+  image_size: 32
+  spatial_tokens: 8
+  motion_tokens: 4
+  state_slots: 4
+  event_capacity: 8
+  read_events: 2
+  read_tokens: 8
+  text_limit: 192
+data:
+  manifest: data/synthetic/manifest.jsonl
+  sampling_fps: 2
+  max_frames: 8
+training:
+  device: auto
+  precision: fp32
+  batch_size: 2
+  grad_accum: 1
+  lr: 0.0003
+  weight_decay: 0.01
+  max_steps: 10
+  save_every: 10
+  detach_every: 0
+  workers: 0
+  cpu_threads: 2
+  loss_weights:
+    answer: 1.0
+    alert: 1.0
+    write: 0.2
+    utility: 0.1
+evaluation:
+  device: auto
+  precision: fp32
+  alert_threshold: 0.5
+  cooldown_seconds: 1.0
+  max_new_tokens: 8
+  cpu_threads: 2

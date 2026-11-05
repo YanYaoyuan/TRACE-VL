@@ -1,0 +1,8 @@
+extends: ../tiny.yaml
+training:
+  device: auto
+  precision: bf16
+  batch_size: 2
+  max_steps: 10
+evaluation:
+  precision: bf16

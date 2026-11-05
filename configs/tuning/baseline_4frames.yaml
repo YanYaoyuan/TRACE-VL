@@ -1,0 +1,5 @@
+extends: ../local_2b_pilot_offline.yaml
+data:
+  manifest: data/processed/llava-pilot-tuning-cfr.jsonl
+evaluation:
+  reuse_video_state: true

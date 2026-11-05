@@ -1,0 +1,8 @@
+cff-version: 1.2.0
+message: "Unpublished research software; no paper results or DOI are claimed."
+title: "TRACE-VL: Causal Video Modeling with Transition Evidence Memory"
+type: software
+version: 0.1.0
+authors:
+  - name: "TRACE-VL contributors"
+license: MIT

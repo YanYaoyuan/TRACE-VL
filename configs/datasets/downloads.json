@@ -1,0 +1,290 @@
+{
+  "schema_version": 1,
+  "checked_date": "2026-11-05",
+  "audit": "../../docs/dataset_source_audit_2026-11-05.json",
+  "units": "GB = 1e9 bytes; GiB = 2**30 bytes",
+  "default_max_download_gb": 10,
+  "profiles": {
+    "llava-activitynet-pilot": {
+      "provider": "hf",
+      "source_id": "lmms-lab/LLaVA-Video-178K",
+      "patterns": [
+        "0_30_s_activitynetqa/0_30_s_activitynetqa_oe_qa_processed.json",
+        "0_30_s_activitynetqa/0_30_s_activitynetqa_videos_1.tar.gz"
+      ],
+      "role": "small video-QA training pilot",
+      "directory": "llava-video-178k",
+      "notes": "One short-video archive plus matching OE annotations (0.928 GB). Archive verified 2026-11-05: 295 video files, 2950 QA rows, extracted file payload 0.943 GB; individual decoding not yet checked. Use for local SFT smoke, not benchmark evaluation. Card restricts use to research/education; underlying media terms apply.",
+      "suggested_data_space_gb_estimate": 4
+    },
+    "llava-annotations": {
+      "provider": "hf",
+      "source_id": "lmms-lab/LLaVA-Video-178K",
+      "patterns": [
+        "0_30_s_academic_v0_1/*processed.json"
+      ],
+      "role": "training annotations",
+      "directory": "llava-video-178k",
+      "notes": "Caption/OE/MC annotations only. No media; filter rows to actual downloaded video IDs before training.",
+      "suggested_data_space_gb_estimate": 0.2
+    },
+    "llava-short-pilot": {
+      "provider": "hf",
+      "source_id": "lmms-lab/LLaVA-Video-178K",
+      "patterns": [
+        "0_30_s_academic_v0_1/*processed.json",
+        "0_30_s_academic_v0_1/0_30_s_academic_v0_1_videos_1.tar.gz"
+      ],
+      "role": "training pilot",
+      "directory": "llava-video-178k",
+      "notes": "One short-video shard only. Annotations cover more videos than this shard. Upstream media licenses still apply. Extraction size not verified.",
+      "suggested_data_space_gb_estimate": 15
+    },
+    "cctv-annotations": {
+      "provider": "hf",
+      "source_id": "xiaozhang79/CCTV-Anomaly",
+      "patterns": [
+        "README.md",
+        "train.jsonl",
+        "test.jsonl"
+      ],
+      "role": "training/evaluation annotations",
+      "directory": "cctv-anomaly",
+      "notes": "Gated: manually request access on HF. Card terms restrict annotations to non-commercial research despite Apache metadata tag. Keep test separate.",
+      "suggested_data_space_gb_estimate": 0.1
+    },
+    "cctv-train-pilot": {
+      "provider": "hf",
+      "source_id": "xiaozhang79/CCTV-Anomaly",
+      "patterns": [
+        "README.md",
+        "train.jsonl",
+        "video_shards/train/train_shard_14.tar.gz"
+      ],
+      "role": "surveillance training pilot",
+      "directory": "cctv-anomaly",
+      "notes": "Gated. One small TRAIN media shard; intersect train annotations with media present. No test media selected. Research-only terms; extraction size not verified.",
+      "suggested_data_space_gb_estimate": 6
+    },
+    "cuva-annotations": {
+      "provider": "hf",
+      "source_id": "fesvhtr/CUVA",
+      "patterns": [
+        "README.md",
+        "data/all.parquet",
+        "data/test.parquet"
+      ],
+      "role": "anomaly reasoning evaluation annotations",
+      "directory": "cuva",
+      "notes": "FULL includes TEST: do not treat all.parquet as a disjoint training set. CC BY-NC-SA 4.0 in official repository.",
+      "suggested_data_space_gb_estimate": 0.1
+    },
+    "cuva-pilot": {
+      "provider": "hf",
+      "source_id": "fesvhtr/CUVA",
+      "patterns": [
+        "README.md",
+        "data/all.parquet",
+        "data/test.parquet",
+        "raw/group_0.zip"
+      ],
+      "role": "anomaly reasoning evaluation pilot",
+      "directory": "cuva",
+      "notes": "One media archive does not cover the full test benchmark. Exclude all test-video IDs if later deriving training data. Extraction size not verified.",
+      "suggested_data_space_gb_estimate": 20
+    },
+    "videomme-annotations": {
+      "provider": "hf",
+      "source_id": "lmms-eval/Video-MME",
+      "patterns": [
+        "videomme/test-00000-of-00001.parquet"
+      ],
+      "role": "offline evaluation annotations",
+      "directory": "videomme",
+      "notes": "Original normalized annotations already exist locally from earlier work. This profile preserves upstream file paths.",
+      "suggested_data_space_gb_estimate": 0.01
+    },
+    "videomme-pilot": {
+      "provider": "hf",
+      "source_id": "lmms-eval/Video-MME",
+      "patterns": [
+        "videomme/test-00000-of-00001.parquet",
+        "videos_chunked_01.zip"
+      ],
+      "role": "offline evaluation pilot",
+      "directory": "videomme",
+      "notes": "One video archive only; select questions with available media. Partial coverage is not an official full benchmark score. Extraction size not verified.",
+      "suggested_data_space_gb_estimate": 14
+    },
+    "videomme-full": {
+      "provider": "hf",
+      "source_id": "lmms-eval/Video-MME",
+      "patterns": [
+        "videomme/test-00000-of-00001.parquet",
+        "videos_chunked_*.zip"
+      ],
+      "role": "offline evaluation full media",
+      "directory": "videomme",
+      "notes": "Visual-only; subtitles/audio protocols are separate. Archive download size is not extracted size.",
+      "suggested_data_space_gb_estimate": 230
+    },
+    "streamingbench-annotations": {
+      "provider": "hf",
+      "source_id": "mjuicem/StreamingBench",
+      "patterns": [
+        "StreamingBench/*.csv",
+        "README.md"
+      ],
+      "role": "streaming evaluation annotations",
+      "directory": "streamingbench",
+      "notes": "Includes task CSVs. Keep all evaluation questions out of training.",
+      "suggested_data_space_gb_estimate": 0.02
+    },
+    "streamingbench-real-pilot": {
+      "provider": "hf",
+      "source_id": "mjuicem/StreamingBench",
+      "patterns": [
+        "StreamingBench/*.csv",
+        "README.md",
+        "Real-Time Visual Understanding_201-250.zip"
+      ],
+      "role": "streaming evaluation pilot",
+      "directory": "streamingbench",
+      "notes": "One real-time perception media archive only; retain upstream directory layout and timestamp protocol. Not full benchmark coverage.",
+      "suggested_data_space_gb_estimate": 7
+    },
+    "streamingbench-proactive-pilot": {
+      "provider": "hf",
+      "source_id": "mjuicem/StreamingBench",
+      "patterns": [
+        "StreamingBench/Proactive_Output*.csv",
+        "README.md",
+        "Proactive Output_1-25.zip"
+      ],
+      "role": "proactive timing evaluation pilot",
+      "directory": "streamingbench",
+      "notes": "One proactive output media archive only; use official timing tolerance, not ordinary MCQ accuracy.",
+      "suggested_data_space_gb_estimate": 12
+    },
+    "streamingbench-full": {
+      "provider": "hf",
+      "source_id": "mjuicem/StreamingBench",
+      "patterns": [
+        "StreamingBench/*.csv",
+        "README.md",
+        "*.zip"
+      ],
+      "role": "streaming evaluation full media",
+      "directory": "streamingbench",
+      "notes": "Different audio/visual/context protocols must remain distinguished. Full release is much larger than local free space.",
+      "suggested_data_space_gb_estimate": 450
+    },
+    "ovo-source": {
+      "provider": "hf",
+      "source_id": "JoeLeelyf/OVO-Bench",
+      "patterns": [
+        "README.md",
+        "src_videos.tar.part*"
+      ],
+      "role": "online evaluation source videos",
+      "directory": "ovo",
+      "notes": "ALL source archive parts required. Source and chunked routes are alternatives. Official annotation ovo_bench_new.json is in GitHub. GitHub NC terms conflict with HF license tag.",
+      "suggested_data_space_gb_estimate": 120
+    },
+    "ovo-chunked": {
+      "provider": "hf",
+      "source_id": "JoeLeelyf/OVO-Bench",
+      "patterns": [
+        "README.md",
+        "chunked_videos.tar.part*"
+      ],
+      "role": "online evaluation official chunked media",
+      "directory": "ovo",
+      "notes": "ALL chunked archive parts required; do not download both source and chunked releases. GitHub NC terms conflict with HF metadata tag.",
+      "suggested_data_space_gb_estimate": 330
+    },
+    "fastbench": {
+      "provider": "hf",
+      "source_id": "Ashenone3/FastBench",
+      "patterns": [
+        "README.md",
+        "proactive_perception_annotations.json",
+        "qa_video/*/*.mp4"
+      ],
+      "role": "high-dynamic streaming evaluation",
+      "directory": "fastbench",
+      "notes": "300 videos / 306 QA; HF viewer split named train is NOT training permission. Use as held-out benchmark. No dataset-wide media license declared.",
+      "suggested_data_space_gb_estimate": 12
+    },
+    "streamarena-annotations": {
+      "provider": "hf",
+      "source_id": "hkuzxc/StreamArena",
+      "patterns": [
+        "README.md",
+        "question*.jsonl",
+        "video_meta*.jsonl",
+        "videos/videos_manifest.jsonl"
+      ],
+      "role": "long-horizon evaluation annotations",
+      "directory": "streamarena",
+      "notes": "ZH/EN are translations of the same 3646 questions, not independent examples. Separate tool-assisted and video-only subsets.",
+      "suggested_data_space_gb_estimate": 0.02
+    },
+    "streamarena-pilot": {
+      "provider": "hf",
+      "source_id": "hkuzxc/StreamArena",
+      "patterns": [
+        "README.md",
+        "question*.jsonl",
+        "video_meta*.jsonl",
+        "videos/videos_manifest.jsonl",
+        "videos/vkduRY-rKOA.tar"
+      ],
+      "role": "long-horizon evaluation pilot",
+      "directory": "streamarena",
+      "notes": "One source-video tar chosen for small storage, not representative full benchmark coverage. CC BY-NC 4.0. Extraction size not verified.",
+      "suggested_data_space_gb_estimate": 1
+    },
+    "joyai-annotations": {
+      "provider": "hf",
+      "source_id": "jdopensource/JoyAI-VL-Interaction",
+      "patterns": [
+        "README.md",
+        "*.json"
+      ],
+      "role": "optional interaction training annotations",
+      "directory": "joyai-interaction",
+      "notes": "This repository contains JSON annotations, not a verified self-contained media bundle. Do not infer that 2.65 GB includes training videos.",
+      "suggested_data_space_gb_estimate": 4
+    },
+    "uca-annotations": {
+      "provider": "http",
+      "source_id": "uca",
+      "files": [
+        {
+          "path": "UCFCrime_Train.json",
+          "bytes": 3091246,
+          "git_blob_sha1": "16cac9d9c016b40476b18a553c11d3ffbaaee4bb",
+          "url": "https://raw.githubusercontent.com/jia-wang-11/Surveillance-Video-Understanding-dataSet/e478cb5b2277c6b7cf6a1dc4691021592003e216/UCF%20Annotation/json/UCFCrime_Train.json"
+        },
+        {
+          "path": "UCFCrime_Val.json",
+          "bytes": 678678,
+          "git_blob_sha1": "bd6e0de36270b327d4bfdba63305c1d3d5434c43",
+          "url": "https://raw.githubusercontent.com/jia-wang-11/Surveillance-Video-Understanding-dataSet/e478cb5b2277c6b7cf6a1dc4691021592003e216/UCF%20Annotation/json/UCFCrime_Val.json"
+        },
+        {
+          "path": "UCFCrime_Test.json",
+          "bytes": 842652,
+          "git_blob_sha1": "068c1d8a9947272506574ad58e21d013e1abb820",
+          "url": "https://raw.githubusercontent.com/jia-wang-11/Surveillance-Video-Understanding-dataSet/e478cb5b2277c6b7cf6a1dc4691021592003e216/UCF%20Annotation/json/UCFCrime_Test.json"
+        }
+      ],
+      "revision": "e478cb5b2277c6b7cf6a1dc4691021592003e216",
+      "role": "surveillance temporal caption annotations",
+      "directory": "uca",
+      "notes": "Train/Val/Test annotation files only; raw videos must be obtained from UCF-Crime official source. Event intervals are not known_at/deadline labels. Empty revised_en_UCFCrime_Train.json excluded. README terms need commercial-use clarification.",
+      "suggested_data_space_gb_estimate": 0.02
+    }
+  }
+}
