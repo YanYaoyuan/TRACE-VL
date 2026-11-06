@@ -1,11 +1,10 @@
 """Verify query/marker/generation forks do not close or mutate the live video cache."""
-import json
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
 import torch
-
 from trace_vl.v3.backbone import Backbone
 from trace_vl.v3.config import load_v3_config
 from trace_vl.v3.session import StreamSession
