@@ -43,6 +43,14 @@ cfg, _ = load_v3_config(args.config)
 cfg.backbone.dtype = args.dtype
 cfg.memory.policy = 'full'
 bb = Backbone(cfg.backbone, cfg.stream, args.device)
+last_stream_hidden = None
+original_lm = bb.lm
+def observed_lm(*args, **kwargs):
+    global last_stream_hidden
+    result = original_lm(*args, **kwargs)
+    last_stream_hidden = result[0, -1].detach().clone()
+    return result
+bb.lm = observed_lm
 processor = bb.processor
 vp = processor.video_processor
 vp_defaults = {key: asdict(getattr(vp, key)) if is_dataclass(getattr(vp, key)) else getattr(vp, key)
@@ -52,6 +60,7 @@ vp_defaults = {key: asdict(getattr(vp, key)) if is_dataclass(getattr(vp, key)) e
     'reference': 'public processor + full model forward, logits_to_keep=1',
     'align_outer_markers': args.align_outer_markers,
     'shard': args.shard,
+    'fp32_letter_scoring': hasattr(bb,'letter_logprobs'),
     'matched': 'same processor pixel_values, per-patch grid, timestamps, question and template; no eviction'}, indent=2)+'\n')
 class AlignedSession(StreamSession):
     @torch.no_grad()
@@ -113,18 +122,29 @@ for video, records in list(groups.items())[:args.limit_videos][shard_index::shar
                 continue
             with torch.no_grad():
                 matched_choice, matched_scores = session.ask(record['question'], record['options'])
+                letters = [bb.ids(chr(65+i))[0] for i in range(len(record['options']))]
+                raw_stream_scores = bb.logits(last_stream_hidden[None,None])[0,-1].float().log_softmax(-1)[letters].tolist()
                 # Clear the multimodal wrapper's own rope-delta state between independent examples.
                 bb.model.model.rope_deltas = None
                 data = {k: v.to(bb.device) for k, v in inputs.items() if torch.is_tensor(v)}
                 data['pixel_values_videos'] = data['pixel_values_videos'].to(bb.dtype)
-                logits = bb.model(**data, use_cache=False, logits_to_keep=1).logits[0, -1].float()
-                letters = [bb.ids(chr(65+i))[0] for i in range(len(record['options']))]
-                official_scores = logits.log_softmax(-1)[letters].tolist()
+                if hasattr(bb,'letter_logprobs'):
+                    last = bb.model.model(**data,use_cache=False).last_hidden_state[0,-1]
+                    official_scores = bb.letter_logprobs(last,letters).tolist()
+                    logits = bb.logits(last[None,None])[0,-1].float()
+                    del last
+                else:
+                    logits = bb.model(**data, use_cache=False, logits_to_keep=1).logits[0, -1].float()
+                    official_scores = logits.log_softmax(-1)[letters].tolist()
+                raw_official_scores = logits.log_softmax(-1)[letters].tolist()
                 official_choice = int(np.argmax(official_scores))
                 greedy_id = int(logits.argmax())
             row = {'id': record['id'], 'video': video, 'task': record['task'], 'answer': record['answer'],
                 'official_prediction': official_choice, 'matched_prediction': matched_choice,
                 'official_scores': official_scores, 'matched_scores': matched_scores,
+                'raw_bf16_official_prediction':int(np.argmax(raw_official_scores)),
+                'raw_bf16_matched_prediction':int(np.argmax(raw_stream_scores)),
+                'raw_bf16_official_scores':raw_official_scores,'raw_bf16_stream_scores':raw_stream_scores,
                 'max_abs_logp_difference': max(abs(a-b) for a,b in zip(official_scores, matched_scores)),
                 'greedy_next_token': bb.tokenizer.decode([greedy_id]), 'greedy_is_option': greedy_id in letters,
                 'sampled_frames': len(frames), 'grid_thw': [nt, gh, gw],
