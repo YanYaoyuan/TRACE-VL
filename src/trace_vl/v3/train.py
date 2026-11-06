@@ -161,12 +161,15 @@ class StudentLoss(nn.Module):
         states = None
         if random.random() < 1.0 / max(1, cfg.alert.state_every):
             # End-of-clip GDN states from a no-grad pass with a cache (checkpointed training drops caches).
-            with torch.no_grad():
+            # Autocast off (weights are already bf16) and its cache cleared: a no-grad pass inside autocast
+            # pollutes the cast-weight cache that checkpoint replay relies on (PR #3 review, CheckpointError).
+            with torch.no_grad(), torch.autocast("cuda", enabled=False):
                 bb.language_model.eval()
                 cache = bb.new_cache()
-                bb.lm(embeds.detach(), positions, cache, use_cache=True)
+                bb.lm(embeds.detach().to(bb.dtype), positions, cache, use_cache=True)
                 bb.language_model.train()
                 states = bb.gdn_states(cache, cfg.alert.state_layers)
+            torch.clear_autocast_cache()
         memory = DecisionMemory(cfg.alert.memory_tokens)
         losses, logs = [], {}
         for k in range(n):
@@ -316,8 +319,9 @@ def gradient_check(cfg: V3Config, steps: int = 6, threshold: float = 1e4, device
     record["alerts"] = [{"id": "abnormal", "kind": "noul", "text": "Is anything abnormal happening?", "spans": []}]
     questions, specs = alert_questions(record)
     teacher_logp = teacher_targets(bb, clips, times, record)
+    encoded = encode_questions(bb, questions)  # before autocast, exactly as in train() (PR #3 review)
     with torch.autocast("cuda", dtype=torch.bfloat16):
-        loss, parts, stats = wrapper(clips, times, record, teacher_logp, encode_questions(bb, questions), specs)
+        loss, parts, stats = wrapper(clips, times, record, teacher_logp, encoded, specs)
     loss.backward()
     groups = {"modules": list(modules.parameters()), "lora": [p for p in bb.model.parameters() if p.requires_grad]}
     norms = {}

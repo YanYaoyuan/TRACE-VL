@@ -154,8 +154,9 @@ class AlertHead(nn.Module):
                 labels = self.opt_proj(encoded.options[i].to(dtype))  # [K, h]
                 logits = (labels @ self.option_query(u[i])) * self.option_scale.exp()
                 probs = logits.softmax(-1)
-                conf = torch.sigmoid(self.confidence(torch.cat([u[i], probs.max()[None].detach()]))).squeeze(-1)
-                out.update(logits=logits, probabilities=probs, value=probs.argmax(), confidence=conf)
+                conf_logit = self.confidence(torch.cat([u[i], probs.max()[None].detach()])).squeeze(-1)
+                out.update(logits=logits, probabilities=probs, value=probs.argmax(), confidence=torch.sigmoid(conf_logit),
+                           confidence_logit=conf_logit)  # fmt: skip
             results.append(out)
         return results
 
@@ -174,7 +175,8 @@ def alert_loss(results: list[dict], targets: dict) -> tuple[Tensor | None, dict]
             y = torch.tensor([int(target)], device=r["logits"].device)
             parts["choice"].append(F.cross_entropy(r["logits"].float()[None], y))
             correct = (r["probabilities"].argmax() == int(target)).float().detach()
-            parts["confidence"].append(F.binary_cross_entropy(r["confidence"].float().clamp(1e-6, 1 - 1e-6), correct))
+            # BCE-with-logits on the pre-sigmoid confidence: plain BCE is not autocast-safe (PR #3 review).
+            parts["confidence"].append(F.binary_cross_entropy_with_logits(r["confidence_logit"].float(), correct))
     weights = {"noul": 1.0, "choice": 1.0, "confidence": 0.2}
     losses, stats = [], {}
     for name, values in parts.items():
