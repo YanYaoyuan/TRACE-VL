@@ -57,13 +57,16 @@ def convert_ovo(annotation: str, output: str, video_root: str | None = None) -> 
             "videos": len({r["video"] for r in rows})}  # fmt: skip
 
 
-def convert_videomme(parquet: str, output: str) -> dict:
+def convert_videomme(parquet: str, output: str, video_root: str | None = None) -> dict:
     """Video-MME (lmms-lab/Video-MME parquet). Offline: questions after the whole video."""
     import pyarrow.parquet as pq
 
     table = pq.read_table(parquet).to_pylist()
-    rows = []
+    rows, missing = [], 0
     for item in table:
+        if video_root and not (Path(video_root) / f"{item['videoID']}.mp4").is_file():
+            missing += 1  # partial download (e.g. a pinned 30-video shard)
+            continue
         options = [re.sub(r"^[A-D]\.\s*", "", o) for o in item["options"]]
         rows.append({
             "id": f"videomme-{item['question_id']}", "source": "video-mme", "task": f"{item['duration']}/{item['task_type']}",
@@ -71,7 +74,7 @@ def convert_videomme(parquet: str, output: str) -> dict:
             "answer": "ABCD".index(item["answer"].strip()[0]), "region": None, "split": "test",
         })  # fmt: skip
     write_jsonl(output, rows)
-    return {"records": len(rows)}
+    return {"records": len(rows), "videos": len({r["video"] for r in rows}), "missing_videos_skipped": missing}
 
 
 def convert_meva(questions: str, streams: str, output: str, split: str | None = "test") -> dict:
