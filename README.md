@@ -10,6 +10,8 @@
 
 最新完成 [双卡高显存调参](docs/experiments/high_memory_tuning_2026-11-05.md)：32帧、224 RGB tokens、每卡batch=2，每卡峰值分配约30.2 GB；加入可选无参数记忆归一化，修复长展开非有限梯度。两个学习率各训练450步，验证EM为29.5%/29.0%，未超过四帧基线，视觉错配后得分仍接近。保留全部结果和权重，不把显存增加解释为质量提升。
 
+**新方向：物业监控巡检（2026-11-06，待真机验证）**：预训练 Qwen3-VL + 变化触发的区域级转移记忆（前后裁剪与时间），在相同视觉 token 预算下与均匀帧、最近帧、文字字幕日志对比；基准由公开 MEVA 标注构建长间隔问题。见 [inspection.md](docs/inspection.md)。
+
 ![架构设计示意](assets/architecture.png)
 
 图中场景为 AI 生成的写实示意；原设计中的 scout、codec-native 输入和若干训练策略属于待验证扩展。以 [实现对应表](docs/architecture.md) 为准。可用 diagrams.net 打开 [可编辑 draw.io 图](assets/architecture.drawio)；[原始设计提案](docs/design_proposal_v0.1.md) 保留用于对照，实际代码边界以实现对应表为准。

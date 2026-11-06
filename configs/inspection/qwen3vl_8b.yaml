@@ -1,0 +1,41 @@
+# Fixed-camera inspection with transition memory; 8B variant for 4x A100 (scale-up check, not the main model).
+model:
+  name: Qwen/Qwen3-VL-8B-Instruct
+  dtype: bfloat16
+  unit: 32                  # pixels per visual-token side (16 px patch x 2 merge); use 28 for Qwen2.5-VL
+  attn_implementation: sdpa
+detector:
+  work_width: 480
+  short_seconds: 4.0
+  long_seconds: 600.0
+  threshold: 25.0
+  confirm_seconds: 6.0
+  vanish_seconds: 4.0
+  absorb_seconds: 1800.0
+snapshot:
+  sample_fps: 2.0
+  buffer_fps: 1.0
+  max_window: 1800.0
+  max_frames: 16
+  max_transitions: 32
+  capacity: 128
+  caption_every: 10.0
+  expected_fps: 30.0
+pack:
+  frame_tokens: 256         # current frame, identical for every method
+  crop_tokens: 64           # per before/after crop
+  frames: 8                 # frame-based baselines spread the budget over this many frames
+caption:
+  tokens: 256
+evaluation:
+  methods: [none, current, uniform, recent, transition, transition_after, transition_meta, textlog]
+  budgets: [512, 1024, 2048]
+training:
+  steps: 2000
+  lr: 0.0001
+  warmup: 100
+  grad_accum: 8
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  save_every: 500
