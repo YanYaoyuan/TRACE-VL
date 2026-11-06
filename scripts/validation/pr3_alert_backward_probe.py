@@ -2,14 +2,13 @@ import argparse
 import json
 import random
 import traceback
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
 import torch
-
+from trace_vl.v3 import train as training
 from trace_vl.v3.config import load_v3_config
 from trace_vl.v3.train import gradient_check
-from trace_vl.v3 import train as training
 
 p = argparse.ArgumentParser()
 p.add_argument('--state', choices=['on', 'off'], required=True)
