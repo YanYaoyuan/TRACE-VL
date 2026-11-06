@@ -106,10 +106,23 @@ def initialize_weights(model, checkpoint):
         "text_limit",
         "local_files_only",
         "normalize_memory",
+        # Parameter-free v2 fixes; query_projection adds a module initialized from the tied map.
+        "prompt_format",
+        "state_update",
+        "state_kv_norm",
+        "retrieval_gradient",
+        "query_projection",
+        "token_selection",
+        "motion_layout",
     }
     if changed - allowed:
         raise ValueError(f"initialization architecture/backbone mismatch: {sorted(changed - allowed)}")
-    model.load_state_dict(saved["model"], strict=True)
+    missing, unexpected = model.load_state_dict(saved["model"], strict=False)
+    added = {"query_projection.weight", "query_projection.bias"}
+    if unexpected or set(missing) - added:
+        raise ValueError(f"initialization state mismatch: missing={missing}, unexpected={unexpected}")
+    if missing:
+        model.reset_query_projection()
     return {
         "checkpoint": str(checkpoint),
         "checkpoint_sha256": file_hash(checkpoint),

@@ -66,6 +66,10 @@ class TransitionMemory(nn.Module):
         previous = old.working if cfg.memory_mode != "recent" else torch.zeros_like(old.working)
         context = torch.cat([previous, current], dim=1)
         proposed = self._read(previous + self.state_queries[None], context)
+        if cfg.state_update == "bounded":
+            # `proposed` is residual on `previous`, so mixing it with `previous` integrates without decay.
+            # Remove the residual and normalize: the gate then forms a convex mix of bounded values.
+            proposed = F.layer_norm(proposed - previous, (cfg.dim,))
         gate = torch.sigmoid(self.gate(torch.cat([previous, proposed], dim=-1)))
         new_working = previous * (1 - gate) + proposed * gate
         if cfg.normalize_memory:
@@ -167,6 +171,13 @@ class EvidenceReader(nn.Module):
         b = torch.arange(query.shape[0], device=query.device)[:, None]
         selected = memory.events[b, indices]
         selected_valid = eligible[b, indices]
+        if self.cfg.retrieval_gradient:
+            # Straight-through retrieval: the forward value is unchanged (factor 1), but the scores receive
+            # gradient through the softmax probability of each selected event, so retrieval can learn.
+            finite = scores.masked_fill(~eligible, torch.finfo(scores.dtype).min)
+            probability = finite.float().softmax(1).to(selected.dtype) * eligible.to(selected.dtype)
+            chosen = probability.gather(1, indices)
+            selected = selected * (1 + chosen - chosen.detach())[..., None, None]
         start, known = memory.observed_start[b, indices], memory.known_at[b, indices]
         timing = torch.stack(
             [

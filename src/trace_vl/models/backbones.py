@@ -18,11 +18,57 @@ class ByteTokenizer:
         return bytes(int(i) - 3 for i in ids if 3 <= int(i) < 259).decode("utf-8", errors="replace")
 
 
-def training_sequences(tokenizer, prompts, answers, limit, device):
+class PromptFormat:
+    """Token layout around the visual prefix: [head] [visual prefix] [question + suffix] [answer].
+
+    `raw` reproduces the original layout (empty head, bare question). `chat` wraps the question in the
+    tokenizer's chat template (or a plain Question/Answer template for the byte tokenizer) and marks the
+    visual prefix, so a post-trained LLM sees the format it was tuned on.
+    """
+
+    def __init__(self, tokenizer, mode="raw", chat_template=None):
+        self.tokenizer, self.mode = tokenizer, mode
+        if mode == "raw":
+            self.head, self.middle, self.suffix = [], [], []
+            return
+        if chat_template is None:
+            head_text, middle_text, suffix_text = "Video:\n", "\nQuestion: ", "\nAnswer: "
+        else:
+            head_text, suffix_text = chat_template
+            head_text, middle_text = head_text + "Video:\n", "\n"
+        self.head = tokenizer.encode(head_text)
+        self.middle = tokenizer.encode(middle_text)
+        self.suffix = tokenizer.encode(suffix_text)
+
+    def prompt(self, question, limit):
+        # Truncate only the question so the template suffix that cues the answer always survives.
+        return self.middle + self.tokenizer.encode(question, limit=limit) + self.suffix
+
+
+def chat_template_parts(tokenizer):
+    """Split a rendered single-turn chat prompt into the text before and after the user content."""
+    marker = "\u0000TRACE_VL_QUESTION\u0000"
+    messages = [{"role": "user", "content": marker}]
+    try:
+        text = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
+        )
+    except TypeError:
+        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    if text.count(marker) != 1:
+        raise ValueError("chat template did not render the user content exactly once")
+    return tuple(text.split(marker))
+
+
+def training_sequences(tokenizer, prompts, answers, limit, device, prompt_format=None):
     """Pad only at sequence ends; prompt and prefix positions never become loss targets."""
     sequences, labels = [], []
     for prompt, answer in zip(prompts, answers):
-        q = tokenizer.encode(prompt, limit=limit // 2)
+        q = (
+            tokenizer.encode(prompt, limit=limit // 2)
+            if prompt_format is None
+            else prompt_format.prompt(prompt, limit // 2)
+        )
         a = tokenizer.encode(answer, limit=max(1, limit - len(q) - 1)) + [tokenizer.eos_token_id]
         sequences.append(q + a)
         labels.append([-100] * len(q) + a)
@@ -76,10 +122,11 @@ class HFVision(nn.Module):
 
 
 class TinyLanguage(nn.Module):
-    def __init__(self, dim, text_limit):
+    def __init__(self, dim, text_limit, prompt_format="raw"):
         super().__init__()
         self.dim, self.text_limit = dim, text_limit
         self.tokenizer = ByteTokenizer()
+        self.format = PromptFormat(self.tokenizer, prompt_format)
         self.embedding = nn.Embedding(self.tokenizer.vocab_size, dim)
         self.position = nn.Embedding(text_limit + 1024, dim)
         layer = nn.TransformerEncoderLayer(dim, 4, 3 * dim, dropout=0, batch_first=True, norm_first=True)
@@ -103,10 +150,15 @@ class TinyLanguage(nn.Module):
         x = self.decoder(x, mask=causal, src_key_padding_mask=None if mask is None else ~mask.bool())
         return self.head(self.norm(x))
 
+    def _head(self, prefix):
+        ids = torch.tensor(self.format.head, dtype=torch.long, device=prefix.device)
+        return self.embedding(ids)[None].expand(prefix.shape[0], -1, -1)
+
     def loss(self, prefix, prompts, answers):
         ids, targets, mask = training_sequences(
-            self.tokenizer, prompts, answers, self.text_limit, prefix.device
+            self.tokenizer, prompts, answers, self.text_limit, prefix.device, self.format
         )
+        prefix = torch.cat([self._head(prefix), prefix], dim=1)
         x = torch.cat([prefix, self.embedding(ids)], dim=1)
         targets = torch.cat([targets.new_full(prefix.shape[:2], -100), targets], dim=1)
         mask = torch.cat([mask.new_ones(prefix.shape[:2]), mask], dim=1)
@@ -116,8 +168,9 @@ class TinyLanguage(nn.Module):
     @torch.no_grad()
     def generate(self, prefix, prompts, max_new_tokens=32):
         answers = []
+        prefix = torch.cat([self._head(prefix), prefix], dim=1)
         for p, prompt in zip(prefix, prompts):
-            ids = self.tokenizer.encode(prompt, self.text_limit // 2) or [1]
+            ids = self.format.prompt(prompt, self.text_limit // 2) or [1]
             seq = torch.tensor(ids, device=p.device)[None]
             generated = []
             for _ in range(max_new_tokens):
@@ -144,7 +197,7 @@ class HFTokenizer:
 
 
 class HFLanguage(nn.Module):
-    def __init__(self, name, local_files_only, text_limit, lora_rank=0):
+    def __init__(self, name, local_files_only, text_limit, lora_rank=0, prompt_format="raw"):
         super().__init__()
         try:
             from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -154,6 +207,10 @@ class HFLanguage(nn.Module):
         if tokenizer.pad_token_id is None:
             tokenizer.pad_token = tokenizer.eos_token
         self.tokenizer = HFTokenizer(tokenizer)
+        template = (
+            chat_template_parts(tokenizer) if prompt_format == "chat" and tokenizer.chat_template else None
+        )
+        self.format = PromptFormat(self.tokenizer, prompt_format, template)
         self.lm = AutoModelForCausalLM.from_pretrained(
             name, local_files_only=local_files_only, torch_dtype="auto"
         )
@@ -193,12 +250,17 @@ class HFLanguage(nn.Module):
         indices = t.attention_mask.sum(1) - 1
         return x[torch.arange(x.shape[0], device=x.device), indices] * nonempty[:, None]
 
+    def _with_head(self, prefix):
+        ids = torch.tensor(self.format.head, dtype=torch.long, device=prefix.device)
+        head = self.lm.get_input_embeddings()(ids)[None].expand(prefix.shape[0], -1, -1)
+        return torch.cat([head, prefix.to(head.dtype)], dim=1)
+
     def loss(self, prefix, prompts, answers):
         ids, targets, mask = training_sequences(
-            self.tokenizer, prompts, answers, self.text_limit, prefix.device
+            self.tokenizer, prompts, answers, self.text_limit, prefix.device, self.format
         )
         embeddings = self.lm.get_input_embeddings()(ids)
-        prefix = prefix.to(embeddings.dtype)
+        prefix = self._with_head(prefix).to(embeddings.dtype)
         x = torch.cat([prefix, embeddings], dim=1)
         targets = torch.cat([targets.new_full(prefix.shape[:2], -100), targets], dim=1)
         mask = torch.cat([mask.new_ones(prefix.shape[:2]), mask], dim=1)
@@ -215,8 +277,9 @@ class HFLanguage(nn.Module):
     @torch.no_grad()
     def generate(self, prefix, prompts, max_new_tokens=64):
         answers = []
+        prefix = self._with_head(prefix)
         for p, prompt in zip(prefix, prompts):
-            ids = self.tokenizer.encode(prompt, self.text_limit // 2) or [self.tokenizer.eos_token_id]
+            ids = self.format.prompt(prompt, self.text_limit // 2) or [self.tokenizer.eos_token_id]
             ids = torch.tensor(ids, device=p.device)[None]
             embedding = self.lm.get_input_embeddings()(ids)
             x = torch.cat([p[None].to(embedding.dtype), embedding], dim=1)

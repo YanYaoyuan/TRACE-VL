@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from contextlib import nullcontext
@@ -29,6 +30,41 @@ from .runtime import (
     seed_everything,
     write_json,
 )
+
+
+def parameter_groups(model, weight_decay, exclude_norm_decay=False):
+    """Optionally exempt biases, norms and learned query/type embeddings from weight decay."""
+    named = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
+    if not exclude_norm_decay:
+        return [{"params": [p for _, p in named], "weight_decay": weight_decay}]
+
+    def exempt(name, parameter):
+        return parameter.ndim < 2 or name.rsplit(".", 1)[-1] in {
+            "state_queries",
+            "event_types",
+            "queries",
+            "token_types",
+        }
+
+    decay = [p for n, p in named if not exempt(n, p)]
+    other = [p for n, p in named if exempt(n, p)]
+    return [{"params": decay, "weight_decay": weight_decay}, {"params": other, "weight_decay": 0.0}]
+
+
+def learning_rate_factor(step, settings):
+    """Stateless schedule of the optimizer step index, so resuming needs no scheduler state."""
+    schedule = settings.get("lr_schedule", "constant")
+    warmup = int(settings.get("warmup_steps", 0))
+    if schedule not in {"constant", "cosine"} or warmup < 0:
+        raise ValueError("lr_schedule must be constant or cosine; warmup_steps must be >= 0")
+    if step < warmup:
+        return (step + 1) / warmup
+    if schedule == "constant":
+        return 1.0
+    total = int(settings.get("max_steps", 10))
+    floor = float(settings.get("min_lr_ratio", 0.1))
+    progress = min(1.0, (step - warmup) / max(1, total - warmup))
+    return floor + (1 - floor) * 0.5 * (1 + math.cos(math.pi * progress))
 
 
 class TrainingLoss(nn.Module):
@@ -72,8 +108,12 @@ def train(config, output, resume=None, init_from=None):
         model = TraceVL(ModelConfig.from_dict(config["model"])).to(device).train()
         initialization = initialize_weights(model, init_from) if init_from else None
         parameters = [p for p in model.parameters() if p.requires_grad]
+        base_lr = settings.get("lr", 3e-4)
         optimizer = torch.optim.AdamW(
-            parameters, lr=settings.get("lr", 3e-4), weight_decay=settings.get("weight_decay", 0.01)
+            parameter_groups(
+                model, settings.get("weight_decay", 0.01), settings.get("exclude_norm_decay", False)
+            ),
+            lr=base_lr,
         )
         step = 0
         fingerprint = file_hash(config["data"]["manifest"])
@@ -136,7 +176,9 @@ def train(config, output, resume=None, init_from=None):
         while step < maximum:
             optimizer.zero_grad(set_to_none=True)
             # Keep collective tensor shapes identical even when only some ranks have auxiliary labels.
-            scalars = {k: 0.0 for k in ("total", "answer", "alert", "write", "utility")}
+            scalars = {k: 0.0 for k in ("total", "answer", "alert", "write", "utility", "contrast")}
+            for group in optimizer.param_groups:
+                group["lr"] = base_lr * learning_rate_factor(step, settings)
             for micro in range(accumulation):
                 batch = move_batch(next_batch(), device)
                 context = module.no_sync() if world > 1 and micro < accumulation - 1 else nullcontext()
@@ -165,6 +207,7 @@ def train(config, output, resume=None, init_from=None):
                 "step": step,
                 "losses": dict(zip(scalars, values.cpu().tolist())),
                 "grad_norm_rank0": float(norm),
+                "lr": optimizer.param_groups[0]["lr"],
                 "elapsed_seconds": time.perf_counter() - start,
             }
             if rank == 0:

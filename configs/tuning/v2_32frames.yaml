@@ -1,0 +1,24 @@
+# v2 design fixes with the 32-frame high-memory input budget (about 30 GB/rank before the fixes).
+# 224 RGB tokens are pooled as a 14x16 grid. Run only after configs/local_2b_v2.yaml shows a visual gap.
+extends: high_memory_base.yaml
+model:
+  prompt_format: chat
+  state_update: bounded
+  state_kv_norm: true
+  retrieval_gradient: true
+  query_projection: separate
+  token_selection: pool
+  motion_layout: grid
+training:
+  lr: 0.0001
+  lr_schedule: cosine
+  warmup_steps: 50
+  min_lr_ratio: 0.1
+  exclude_norm_decay: true
+  loss_weights:
+    answer: 1.0
+    alert: 0.0
+    write: 0.0
+    utility: 0.0
+    contrast: 0.5
+    contrast_margin: 0.2

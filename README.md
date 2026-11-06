@@ -10,6 +10,8 @@
 
 最新完成 [双卡高显存调参](docs/experiments/high_memory_tuning_2026-11-05.md)：32帧、224 RGB tokens、每卡batch=2，每卡峰值分配约30.2 GB；加入可选无参数记忆归一化，修复长展开非有限梯度。两个学习率各训练450步，验证EM为29.5%/29.0%，未超过四帧基线，视觉错配后得分仍接近。保留全部结果和权重，不把显存增加解释为质量提升。
 
+**v2 设计修正（待真机验证）**：针对视觉依赖缺失与状态爆炸，新增 chat 提示格式、有界状态更新、可导检索、池化 token、视觉对比损失和学习率调度等可选开关，默认保持原行为。先用 `scripts/diagnose_prefix.py` 检查前缀，再运行 `configs/local_2b_v2.yaml`，见 [v2 设计修正](docs/architecture.md#v2-设计修正可选开关默认关闭)。
+
 ![架构设计示意](assets/architecture.png)
 
 图中场景为 AI 生成的写实示意；原设计中的 scout、codec-native 输入和若干训练策略属于待验证扩展。以 [实现对应表](docs/architecture.md) 为准。可用 diagrams.net 打开 [可编辑 draw.io 图](assets/architecture.drawio)；[原始设计提案](docs/design_proposal_v0.1.md) 保留用于对照，实际代码边界以实现对应表为准。
