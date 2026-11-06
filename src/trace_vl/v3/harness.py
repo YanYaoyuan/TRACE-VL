@@ -295,8 +295,9 @@ def check_equality(cfg: V3Config, video: str | None = None, steps: int = 4, devi
     backbone.model.model.rope_deltas = None
     data = {k: v.to(backbone.device) for k, v in inputs.items() if torch.is_tensor(v)}
     data["pixel_values_videos"] = data["pixel_values_videos"].to(backbone.dtype)
-    logits = backbone.model(**data, use_cache=False, logits_to_keep=1).logits[0, -1].float()
-    ref = logits.log_softmax(-1)[native.letter_ids[: len(options)]].tolist()
+    # Same scoring on both sides: fp32 letter rows on the public forward's final hidden state.
+    last = backbone.model.model(**data, use_cache=False).last_hidden_state[0, -1]
+    ref = backbone.letter_logprobs(last, native.letter_ids[: len(options)]).tolist()
     diff_ref = max(abs(a - b) for a, b in zip(ref, native_scores))
     diff_v3 = max(abs(a - b) for a, b in zip(v3_scores, native_scores))
     gate = dtype == "float32"

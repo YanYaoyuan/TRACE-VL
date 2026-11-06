@@ -247,8 +247,7 @@ class StreamSession:
         if self.trace_ids is not None:
             self.trace_query = closing + ids
         hidden = self.bb.lm(self.bb.embed_ids(ids), pos.text(len(ids)), cache)
-        logits = self.bb.logits(hidden[:, -1:])[0, -1].float()
-        scores = logits.log_softmax(-1)[self.letter_ids[: len(options)]]
+        scores = self.bb.letter_logprobs(hidden[0, -1], self.letter_ids[: len(options)])
         return int(scores.argmax()), scores.tolist()
 
     @torch.no_grad()

@@ -212,6 +212,20 @@ class Backbone:
             pooled.append(hidden[0].float().mean(0))
         return torch.stack(pooled)
 
+    def letter_logprobs(self, hidden: torch.Tensor, letter_ids: list[int]) -> torch.Tensor:
+        """Log-probs of option letters at one position, without bf16 output quantization.
+
+        bf16 logits of magnitude ~16-32 are quantized in steps of 0.125, so close options tie exactly and
+        argmax picks by index (PR #3 control: top-2 margins 0.0 / 0.125). The letter logits are computed in
+        fp32 from the hidden state and the letter rows of lm_head; the full-vocabulary logsumexp (a shared
+        constant across letters) comes from the regular logits.
+        """
+        hidden = hidden.reshape(-1)
+        rows = self.lm_head.weight[letter_ids].float()
+        letters = rows @ hidden.float()
+        normalizer = self.lm_head(hidden[None].to(self.lm_head.weight.dtype)).float().logsumexp(-1)
+        return letters - normalizer
+
     def logits(self, hidden: torch.Tensor) -> torch.Tensor:
         return self.lm_head(hidden)
 

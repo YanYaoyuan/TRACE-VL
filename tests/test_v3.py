@@ -298,3 +298,19 @@ def test_transition_tracker_expires_before_matching_across_gaps():
     assert float(tracker.clock(100.0, 0.0)[0]) == 0.0  # age 0, not 100 s
     tracker.update(105.0, [(2.0, 2.0)], vec)  # within resolve_seconds: same track continues
     assert tracker.tracks[0]["onset"] == 100.0
+
+
+def test_letter_logprobs_match_log_softmax_in_fp32():
+    """fp32 letter scoring (bf16 tie fix, PR #3) equals the plain log-softmax when everything is fp32."""
+    from types import SimpleNamespace
+
+    from trace_vl.v3.backbone import Backbone
+
+    torch.manual_seed(0)
+    head = torch.nn.Linear(16, 50, bias=False)
+    fake = SimpleNamespace(lm_head=head)
+    hidden = torch.randn(16)
+    letters = [3, 7, 11, 42]
+    ours = Backbone.letter_logprobs(fake, hidden, letters)
+    ref = head(hidden).log_softmax(-1)[letters]
+    assert torch.allclose(ours, ref, atol=1e-5)
