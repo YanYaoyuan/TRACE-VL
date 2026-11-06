@@ -1,0 +1,212 @@
+{
+  "gradient": {
+    "probe": "gradient",
+    "pass": false,
+    "results": {
+      "original": {
+        "losses": {
+          "ce": 0.2021189033985138,
+          "kd": 0.09839612990617752,
+          "pred": 0.08559602499008179,
+          "budget": 11.009602546691895
+        },
+        "stats": {
+          "tokens_per_step": 86.66666666666667,
+          "i_step_fraction": 0.3333333333333333
+        },
+        "unclipped_gradient_norm": 1038007101392.5778,
+        "top5": [
+          [
+            727546068992,
+            "v3.transition.delta.2.bias"
+          ],
+          [
+            727310008320,
+            "v3.transition.type_embed"
+          ],
+          [
+            127306268672,
+            "v3.transition.delta.2.weight"
+          ],
+          [
+            54302171136,
+            "v3.cst.gate"
+          ],
+          [
+            28.471982955932617,
+            "lm_model.model.language_model.layers.0.linear_attn.out_proj.lora_B.default.weight"
+          ]
+        ],
+        "delta_norm_min": 0,
+        "delta_norm_max": 0
+      },
+      "diagnostic_after_anchor": {
+        "losses": {
+          "ce": 0.07015618681907654,
+          "kd": 0.008585628122091293,
+          "pred": 0.08559602499008179,
+          "budget": 11.009602546691895
+        },
+        "stats": {
+          "tokens_per_step": 86.66666666666667,
+          "i_step_fraction": 0.3333333333333333
+        },
+        "unclipped_gradient_norm": 13.700317252190983,
+        "top5": [
+          [
+            9.142745971679688,
+            "lm_model.model.language_model.layers.0.linear_attn.out_proj.lora_B.default.weight"
+          ],
+          [
+            3.0489728450775146,
+            "lm_model.model.language_model.layers.2.linear_attn.out_proj.lora_B.default.weight"
+          ],
+          [
+            2.2778608798980713,
+            "lm_model.model.language_model.layers.3.self_attn.o_proj.lora_B.default.weight"
+          ],
+          [
+            2.1105778217315674,
+            "lm_model.model.language_model.layers.4.linear_attn.out_proj.lora_B.default.weight"
+          ],
+          [
+            1.969409704208374,
+            "lm_model.model.language_model.layers.7.self_attn.o_proj.lora_B.default.weight"
+          ]
+        ],
+        "delta_norm_min": 0,
+        "delta_norm_max": 0
+      },
+      "all_i_steps": {
+        "losses": {
+          "ce": 0.038158118724823,
+          "kd": 9.985201359086204e-7,
+          "pred": 0.03949130326509476
+        },
+        "stats": {
+          "tokens_per_step": 196,
+          "i_step_fraction": 1
+        },
+        "unclipped_gradient_norm": 4.351001570388056,
+        "top5": [
+          [
+            2.898531675338745,
+            "lm_model.model.language_model.layers.0.linear_attn.out_proj.lora_B.default.weight"
+          ],
+          [
+            1.0207644701004028,
+            "lm_model.model.language_model.layers.2.linear_attn.out_proj.lora_B.default.weight"
+          ],
+          [
+            0.7562281489372253,
+            "lm_model.model.language_model.layers.3.self_attn.o_proj.lora_B.default.weight"
+          ],
+          [
+            0.6812536716461182,
+            "lm_model.model.language_model.layers.1.linear_attn.out_proj.lora_B.default.weight"
+          ],
+          [
+            0.6481301188468933,
+            "lm_model.model.language_model.layers.0.linear_attn.in_proj_z.lora_B.default.weight"
+          ]
+        ],
+        "delta_norm_min": null,
+        "delta_norm_max": null
+      }
+    },
+    "reviewed_commit": "143e4c6cb7a5bb9b88bbcfce7a69708cbccaf9a2"
+  },
+  "resume": {
+    "probe": "resume",
+    "pass": false,
+    "first": {
+      "run": "e63af95c75e7ffb4",
+      "videos": 1,
+      "errors": 0,
+      "predictions": "outputs/pr3-validation-20261107/portable-resume-probe/evaluation/predictions.0of1.jsonl"
+    },
+    "second": {
+      "run": "e63af95c75e7ffb4",
+      "videos": 1,
+      "errors": 0,
+      "predictions": "outputs/pr3-validation-20261107/portable-resume-probe/evaluation/predictions.0of1.jsonl"
+    },
+    "inference_calls": 1,
+    "expected": "reject incompatible adapter before reusing predictions",
+    "reviewed_commit": "143e4c6cb7a5bb9b88bbcfce7a69708cbccaf9a2"
+  },
+  "equality_bf16": {
+    "reference_scores": [
+      -5.3835015296936035,
+      -7.2585015296936035,
+      -5.7585015296936035,
+      -0.008501292206346989
+    ],
+    "native_scores": [
+      -5.3831329345703125,
+      -7.2581329345703125,
+      -5.8831329345703125,
+      -0.008133149705827236
+    ],
+    "v3_zero_gate_scores": [
+      -5.3831329345703125,
+      -7.2581329345703125,
+      -5.8831329345703125,
+      -0.008133149705827236
+    ],
+    "max_abs_diff_native_vs_reference": 0.12463140487670898,
+    "max_abs_diff_v3_vs_native": 0,
+    "pass": false,
+    "modules": {
+      "cst": 41068768,
+      "transition": 17150721,
+      "alert": 2403137,
+      "event": 6302720,
+      "retention": 513,
+      "total": 66925859
+    },
+    "note": "bf16 incremental vs one-shot prefill can differ slightly; v3 vs native must be ~exact.",
+    "seconds": 4.089034612989053,
+    "peak_allocated_gb": 5.255044608,
+    "torch": "2.8.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "pr_commit": "143e4c6cb7a5bb9b88bbcfce7a69708cbccaf9a2"
+  },
+  "equality_fp32": {
+    "reference_scores": [
+      -5.362674236297607,
+      -7.267703533172607,
+      -5.874919414520264,
+      -0.008243228308856487
+    ],
+    "native_scores": [
+      -5.362628936767578,
+      -7.267658233642578,
+      -5.8748626708984375,
+      -0.008243701420724392
+    ],
+    "v3_zero_gate_scores": [
+      -5.362628936767578,
+      -7.267658233642578,
+      -5.8748626708984375,
+      -0.008243701420724392
+    ],
+    "max_abs_diff_native_vs_reference": 0.000056743621826171875,
+    "max_abs_diff_v3_vs_native": 0,
+    "pass": true,
+    "modules": {
+      "cst": 41068768,
+      "transition": 17150721,
+      "alert": 2403137,
+      "event": 6302720,
+      "retention": 513,
+      "total": 66925859
+    },
+    "note": "bf16 incremental vs one-shot prefill can differ slightly; v3 vs native must be ~exact.",
+    "seconds": 5.573770212999079,
+    "peak_allocated_gb": 10.138788352,
+    "torch": "2.8.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "pr_commit": "143e4c6cb7a5bb9b88bbcfce7a69708cbccaf9a2"
+  }
+}
