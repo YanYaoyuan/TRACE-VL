@@ -7,7 +7,7 @@ tracking issue with the template at the end. Nothing below is a result yet.
 
 | Milestone | Work | Gate (must hold to continue) |
 |---|---|---|
-| **M0** harness | load Qwen3.5-2B; streaming feature extraction; eval harness for Video-MME, OVO-Bench, StreamingBench, MEVA long-gap; measure tokens/s, KV MB, latency per step on 5090 and A100 | **harness fidelity**, not the model card: (a) `v3 check` (processor-originated) passes: exact token ids + fp32 letter log-probs within 1e-3; (b) on the same Video-MME subset, native streaming fed the processor's own patches agrees with the public full forward on ≥ 97% of predictions and accuracy within 1 question per 90. The model card's 69.0 uses thinking mode on the full benchmark and is not comparable to non-thinking letter-likelihood scoring on a subset |
+| **M0** harness | load Qwen3.5-2B; streaming feature extraction; eval harness for Video-MME, OVO-Bench, StreamingBench, MEVA long-gap; measure tokens/s, KV MB, latency per step on 5090 and A100 | **harness fidelity to the public processor**, not the model card: (a) processor-originated `v3 check` passes (exact token ids; fp32 letter log-probs within 1e-3); (b) on the same Video-MME subset, **with fp32 letter scoring on both paths over a bf16 backbone** (`Backbone.letter_logprobs`), prediction agreement ≥ 97% and accuracy within 1/90, plus a full-fp32 rerun of every disagreement. Raw bf16-logit agreement is always reported next to it. **Status: passed at `ac3fec5`** (see §8) |
 | **M1** plumbing | CST + TE + TKM modules, zero-init; streaming cache; parameter report | (a) gates = 0 and all I-steps ⇒ logits match the base model (max abs diff < 1e-2 bf16); (b) one training step runs on 1 × 5090 at 3-minute clips |
 | **M2** Stage 1 | distillation on short clips | at ~1/5 of the tokens: ≥ 95% of the full-token teacher's accuracy on MVBench + Video-MME-short, and ≥ +2 pts over B4 (same tokens, pooled) |
 | **M3** Stage 2 | streaming SFT on long streams | at equal KV budget: OVO-Bench backward and MEVA long-gap ≥ B1 (StreamingVLM recipe) + 3 pts; no loss > 1 pt on OVO real-time |
@@ -107,3 +107,25 @@ artifacts: <outputs dir, checkpoint name>
 
 Code changes reference the issue number in their commit messages, and design changes are posted as
 comments before they are implemented.
+
+## 8. Validation record (2×5090, 2026-11-06/07)
+
+Reports and raw JSON are on the tester's review branch
+(`review/pr3-5090-validation-20261107`): `docs/reviews/pr3_final_local_verification_20261107.md`,
+`pr3_verification_ac3fec5_20261107.json`, `pr3_verification_b538ae1_20261107.json`.
+
+| Check | Result | SHA |
+|---|---|---|
+| Processor-originated equality (fp32, real video) | tokens equal; native vs public 3.05e-5; zero-gated v3 vs native 0.0 | `ac3fec5` |
+| Video-MME subset fidelity, fp32 letter scoring both paths | **90/90 agreement**; 51/90 vs 51/90; 90/90 token equality | `ac3fec5` |
+| Same passes, raw bf16 logits | **86/90 agreement (fails the strict raw gate)**; 50/90 vs 52/90; all 4 disagreements are exact bf16 ties; full-fp32 rerun 4/4 agree (2.78e-4) | `b538ae1`, `ac3fec5` |
+| Query-fork isolation | all 48 KV/GDN/conv tensors unchanged; continuation equals the uninterrupted stream | `ac3fec5` |
+| Static-clip gradient regression | 14.0 (was 1.04e12) | `a761f09` |
+| 180 s training, mixed alert labels, 1×5090 | 2 updates, peak 14.45 GB | `b538ae1` |
+| 2-GPU DDP with the alert head | 2 updates, rank-0 peak 6.34 GB | `74eb908` |
+| Alert head (untrained) cost | 1.19 ms/step vs LM 16.8 ms; isolation within 1.2e-7 | `0171f07` |
+| CPU + CUDA test suite | 87 passed | `ac3fec5` |
+
+Not established by these tests: any accuracy advantage of v3 (a 12-step ActivityNet diagnostic gave 12/13 vs
+11/13 on a 13-question video-disjoint set), official benchmark scores (30 selected videos, no subtitles,
+non-thinking, option likelihoods), and surveillance false-alarm/miss rates.

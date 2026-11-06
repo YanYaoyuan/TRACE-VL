@@ -89,3 +89,36 @@ CUDA_VISIBLE_DEVICES=0,1 uv run --locked torchrun --standalone --nproc_per_node=
 uv run --locked trace-vl v3 eval --config configs/v3/v3_tkm.yaml --mode v3 --checkpoint outputs/v3/stage1/modules.pt \
   --adapter outputs/v3/stage1/lora --records data/v3/ovo.jsonl --video-root /data/ovo --output outputs/v3/ovo_v3_stage1
 ```
+
+## Phase 2: Stage 1 on 4 × A100-40GB (after M0/M1 passed on 2 × 5090)
+
+Code functionality and protocol fidelity were verified on 2 × 5090 at `ac3fec5` (experiments.md §8). The
+A100 machine has the storage for training data at scale.
+
+```bash
+git fetch origin && git checkout design/v3-transition-streaming && git pull   # PR #3 head
+uv sync --extra dev --extra vlm --extra data && uv pip install flash-linear-attention
+uv run --locked pytest -q tests/test_v3.py tests/test_v3_gpu.py
+CUDA_VISIBLE_DEVICES=0 uv run --locked trace-vl v3 check --config configs/v3/native_full.yaml --video <short.mp4>  # sm_80 sanity
+
+# Data: LLaVA-Video-178K multiple-choice subsets (the trainer needs option-letter answers; open-ended QA is
+# not used by Stage 1 yet). Download the *_mc_* json files plus their videos for the 0-30 s ... 2-3 min
+# buckets; record dataset versions/licences in configs/datasets/downloads.json.
+uv run --locked trace-vl v3 convert-llava-mc /data/llava-video/*/*_mc_*.json --video-root /data/llava-video \
+  --output data/v3/llava_mc.jsonl
+uv run --locked trace-vl v3 convert-meva --bench data/meva/bench --split train --output data/v3/meva_train.jsonl   # optional
+cat data/v3/llava_mc.jsonl data/v3/meva_train.jsonl > data/v3/stage1_train.jsonl
+
+CUDA_VISIBLE_DEVICES=0,1,2,3 uv run --locked torchrun --standalone --nproc_per_node=4 -m trace_vl v3 train \
+  --config configs/v3/stage1_a100.yaml --records data/v3/stage1_train.jsonl --video-root /data \
+  --output outputs/v3/stage1_a100 --clip-seconds 180
+```
+
+Evaluate checkpoints (`modules.pt` + `lora/`) with `v3 eval --mode v3 --checkpoint ... --adapter ...` on
+the held-out `val` split, OVO-Bench and Video-MME, against B0/B1/B2 at equal visual tokens
+(experiments.md §2), and post every run to issue #4.
+
+Not implemented yet (next development work, tracked in issue #4): the **Stage 2 trainer** (long
+10-60 min streams with the inference KV policy, chunked SFT, retention-scorer supervision) and alert-head
+training data at scale (frame-labelled anomaly sets such as CUHK Avenue / ShanghaiTech Campus;
+licences to check).

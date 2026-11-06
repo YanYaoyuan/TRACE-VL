@@ -95,6 +95,57 @@ def convert_meva(questions: str, streams: str, output: str, split: str | None = 
     return {"records": len(rows)}
 
 
+OPTION_LINE = re.compile(r"^\s*\(?([A-H])[\.\):]\s*(.+?)\s*$")
+
+
+def convert_llava_mc(annotations: list[str], output: str, video_root: str | None = None, val_fraction: float = 0.05,
+                     seed: int = 7) -> dict:  # fmt: skip
+    """LLaVA-Video-178K multiple-choice QA files -> Stage 1 records (offline: question after the clip).
+
+    Each human turn holds the question followed by option lines ("A. ..."); the gpt turn starts with
+    the letter. Unparseable turns are counted and skipped. Split by video (hash), never by question.
+    """
+    import hashlib
+
+    rows, skipped, missing = [], 0, 0
+    for path in annotations:
+        subset = Path(path).stem
+        for item in json.loads(Path(path).read_text()):
+            video = item.get("video")
+            if not video:
+                skipped += 1
+                continue
+            if video_root and not (Path(video_root) / video).is_file():
+                missing += 1
+                continue
+            turns = item.get("conversations", [])
+            for k in range(0, len(turns) - 1, 2):
+                human, gpt = turns[k].get("value", ""), turns[k + 1].get("value", "")
+                lines = [x for x in human.replace("<image>", "").replace("<video>", "").splitlines() if x.strip()]
+                options, question = [], []
+                for line in lines:
+                    match = OPTION_LINE.match(line)
+                    if match and len(options) == "ABCDEFGH".index(match.group(1)):
+                        options.append(match.group(2))
+                    elif not options:
+                        question.append(line.strip())
+                answer = re.match(r"\s*\(?([A-H])\b", gpt)
+                if len(options) < 2 or not question or not answer or "ABCDEFGH".index(answer.group(1)) >= len(options):
+                    skipped += 1
+                    continue
+                digest = hashlib.sha256(f"{seed}:{video}".encode()).hexdigest()
+                split = "val" if int(digest[:8], 16) / 0xFFFFFFFF < val_fraction else "train"
+                rows.append({
+                    "id": f"llava-mc-{item.get('id', len(rows))}-{k // 2}", "source": "llava-video-178k-mc",
+                    "task": subset, "video": video, "query_time": None, "question": " ".join(question),
+                    "options": options, "answer": "ABCDEFGH".index(answer.group(1)), "region": None, "split": split,
+                })  # fmt: skip
+    write_jsonl(output, rows)
+    splits = {s: sum(r["split"] == s for r in rows) for s in ("train", "val")}
+    return {"records": len(rows), "videos": len({r["video"] for r in rows}), "splits": splits,
+            "skipped_unparseable": skipped, "missing_videos_skipped": missing}  # fmt: skip
+
+
 # ---------------------------------------------------------------------------- reading steps
 class StepReader:
     """Decode the two frames of each step (t - gap/2, t + gap/2) from one video or a chain of clips."""

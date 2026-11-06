@@ -1,0 +1,9 @@
+# Stage 1 distillation on 4 x A100-40GB (torchrun --nproc_per_node=4). Measured on 1 x 5090: a 180 s clip
+# with mixed alert labels peaks at 14.45 GB (b538ae1), so 180 s clips fit 40 GB with headroom.
+# Effective batch = 4 GPUs x grad_accum 4 = 16 clips per optimizer step.
+extends: stage1.yaml
+train:
+  grad_accum: 4
+  steps: 3000
+  warmup: 150
+  save_every: 250

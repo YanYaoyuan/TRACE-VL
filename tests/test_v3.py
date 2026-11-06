@@ -314,3 +314,26 @@ def test_letter_logprobs_match_log_softmax_in_fp32():
     ours = Backbone.letter_logprobs(fake, hidden, letters)
     ref = head(hidden).log_softmax(-1)[letters]
     assert torch.allclose(ours, ref, atol=1e-5)
+
+
+def test_convert_llava_mc_parses_options_and_splits_by_video(tmp_path):
+    from trace_vl.v3.data import convert_llava_mc
+
+    items = [
+        {"id": "a", "video": "v1.mp4", "conversations": [
+            {"from": "human", "value": "<image>\nWhat is the man doing?\nA. running\nB. cooking\nC. sleeping\n"
+                                        "Answer with the option's letter from the given choices directly."},
+            {"from": "gpt", "value": "B."},
+            {"from": "human", "value": "Where is he?\nA. kitchen\nB. park"},
+            {"from": "gpt", "value": "A"}]},
+        {"id": "b", "video": "v2.mp4", "conversations": [
+            {"from": "human", "value": "Describe the video."}, {"from": "gpt", "value": "A man cooks."}]},
+    ]  # fmt: skip
+    src = tmp_path / "x_mc.json"
+    src.write_text(json.dumps(items))
+    report = convert_llava_mc([str(src)], str(tmp_path / "out.jsonl"))
+    rows = [json.loads(x) for x in (tmp_path / "out.jsonl").read_text().splitlines()]
+    assert report["records"] == 2 and report["skipped_unparseable"] == 1
+    assert rows[0]["options"] == ["running", "cooking", "sleeping"] and rows[0]["answer"] == 1
+    assert rows[0]["question"].startswith("What is the man doing?") and rows[1]["answer"] == 0
+    assert rows[0]["split"] == rows[1]["split"]  # same video -> same split
