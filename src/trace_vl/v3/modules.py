@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
+from torch.utils.checkpoint import checkpoint
 
 from .config import CSTConfig, TransitionConfig
 
@@ -79,11 +80,11 @@ class CSTLayer(nn.Module):
         values = torch.cat([*past_v, v], dim=1)
         steps = len(past_k) + 1
         dxy = coords[:, None, :] - coords[None, :, :]  # [N, N, 2]
-        bias_xy = self.bias_xy(dxy).permute(2, 0, 1)  # [H, N, N]
+        bias_xy = self.bias_xy(dxy).permute(2, 0, 1).to(q.dtype)  # [H, N, N], built in the compute dtype
         dts = torch.tensor([t - s for s in past_t] + [0.0], device=z.device, dtype=z.dtype).clamp_min(0)
-        bias_t = self.bias_t(torch.log1p(dts)[:, None]).t()  # [H, S+1]
+        bias_t = self.bias_t(torch.log1p(dts)[:, None]).t().to(q.dtype)  # [H, S+1]
         bias = bias_xy.repeat(1, 1, steps) + bias_t.repeat_interleave(n, dim=1)[:, None, :]
-        attended = F.scaled_dot_product_attention(q[None], keys[None], values[None], attn_mask=bias[None].to(q.dtype))
+        attended = F.scaled_dot_product_attention(q[None], keys[None], values[None], attn_mask=bias[None])
         z = z + self.proj(attended[0].transpose(0, 1).reshape(n, -1))
         if self.memory_read and memory is not None and memory.shape[0] > 0:
             age = torch.log1p((t - memory_t).clamp_min(0))[:, None].to(z.dtype)
@@ -121,7 +122,14 @@ class CSTAdapter(nn.Module):
         coords = grid_coords(h, w, x.device).to(x.dtype)
         z = self.inp(x)
         for i, layer in enumerate(self.layers):
-            z, k, v = layer(z, coords, t, cache.keys[i], cache.values[i], cache.times, cache.memory, cache.memory_times)
+            args = (z, coords, t, cache.keys[i], cache.values[i], cache.times, cache.memory, cache.memory_times)
+            if self.cfg.checkpoint and self.training and torch.is_grad_enabled():
+                # Whole-clip training keeps every step's graph for the answer loss; the dense relative bias
+                # [H, N, (S+1)N] alone was ~20 GB for 180 steps (PR #3, M1 OOM). Recompute it in backward.
+                # Safe: cached past K/V tensors are never modified in place (lists are replaced, not edited).
+                z, k, v = checkpoint(layer, *args, use_reentrant=False)
+            else:
+                z, k, v = layer(*args)
             cache.keys[i] = (cache.keys[i] + [k])[-self.cfg.window :]
             cache.values[i] = (cache.values[i] + [v])[-self.cfg.window :]
         # The current step's K/V were appended; keep at most `window` past steps for the next call.
@@ -233,7 +241,10 @@ class TransitionEncoder(nn.Module):
             pred_err = diff.norm(dim=-1) / math.sqrt(z.shape[-1])
             surprise = torch.sigmoid(self.surprise_gate(torch.cat([z, diff, pred_err[:, None]], dim=-1))).squeeze(-1)
         pos = self.pos(coords)
-        slots, attn = self.slots(z, surprise, pos)  # attn [N, S]
+        if self.training and torch.is_grad_enabled():
+            slots, attn = checkpoint(self.slots, z, surprise, pos, use_reentrant=False)  # attn [N, S]
+        else:
+            slots, attn = self.slots(z, surprise, pos)
         weighted = attn * surprise[:, None]
         masses = weighted.sum(0)  # [S]
         share = weighted / weighted.sum(0, keepdim=True).clamp_min(1e-6)  # per-slot token weights [N, S]

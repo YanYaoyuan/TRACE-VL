@@ -262,3 +262,25 @@ def test_grid_coords_range():
     c = grid_coords(3, 4)
     assert c.shape == (12, 2) and float(c.min()) == 0.0 and float(c.max()) == 1.0
     assert np.isclose(float(c[5, 0]), 1 / 3)
+
+
+def test_cst_checkpointing_matches_plain_forward_and_gradients():
+    """M1 capacity fix (PR #3): per-layer activation checkpointing must not change results."""
+    torch.manual_seed(0)
+    outs = []
+    for flag in (True, False):
+        cfg = small_config()
+        cfg.cst.checkpoint = flag
+        torch.manual_seed(1)
+        modules = TraceV3Modules(cfg, model_dim=16).train()
+        with torch.no_grad():
+            modules.cst.gate.fill_(0.5)
+        cache, total = CSTCache(), 0
+        torch.manual_seed(2)
+        for k in range(4):
+            out, z = modules.cst(torch.randn(6, 16), (2, 3), float(k), cache)
+            total = total + out.square().sum() + z.square().sum()
+        total.backward()
+        outs.append((total.detach(), modules.cst.layers[0].qkv.weight.grad.clone(), modules.cst.gate.grad.clone()))
+    for a, b in zip(*outs):
+        assert torch.allclose(a, b, rtol=1e-5, atol=1e-6)

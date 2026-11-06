@@ -43,6 +43,7 @@ class CSTConfig:
     window: int = 16  # past steps visible to temporal attention
     ffn_ratio: int = 4
     memory_read: bool = True
+    checkpoint: bool = True  # activation checkpointing per CST layer in training (needed for 180 s clips)
 
 
 @dataclass
