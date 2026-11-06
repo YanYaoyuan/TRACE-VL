@@ -26,7 +26,7 @@ from .backbone import Backbone
 from .config import V3Config
 from .data import StepReader, read_jsonl, step_times
 from .model import TraceV3Modules
-from .modules import CSTCache, TECache
+from .modules import CSTCache, TECache, TransitionTracker
 from .positions import PositionCounter
 from .session import LETTERS
 
@@ -51,8 +51,8 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
     pos = PositionCounter()
     prompt_ids, spans = _prompt(bb, record.get("rules") or [])
     parts, positions = [bb.embed_ids(prompt_ids)], [pos.text(len(prompt_ids), bb.device)]
-    cst_cache, te_cache = CSTCache(), TECache()
-    step_ends, aux = [], {"pred": [], "budget": [], "tokens": [], "i_steps": 0}
+    cst_cache, te_cache, tracker = CSTCache(), TECache(), TransitionTracker()
+    step_ends, aux = [], {"pred": [], "budget": [], "tokens": [], "i_steps": 0, "clock": []}
     dtype = next(modules.parameters()).dtype if modules is not None else bb.dtype
     length = len(prompt_ids)
     for k, (frames, t) in enumerate(zip(clips, times)):
@@ -65,6 +65,7 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
             rows = torch.arange(h, device=x.device).repeat_interleave(w)
             cols = torch.arange(w, device=x.device).repeat(h)
             aux["i_steps"] += 1
+            aux["clock"].append(torch.zeros(4))
         else:
             if tbptt and k and k % tbptt == 0:
                 cst_cache.detach()
@@ -78,6 +79,8 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
                 aux["budget"].append(info.masses.sum())
             aux["i_steps"] += int(info.is_i_step)
             slot_memory = info.aux.get("slot_memory")
+            tracker.update(t, info.aux.get("active_centroids", []), slot_memory)
+            aux["clock"].append(tracker.clock(t, float(info.surprise.mean())))
             if slot_memory is not None:
                 tt = torch.full((slot_memory.shape[0],), t, device=slot_memory.device, dtype=slot_memory.dtype)
                 cap = modules.cfg.transition.memory_slots
@@ -133,7 +136,7 @@ class StudentLoss(nn.Module):
                 for k, t in enumerate(times):
                     if start <= t <= end:
                         labels[k, int(rule)] = 1.0
-            clock_feats = torch.zeros(len(times), 4, device=hidden.device, dtype=dtype)  # TODO: transition ages
+            clock_feats = torch.stack(aux["clock"]).to(hidden.device, dtype)  # transition-track clocks per step
             alert = torch.stack([self.v3.alert(step_hidden[k], rule_hidden, clock_feats[k]) for k in range(len(times))])
             losses["alert"] = F.binary_cross_entropy_with_logits(alert.float(), labels)
         if caption_targets is not None:
@@ -250,12 +253,18 @@ def train(cfg: V3Config, records_path: str, video_root: str, output: str, clip_s
                     (loss / tc.grad_accum).backward()
                 for k, v in parts.items():
                     logs[k] = logs.get(k, 0.0) + v / tc.grad_accum
-            params = [p for g in optimizer.param_groups for p in g["params"] if p.grad is not None]
-            norm = torch.nn.utils.clip_grad_norm_(params, 1.0) if params else torch.tensor(0.0)
+            # Clip each group separately: one global norm lets a spike in the new modules shrink LoRA updates.
+            norms = {}
+            for name, group in zip(("modules", "lora"), optimizer.param_groups):
+                params = [p for p in group["params"] if p.grad is not None]
+                norms[name] = float(torch.nn.utils.clip_grad_norm_(params, 1.0)) if params else 0.0
+            if not all(math.isfinite(v) for v in norms.values()):
+                raise FloatingPointError(f"nonfinite gradient norm: {norms}")
             optimizer.step()
             if rank == 0:
                 line = {"step": step + 1, **{k: round(v, 5) for k, v in logs.items()}, **stats,
-                        "grad_norm": float(norm), "gate_abs_mean": float(modules.cst.gate.abs().mean()),
+                        "grad_norm_modules": norms["modules"], "grad_norm_lora": norms["lora"],
+                        "gate_abs_mean": float(modules.cst.gate.abs().mean()),
                         "lr": optimizer.param_groups[0]["lr"], "elapsed": round(clock.perf_counter() - started, 1),
                         "peak_gb": torch.cuda.max_memory_allocated(device) / 1e9}  # fmt: skip
                 with (output / "metrics.jsonl").open("a") as handle:
@@ -268,3 +277,33 @@ def train(cfg: V3Config, records_path: str, video_root: str, output: str, clip_s
     finally:
         if world > 1 and dist.is_initialized():
             dist.destroy_process_group()
+
+
+def gradient_check(cfg: V3Config, steps: int = 6, threshold: float = 1e4, device: str = "cuda") -> dict:
+    """Regression check (PR #3 review): unclipped gradient norms on a static clip must stay moderate.
+
+    Static frames make after - before exactly zero; before the anchored-delta fix this gave ~1e12.
+    """
+    bb = Backbone(cfg.backbone, cfg.stream, device)
+    bb.add_lora(cfg.train.lora_rank, cfg.train.lora_alpha)
+    bb.enable_checkpointing()
+    modules = TraceV3Modules(cfg, bb.hidden).to(device).train()
+    wrapper = StudentLoss(bb, modules, cfg)
+    frames = torch.full((2, 448, 448, 3), 128, dtype=torch.uint8).numpy()
+    clips = [frames] * steps
+    times = [k + cfg.stream.frame_gap / 2 for k in range(steps)]
+    record = {"question": "What is shown?", "options": ["a gray image", "a cat", "a car", "a tree"], "answer": 0}
+    teacher_logp, _ = teacher_targets(bb, clips, times, record)
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        loss, parts, stats = wrapper(clips, times, record, teacher_logp, None)
+    loss.backward()
+    groups = {"modules": list(modules.parameters()), "lora": [p for p in bb.model.parameters() if p.requires_grad]}
+    norms = {}
+    for name, params in groups.items():
+        grads = [p.grad.float().norm() for p in params if p.grad is not None]
+        norms[name] = float(torch.stack(grads).norm()) if grads else 0.0
+    top = sorted(((float(p.grad.float().norm()), n) for n, p in modules.named_parameters() if p.grad is not None),
+                 reverse=True)[:5]  # fmt: skip
+    total = math.sqrt(sum(v * v for v in norms.values()))
+    return {"losses": parts, "stats": stats, "grad_norms": norms, "total": total, "top_module_params": top,
+            "threshold": threshold, "pass": math.isfinite(total) and total < threshold}  # fmt: skip

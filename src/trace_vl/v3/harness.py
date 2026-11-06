@@ -25,15 +25,44 @@ def _modules(cfg: V3Config, backbone: Backbone, checkpoint: str | None, device):
     return modules.to(device).eval()
 
 
-def run_fingerprint(cfg: V3Config, records_path: str, mode: str, checkpoint: str | None) -> dict:
+def _sha256(path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _dir_identity(path: str | None) -> dict | None:
+    if not path:
+        return None
+    root = Path(path)
+    files = sorted(f for f in root.rglob("*") if f.is_file()) if root.is_dir() else [root]
+    return {str(f.relative_to(root) if root.is_dir() else f.name): _sha256(f) for f in files}
+
+
+def _video_identity(records: list[dict], video_root: str) -> str:
+    """Cheap identity of every referenced video: relative path, size and modification time."""
+    entries = []
+    for r in records:
+        for clip in r.get("clips") or [{"video": r["video"]}]:
+            f = Path(video_root) / clip["video"]
+            stat = f.stat() if f.exists() else None
+            entries.append((clip["video"], stat.st_size if stat else None, int(stat.st_mtime) if stat else None))
+    return hashlib.sha256(json.dumps(sorted(set(entries))).encode()).hexdigest()
+
+
+def run_fingerprint(cfg: V3Config, records_path: str, mode: str, checkpoint: str | None = None,
+                    adapter: str | None = None, video_root: str | None = None, records: list | None = None) -> dict:  # fmt: skip
+    """Everything that changes a prediction, hashed before the id is derived (PR #3 review)."""
     identity = {
         "config": cfg.to_dict(),
-        "records_sha256": hashlib.sha256(Path(records_path).read_bytes()).hexdigest(),
+        "records_sha256": _sha256(records_path),
         "mode": mode,
-        "checkpoint": None,
+        "checkpoint": _sha256(checkpoint) if checkpoint else None,
+        "adapter": _dir_identity(adapter),
+        "videos": _video_identity(records, video_root) if records is not None and video_root else None,
     }
-    if checkpoint:
-        identity["checkpoint"] = hashlib.sha256(Path(checkpoint).read_bytes()).hexdigest()
     identity["id"] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:16]
     return identity
 
@@ -52,14 +81,26 @@ def evaluate(cfg: V3Config, records_path: str, video_root: str, output: str, mod
         keys = keys[:limit]
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
-    fingerprint = run_fingerprint(cfg, records_path, mode, checkpoint)
-    fingerprint["adapter"] = str(Path(adapter).resolve()) if adapter else None
+    fingerprint = run_fingerprint(cfg, records_path, mode, checkpoint, adapter, video_root, records)
     run_file = output / "run.json"
-    if run_file.exists() and json.loads(run_file.read_text())["id"] != fingerprint["id"]:
-        raise ValueError(f"{output} holds a different run; use a new --output")
-    run_file.write_text(json.dumps(fingerprint, indent=2) + "\n")
+    # Validate before touching anything: never relabel an existing run's predictions.
+    if run_file.exists():
+        previous = json.loads(run_file.read_text())
+        if previous.get("id") != fingerprint["id"]:
+            changed = sorted(k for k in fingerprint if k != "id" and previous.get(k) != fingerprint[k])
+            raise ValueError(f"{output} holds a different run (differs in {changed}); use a new --output")
     target = output / f"predictions.{shard[0]}of{shard[1]}.jsonl"
-    done = {json.loads(x)["id"] for x in target.read_text().splitlines() if x.strip()} if target.exists() else set()
+    done = set()
+    if target.exists():
+        for line in target.read_text().splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("run") != fingerprint["id"]:
+                raise ValueError(f"{target} has predictions from run {row.get('run')}; use a new --output")
+            done.add(row["id"])
+    if not run_file.exists():
+        run_file.write_text(json.dumps(fingerprint, indent=2) + "\n")
 
     backbone = Backbone(cfg.backbone, cfg.stream, device)
     if adapter:
@@ -79,7 +120,7 @@ def evaluate(cfg: V3Config, records_path: str, video_root: str, output: str, mod
                 errors[key] = str(error)
                 continue
             try:
-                _run_video(cfg, backbone, modules, mode, reader, pending, handle)
+                _run_video(cfg, backbone, modules, mode, reader, pending, handle, fingerprint["id"])
             except (ValueError, RuntimeError) as error:
                 errors[key] = str(error)
             finally:
@@ -88,7 +129,7 @@ def evaluate(cfg: V3Config, records_path: str, video_root: str, output: str, mod
     return {"run": fingerprint["id"], "videos": len(keys), "errors": len(errors), "predictions": str(target)}
 
 
-def _run_video(cfg, backbone, modules, mode, reader, records, handle):
+def _run_video(cfg, backbone, modules, mode, reader, records, handle, run_id):
     gap, step_s = cfg.stream.frame_gap, cfg.stream.step_seconds
     offline = all(r["query_time"] is None for r in records)
     last_query = reader.duration if offline else max(r["query_time"] for r in records)
@@ -99,16 +140,16 @@ def _run_video(cfg, backbone, modules, mode, reader, records, handle):
     for t in times:
         # Answer every question whose time has come before consuming frames beyond it (causality).
         while queue and queue[0]["query_time"] is not None and queue[0]["query_time"] < t + gap / 2:
-            _answer(session, reader, queue.pop(0), handle, consumed, steps_tokens, i_steps, started, gap)
+            _answer(session, reader, queue.pop(0), handle, consumed, steps_tokens, i_steps, started, gap, run_id)
         result = session.step(reader.step(t, gap), t)
         consumed += 1
         steps_tokens += result.tokens
         i_steps += int(result.is_i_step)
     for record in queue:
-        _answer(session, reader, record, handle, consumed, steps_tokens, i_steps, started, gap)
+        _answer(session, reader, record, handle, consumed, steps_tokens, i_steps, started, gap, run_id)
 
 
-def _answer(session, reader, record, handle, consumed, steps_tokens, i_steps, started, gap):
+def _answer(session, reader, record, handle, consumed, steps_tokens, i_steps, started, gap, run_id):
     marker = None
     t_q = record["query_time"] if record["query_time"] is not None else reader.duration
     if record.get("region"):
@@ -118,7 +159,7 @@ def _answer(session, reader, record, handle, consumed, steps_tokens, i_steps, st
     choice, scores = session.ask(record["question"], record["options"], marker)
     stats = session.stats()
     handle.write(json.dumps({
-        "id": record["id"], "source": record["source"], "task": record["task"], "answer": record["answer"],
+        "run": run_id, "id": record["id"], "source": record["source"], "task": record["task"], "answer": record["answer"],
         "prediction": choice, "scores": [round(s, 4) for s in scores], "query_time": record["query_time"],
         "steps": consumed, "lm_tokens_per_step": steps_tokens / max(1, consumed), "i_step_fraction": i_steps / max(1, consumed),
         "kv_tokens": stats["kv_tokens"], "kv_mb": stats["kv_bytes"] / 2**20, "state_mb": stats["state_bytes"] / 2**20,
@@ -131,6 +172,9 @@ def _answer(session, reader, record, handle, consumed, steps_tokens, i_steps, st
 def score(prediction_dir: str, output: str | None = None, samples: int = 2000, seed: int = 7) -> dict:
     rows = [json.loads(x) for p in sorted(Path(prediction_dir).glob("predictions.*.jsonl"))
             for x in p.read_text().splitlines() if x.strip()]  # fmt: skip
+    runs = {r.get("run") for r in rows}
+    if len(runs) > 1:
+        raise ValueError(f"{prediction_dir} mixes predictions from runs {sorted(map(str, runs))}")
     by_task = defaultdict(list)
     for r in rows:
         by_task[(r["source"], r["task"])].append(r["prediction"] == r["answer"])
@@ -146,6 +190,7 @@ def score(prediction_dir: str, output: str | None = None, samples: int = 2000, s
         boots.append(sum(x["prediction"] == x["answer"] for x in pick) / len(pick))
     boots.sort()
     report = {
+        "run": next(iter(runs)) if rows else None,
         "n": len(rows),
         "accuracy": sum(r["prediction"] == r["answer"] for r in rows) / max(1, len(rows)),
         "ci95": [boots[int(0.025 * len(boots))], boots[int(0.975 * len(boots)) - 1]] if boots else None,
@@ -194,9 +239,16 @@ def profile(cfg: V3Config, steps: int = 600, mode: str = "native", checkpoint: s
 
 
 @torch.no_grad()
-def check_equality(cfg: V3Config, video: str | None = None, steps: int = 4, device="cuda") -> dict:
+def check_equality(cfg: V3Config, video: str | None = None, steps: int = 4, device="cuda",
+                   dtype: str = "float32") -> dict:  # fmt: skip
     """M1 gate (a): our incremental streaming path reproduces the reference HF forward, and the zero-gated
-    v3 path (all I-steps) reproduces the native path."""
+    v3 path (all I-steps) reproduces the native path.
+
+    The gate runs in float32: bf16 incremental decoding vs one-shot prefill differs by ~0.1 in letter
+    log-probs from rounding alone (PR #3 review: bf16 0.125, fp32 5.7e-5 on the same case), so a bf16
+    run is informational only.
+    """
+    cfg = V3Config.from_dict({**cfg.to_dict(), "backbone": {**cfg.to_dict()["backbone"], "dtype": dtype}})
     backbone = Backbone(cfg.backbone, cfg.stream, device)
     rng = np.random.default_rng(0)
     if video:
@@ -214,7 +266,7 @@ def check_equality(cfg: V3Config, video: str | None = None, steps: int = 4, devi
     _, native_scores = native.ask(question, options)
 
     cfg_eq = V3Config.from_dict({**cfg.to_dict(), "transition": {**cfg.to_dict()["transition"], "i_step_every": 1}})
-    modules = TraceV3Modules(cfg_eq, backbone.hidden).to(device).eval()
+    modules = TraceV3Modules(cfg_eq, backbone.hidden).to(device, getattr(torch, dtype)).eval()
     v3 = StreamSession(backbone, cfg_eq, modules, "v3")
     for frames, t in zip(clips, times):
         v3.step(frames, t)
@@ -246,9 +298,11 @@ def check_equality(cfg: V3Config, video: str | None = None, steps: int = 4, devi
     ref = out.logits[0, -1].float().log_softmax(-1)[native.letter_ids[: len(options)]].tolist()
     diff_ref = max(abs(a - b) for a, b in zip(ref, native_scores))
     diff_v3 = max(abs(a - b) for a, b in zip(v3_scores, native_scores))
+    gate = dtype == "float32"
     return {
-        "reference_scores": ref, "native_scores": native_scores, "v3_zero_gate_scores": v3_scores,
+        "dtype": dtype, "reference_scores": ref, "native_scores": native_scores, "v3_zero_gate_scores": v3_scores,
         "max_abs_diff_native_vs_reference": diff_ref, "max_abs_diff_v3_vs_native": diff_v3,
-        "pass": diff_ref < 5e-2 and diff_v3 < 1e-3, "modules": modules.parameter_report(),
-        "note": "bf16 incremental vs one-shot prefill can differ slightly; v3 vs native must be ~exact.",
+        "thresholds": {"native_vs_reference": 1e-3 if gate else 0.25, "v3_vs_native": 1e-5 if gate else 1e-3},
+        "pass": diff_ref < (1e-3 if gate else 0.25) and diff_v3 < (1e-5 if gate else 1e-3),
+        "is_gate": gate, "modules": modules.parameter_report(),
     }  # fmt: skip

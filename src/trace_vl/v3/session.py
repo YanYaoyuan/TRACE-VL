@@ -11,7 +11,6 @@ the CST adapter and the transition encoder (I-steps keep all tokens; P-steps sen
 from __future__ import annotations
 
 import copy
-import math
 import time as clock
 from dataclasses import dataclass, field
 
@@ -23,7 +22,7 @@ from .backbone import Backbone
 from .config import V3Config
 from .kv import KVMemory
 from .model import TraceV3Modules
-from .modules import CSTCache, RetentionScorer, TECache
+from .modules import CSTCache, RetentionScorer, TECache, TransitionTracker
 from .positions import PositionCounter
 
 LETTERS = "ABCDEFGHIJ"
@@ -56,7 +55,7 @@ class StreamSession:
         self.memory = KVMemory(cfg.memory)
         self.cst_cache, self.te_cache = CSTCache(), TECache()
         self.step_index = 0
-        self.active: dict[int, float] = {}  # transition slot id -> onset time (for duration clocks)
+        self.tracker = TransitionTracker()  # persistent transition tracks for the alert clocks (bounded)
         self.letter_ids = [backbone.ids(letter)[0] for letter in LETTERS]
         self.rules = rules or []
         self.rule_hidden = None
@@ -107,6 +106,7 @@ class StreamSession:
             kinds = info.kinds
             groups = [("step", self.step_index) if g < 0 else ("slot", g) for g in info.groups]
             self._update_cst_memory(info, t)
+            self.tracker.update(t, info.aux.get("active_centroids", []), info.aux.get("slot_memory"))
         else:
             tokens = x
             rows = torch.arange(h, device=x.device).repeat_interleave(w)
@@ -160,15 +160,10 @@ class StreamSession:
         times = torch.full((slot_memory.shape[0],), t, device=slot_memory.device, dtype=slot_memory.dtype)
         cache.memory = slot_memory if cache.memory is None else torch.cat([cache.memory, slot_memory])[-cap:]
         cache.memory_times = times if cache.memory_times is None else torch.cat([cache.memory_times, times])[-cap:]
-        for g in sorted({g for g in info.groups if g >= 0}):
-            self.active[g] = t
 
     def _clock(self, info, t: float) -> torch.Tensor:
-        ages = [t - onset for onset in self.active.values()]
         surprise = float(info.surprise.mean()) if info is not None else 0.0
-        if not ages:
-            return torch.tensor([0.0, 0.0, 0.0, surprise])
-        return torch.tensor([math.log1p(max(ages)), math.log1p(sum(ages) / len(ages)), math.log1p(len(ages)), surprise])
+        return self.tracker.clock(t, surprise)
 
     def _score_groups(self, info, t: float, drift: float):
         policy = self.cfg.memory.policy
@@ -245,6 +240,7 @@ class StreamSession:
             "evicted_tokens": self.memory.evicted_tokens,
             "kv_kinds": self.memory.counts(),
             "position": self.pos.state(),
+            "transition_tracks": len(self.tracker.tracks),
         }
 
 

@@ -24,6 +24,13 @@ def grid_coords(h: int, w: int, device=None) -> Tensor:
     return torch.stack([xx.flatten(), yy.flatten()], dim=-1)
 
 
+def match_norm(tokens: Tensor, ref_norm: Tensor, floor: float = 1e-3) -> Tensor:
+    """Rescale tokens to the reference norm (scale detached), so synthesized tokens stay in the LM's range."""
+    norms = tokens.norm(dim=-1, keepdim=True)
+    scale = (ref_norm / norms.clamp_min(floor * ref_norm)).detach()
+    return tokens * scale
+
+
 # ============================================================================ CST adapter
 @dataclass
 class CSTCache:
@@ -192,8 +199,10 @@ class TransitionEncoder(nn.Module):
         self.slots = SlotAttention(d, cfg.slots, cfg.slot_iters)
         self.gist_queries = nn.Parameter(torch.randn(cfg.gist, d) * 0.02)
         self.gist_key = nn.Linear(d, d)
-        # Transition tokens are convex combinations of real LM-space tokens (in-distribution for the LM);
-        # delta adds a learned correction that starts at zero, and type embeddings start at zero.
+        # Transition tokens are built from real LM-space tokens and norm-matched to the step's frame tokens.
+        # The delta token is anchored on the after token (delta = after + correction(after - before)):
+        # a raw difference is exactly zero on static content, and zero-norm inputs make the LM's RMSNorm
+        # gradients explode (~1/sqrt(eps); measured 1e12 on a static clip, PR #3 review).
         self.delta = nn.Sequential(nn.Linear(model_dim, d), nn.GELU(), nn.Linear(d, model_dim))
         nn.init.zeros_(self.delta[-1].weight)
         nn.init.zeros_(self.delta[-1].bias)
@@ -240,7 +249,8 @@ class TransitionEncoder(nn.Module):
 
         # Gist: G learned queries pool the step (convex combinations of real tokens).
         gist_attn = (self.gist_queries @ self.gist_key(z + pos).t() / math.sqrt(z.shape[-1])).softmax(-1)  # [G, N]
-        gist = gist_attn @ x
+        ref_norm = x.detach().norm(dim=-1).mean()
+        gist = match_norm(gist_attn @ x, ref_norm)
         g_rows = (gist_attn @ rows.to(gist.dtype)).round()
         g_cols = (gist_attn @ cols.to(gist.dtype)).round()
         tokens, kinds, groups = [gist], ["gist"] * gist.shape[0], [-1] * gist.shape[0]
@@ -250,15 +260,16 @@ class TransitionEncoder(nn.Module):
         order = masses.argsort(descending=True)
         active = [int(k) for k in order[: cfg.max_active] if float(masses[k]) >= cfg.mass_threshold]
         before_src = cache.history[0] if len(cache.history) > 1 else x
-        trans_tokens = []
+        trans_tokens, centroids = [], []
         for k in active:
             a = share[:, k]
             after = a @ x
             before = a @ before_src
-            delta = (after - before) + self.delta(after - before)
-            trio = torch.stack([before, after, delta]) + self.type_embed
+            delta = after + self.delta(after - before)
+            trio = match_norm(torch.stack([before, after, delta]) + self.type_embed, ref_norm)
             trans_tokens.append(trio)
             r, c = (a @ rows.to(a.dtype)).round(), (a @ cols.to(a.dtype)).round()
+            centroids.append((float(r), float(c)))
             t_rows.append(r.repeat(3))
             t_cols.append(c.repeat(3))
             kinds += ["before", "after", "delta"]
@@ -268,6 +279,7 @@ class TransitionEncoder(nn.Module):
             tokens.append(torch.cat(trans_tokens))
         aux["active_slots"] = len(active)
         aux["active_masses"] = [float(masses[k]) for k in active]
+        aux["active_centroids"] = centroids
         aux["slot_memory"] = (
             self.to_memory(torch.stack([t[1] for t in trans_tokens])) if trans_tokens else None
         )
@@ -282,6 +294,43 @@ class TransitionEncoder(nn.Module):
             masses,
             aux,
         )
+
+
+# ============================================================================ transition tracks
+class TransitionTracker:
+    """Persistent tracks for the alert clocks: a transition emitted again at the same place with a similar
+    after-token continues its track (onset kept); tracks not seen for `resolve_seconds` are resolved and
+    dropped; at most `capacity` tracks are kept (least recently seen dropped first)."""
+
+    def __init__(self, resolve_seconds: float = 12.0, capacity: int = 64, max_cells: float = 2.0, min_cos: float = 0.8):
+        self.resolve_seconds, self.capacity, self.max_cells, self.min_cos = resolve_seconds, capacity, max_cells, min_cos
+        self.tracks: list[dict] = []  # {"onset", "last", "row", "col", "vec"}
+
+    def update(self, t: float, centroids: list[tuple[float, float]], vectors: Tensor | None) -> None:
+        if vectors is not None:
+            vectors = F.normalize(vectors.detach().float(), dim=-1)
+            for (row, col), vec in zip(centroids, vectors):
+                best, best_cos = None, self.min_cos
+                for track in self.tracks:
+                    if math.hypot(track["row"] - row, track["col"] - col) > self.max_cells:
+                        continue
+                    cos = float(track["vec"] @ vec)
+                    if cos >= best_cos:
+                        best, best_cos = track, cos
+                if best is None:
+                    self.tracks.append({"onset": t, "last": t, "row": row, "col": col, "vec": vec})
+                else:
+                    best.update(last=t, row=row, col=col, vec=vec)
+        self.tracks = [k for k in self.tracks if t - k["last"] <= self.resolve_seconds]
+        if len(self.tracks) > self.capacity:
+            self.tracks = sorted(self.tracks, key=lambda k: k["last"])[-self.capacity :]
+
+    def clock(self, t: float, surprise_mean: float) -> Tensor:
+        """[log1p max age, log1p mean age, log1p count, mean surprise] for the alert head."""
+        ages = [t - k["onset"] for k in self.tracks]
+        if not ages:
+            return torch.tensor([0.0, 0.0, 0.0, surprise_mean])
+        return torch.tensor([math.log1p(max(ages)), math.log1p(sum(ages) / len(ages)), math.log1p(len(ages)), surprise_mean])
 
 
 # ============================================================================ heads

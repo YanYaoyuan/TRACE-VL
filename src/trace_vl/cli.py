@@ -356,6 +356,12 @@ def _v3_parser(commands):
     c.add_argument("--video")
     c.add_argument("--steps", type=int, default=4)
     c.add_argument("--device", default="cuda")
+    c.add_argument("--dtype", choices=["float32", "bfloat16"], default="float32", help="gate is float32")
+    c = sub.add_parser("gradcheck", help="unclipped gradient norms on a static clip (anchored-delta regression)")
+    c.add_argument("--config", default="configs/v3/stage1.yaml")
+    c.add_argument("--steps", type=int, default=6)
+    c.add_argument("--threshold", type=float, default=1e4)
+    c.add_argument("--device", default="cuda")
     c = sub.add_parser("profile", help="latency / KV memory on synthetic frames")
     c.add_argument("--config", default="configs/v3/native_full.yaml")
     c.add_argument("--mode", choices=["native", "v3"], default="native")
@@ -414,7 +420,11 @@ def _v3(args):
     if args.action == "check":
         from .v3.harness import check_equality
 
-        return show(check_equality(cfg, args.video, args.steps, args.device))
+        return show(check_equality(cfg, args.video, args.steps, args.device, args.dtype))
+    if args.action == "gradcheck":
+        from .v3.train import gradient_check
+
+        return show(gradient_check(cfg, args.steps, args.threshold, args.device))
     if args.action == "profile":
         from .v3.harness import profile
 

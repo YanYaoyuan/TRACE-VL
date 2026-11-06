@@ -80,17 +80,68 @@ def test_transition_encoder_i_and_p_steps():
     assert kinds[1:3] == [False, False] and kinds[3] is True
 
 
-def test_transition_tokens_are_convex_combinations_at_init():
+def test_synthesized_tokens_are_norm_matched_and_nonzero_on_static_input():
+    """Regression (PR #3 review): static content made delta = after - before exactly zero -> 1e12 grads."""
     cfg = small_config(i_step_every=100)
     modules = TraceV3Modules(cfg, model_dim=16).eval()
     cst, te = CSTCache(), TECache()
-    x0 = torch.rand(6, 16)
-    for k in range(3):
-        x = x0 + 0.5 * k
+    x = torch.rand(6, 16) + 0.5
+    for k in range(4):  # identical frames every step
         adapted, z = modules.cst(x, (2, 3), float(k), cst)
         info = modules.transition(adapted, z, (2, 3), te)
-    gist = info.tokens[: cfg.transition.gist]
-    assert (gist >= adapted.min(0).values - 1e-5).all() and (gist <= adapted.max(0).values + 1e-5).all()
+    assert not info.is_i_step and info.aux["active_slots"] > 0
+    ref = adapted.norm(dim=-1).mean()
+    norms = info.tokens.norm(dim=-1)
+    assert torch.allclose(norms, torch.full_like(norms, float(ref)), rtol=1e-4)
+    deltas = [tok for tok, kind in zip(info.tokens, info.kinds) if kind == "delta"]
+    assert deltas and all(float(d.norm()) > 0.5 * float(ref) for d in deltas)
+
+
+def test_transition_tracker_is_bounded_and_keeps_onsets():
+    from trace_vl.v3.modules import TransitionTracker
+
+    tracker = TransitionTracker(resolve_seconds=5.0, capacity=3)
+    vec = torch.tensor([[1.0, 0.0, 0.0]])
+    for t in range(10):  # the same transition re-emitted every second
+        tracker.update(float(t), [(2.0, 2.0)], vec)
+    assert len(tracker.tracks) == 1 and tracker.tracks[0]["onset"] == 0.0
+    assert float(tracker.clock(9.0, 0.0)[0]) == pytest.approx(np.log1p(9.0))
+    for t in range(10, 20):  # many different transitions
+        tracker.update(float(t), [(float(t % 7), 0.0)], torch.randn(1, 3))
+    assert len(tracker.tracks) <= 3
+    tracker.update(100.0, [], None)  # nothing seen for > resolve_seconds
+    assert tracker.tracks == []
+
+
+def test_eval_fingerprint_covers_adapter_content_and_videos(tmp_path):
+    from trace_vl.v3.harness import run_fingerprint
+
+    records = tmp_path / "r.jsonl"
+    records.write_text(json.dumps({"id": "a", "video": "v.mp4"}) + "\n")
+    (tmp_path / "v.mp4").write_bytes(b"0" * 10)
+    adapter = tmp_path / "lora"
+    adapter.mkdir()
+    (adapter / "adapter_model.safetensors").write_bytes(b"one")
+    rows = [{"id": "a", "video": "v.mp4"}]
+    a = run_fingerprint(V3Config(), records, "v3", None, str(adapter), str(tmp_path), rows)
+    b = run_fingerprint(V3Config(), records, "v3", None, None, str(tmp_path), rows)
+    (adapter / "adapter_model.safetensors").write_bytes(b"two")
+    c = run_fingerprint(V3Config(), records, "v3", None, str(adapter), str(tmp_path), rows)
+    (tmp_path / "v.mp4").write_bytes(b"0" * 11)
+    d = run_fingerprint(V3Config(), records, "v3", None, str(adapter), str(tmp_path), rows)
+    assert len({a["id"], b["id"], c["id"], d["id"]}) == 4
+
+
+def test_score_rejects_mixed_runs(tmp_path):
+    from trace_vl.v3.harness import score
+
+    base = {"source": "s", "task": "t", "answer": 0, "prediction": 0, "lm_tokens_per_step": 1, "kv_mb": 1,
+            "answer_seconds": 0.1, "video_key": "v"}  # fmt: skip
+    (tmp_path / "predictions.0of1.jsonl").write_text(
+        json.dumps({**base, "id": "a", "run": "r1"}) + "\n" + json.dumps({**base, "id": "b", "run": "r2"}) + "\n"
+    )
+    with pytest.raises(ValueError, match="mixes"):
+        score(str(tmp_path))
 
 
 def test_full_v3_parameter_budget_is_small():
