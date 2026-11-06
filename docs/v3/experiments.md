@@ -7,7 +7,7 @@ tracking issue with the template at the end. Nothing below is a result yet.
 
 | Milestone | Work | Gate (must hold to continue) |
 |---|---|---|
-| **M0** harness | load Qwen3.5-2B; streaming feature extraction; eval harness for Video-MME (short + long subsets), OVO-Bench, StreamingBench real-time, MEVA long-gap; measure tokens/s, KV MB, latency per step on 5090 and A100 | zero-shot Video-MME within ±2 pts of the model card (69.0 thinking, or the non-thinking number we measure, reported both ways) |
+| **M0** harness | load Qwen3.5-2B; streaming feature extraction; eval harness for Video-MME, OVO-Bench, StreamingBench, MEVA long-gap; measure tokens/s, KV MB, latency per step on 5090 and A100 | **harness fidelity**, not the model card: (a) `v3 check` (processor-originated) passes: exact token ids + fp32 letter log-probs within 1e-3; (b) on the same Video-MME subset, native streaming fed the processor's own patches agrees with the public full forward on ≥ 97% of predictions and accuracy within 1 question per 90. The model card's 69.0 uses thinking mode on the full benchmark and is not comparable to non-thinking letter-likelihood scoring on a subset |
 | **M1** plumbing | CST + TE + TKM modules, zero-init; streaming cache; parameter report | (a) gates = 0 and all I-steps ⇒ logits match the base model (max abs diff < 1e-2 bf16); (b) one training step runs on 1 × 5090 at 3-minute clips |
 | **M2** Stage 1 | distillation on short clips | at ~1/5 of the tokens: ≥ 95% of the full-token teacher's accuracy on MVBench + Video-MME-short, and ≥ +2 pts over B4 (same tokens, pooled) |
 | **M3** Stage 2 | streaming SFT on long streams | at equal KV budget: OVO-Bench backward and MEVA long-gap ≥ B1 (StreamingVLM recipe) + 3 pts; no loss > 1 pt on OVO real-time |
