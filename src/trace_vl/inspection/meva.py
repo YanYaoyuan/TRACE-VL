@@ -439,7 +439,8 @@ def build(annotations, output, seed=7, splits=(0.7, 0.1, 0.2), balance_answers=T
     n_train, n_val = round(len(cameras) * splits[0]), round(len(cameras) * splits[1])
     split_of = {c: "train" if i < n_train else "val" if i < n_train + n_val else "test" for i, c in enumerate(cameras)}
     for q in questions:
-        q["split"] = split_of[streams[q["stream"]]["camera"]]
+        q["camera"] = streams[q["stream"]]["camera"]
+        q["split"] = split_of[q["camera"]]
     used = {q["stream"] for q in questions}
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)

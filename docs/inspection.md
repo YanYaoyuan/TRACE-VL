@@ -81,14 +81,17 @@ without them (`score --exclude-censored`).
 questions per type, with clip names and in-clip times) by watching the clips, and report the
 per-type label accuracy next to every result.
 
+Confidence intervals resample whole cameras (all their streams together), the independent unit.
+
 Alerts: the rule "object left for at least N minutes" is replayed causally from the transition
 logs and matched to linked put-downs. Precision is a lower bound, because the detector also fires
-on unannotated changes. `--verify` adds VLM before/after verification.
+on unannotated changes. `--verify` adds VLM before/after verification. The replay is
+chronological: an alert fires at max(onset + N, confirmation) unless the change's end was already
+known by then, and later log entries never remove an alert that was already emitted.
 
 ## Running on 2x RTX 5090
 
 ```bash
-uv lock                                  # new `vlm` extra (transformers, peft, torchvision cu128)
 uv sync --extra dev --extra vlm
 uv run --locked pytest -q tests/test_inspection.py          # CPU, seconds
 
@@ -106,7 +109,9 @@ uv run --locked trace-vl inspection prepare --bench data/meva/bench --video-root
   --output data/meva/prepared --split test --workers 8
 cat data/meva/prepared/prepare_report.json   # check "errors" and "missed"
 
-# 4. Zero-shot evaluation, one shard per GPU (resumable), then caption log and scoring
+# 4. Zero-shot evaluation, one shard per GPU, then caption log and scoring.
+#    Resumable only for the same run: output/run.json fingerprints model, adapter weights, packing,
+#    questions and prepared data; anything else is refused, so use a new --output per experiment.
 CUDA_VISIBLE_DEVICES=0 uv run --locked trace-vl inspection evaluate --shard 0/2 \
   --methods none current uniform recent transition transition_after transition_meta &
 CUDA_VISIBLE_DEVICES=1 uv run --locked trace-vl inspection evaluate --shard 1/2 \

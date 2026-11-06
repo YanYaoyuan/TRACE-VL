@@ -50,10 +50,10 @@ TRACE-VL 是一个**流式视频理解模型**：视频按时间顺序到达，�
 
 ## 运行（本机 2×RTX 5090）
 
-Python 3.10，uv 锁定依赖，PyTorch 2.8.0 / CUDA 12.8。新增的 `vlm` 依赖组首次使用前需执行 `uv lock` 并提交更新后的 `uv.lock`（CI 使用 `--locked`）。
+Python 3.10，uv 锁定依赖，PyTorch 2.8.0 / CUDA 12.8；`vlm` 依赖组包含 transformers、peft 与 torchvision（cu128）。`evaluate` 在输出目录写入 `run.json` 指纹（模型、adapter 权重哈希、打包设置、问题与快照报告哈希），模型或数据不同时拒绝续写，需换新的 `--output`；`score` 的置信区间按摄像头整体重采样。
 
 ```bash
-uv lock && uv sync --extra dev --extra vlm
+uv sync --extra dev --extra vlm
 uv run --locked pytest -q tests/test_inspection.py
 
 uv run --locked trace-vl inspection meva-fetch                    # 只下载标注

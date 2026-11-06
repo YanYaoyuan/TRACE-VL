@@ -16,23 +16,44 @@ from .evidence import fit
 from .meva import _same_place
 
 
-def predicted_alerts(log, min_duration, zone=None):
-    """One alert per region transition that stays changed for `min_duration`, raised causally."""
-    state = {}
-    for record in log:
-        if record["kind"] != "region":
-            continue
-        item = state.setdefault(record["id"], dict(record))
-        item.update({k: record[k] for k in ("t_end", "t_end_known", "status", "crops")})
-    alerts = []
-    for item in state.values():
-        if zone is not None and not _same_place(item["box"], zone):
-            continue
-        due = item["t_start"] + min_duration
-        ended = item["t_end"] if item["t_end"] is not None else float("inf")
-        if ended < due:
-            continue
-        alerts.append({**item, "alert_time": max(due, item["t_known"])})
+def _known(record):
+    """When the information in a log record became available to an online system."""
+    if record.get("event") in {"resolve", "absorb"}:
+        return record["t_end_known"] if record.get("t_end_known") is not None else record["time"]
+    return record.get("time", record["t_known"])
+
+
+def predicted_alerts(log, min_duration, zone=None, until=None):
+    """Replay the log in time order and emit what an online rule engine would have emitted.
+
+    Each region transition schedules an alert at max(t_start + min_duration, t_known). The alert fires
+    unless an ending (resolve/absorb) became known *before* that time. Endings known later never
+    remove an alert that was already emitted, so appending to the log cannot change past alerts.
+    `until` restricts the replay to information available up to that time.
+    """
+    records = sorted((r for r in log if r["kind"] == "region"), key=_known)
+    pending, alerts = {}, []
+
+    def fire_due(now):
+        due = sorted((v["alert_time"], k) for k, v in pending.items() if v["alert_time"] <= now)
+        for _, key in due:
+            alerts.append(pending.pop(key))
+
+    for record in records:
+        now = _known(record)
+        if until is not None and now > until:
+            break
+        fire_due(now)
+        if record.get("event", "appear") == "appear":
+            if zone is not None and not _same_place(record["box"], zone):
+                continue
+            item = dict(record)
+            item["alert_time"] = max(record["t_start"] + min_duration, record["t_known"])
+            pending[record["id"]] = item
+        elif record["id"] in pending:
+            # The change ended before its alert was due: an online engine cancels the pending alert.
+            pending.pop(record["id"])
+    fire_due(float("inf") if until is None else until)
     return alerts
 
 

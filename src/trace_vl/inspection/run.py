@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -69,6 +70,46 @@ def caption(root, model_cfg, caption_tokens=256, shard=(0, 1), device="cuda"):
     return {"streams": len(streams), "captions": total, "seconds": round(time.perf_counter() - started, 1)}
 
 
+def _sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _adapter_identity(adapter):
+    if not adapter:
+        return None
+    path = Path(adapter)
+    if not path.is_dir():
+        return {"path": str(adapter)}
+    files = sorted(f for f in path.iterdir() if f.is_file() and f.suffix in {".json", ".safetensors", ".bin"})
+    return {"path": str(path.resolve()), "files": {f.name: _sha256(f) for f in files}}
+
+
+def run_fingerprint(questions_path, root, model_cfg, adapter, pack_cfg, split):
+    """Everything that changes a prediction; resuming into a directory requires an exact match."""
+    reports = sorted(Path(root).glob("prepare_report*.json"))
+    identity = {
+        "model": {k: model_cfg.get(k) for k in ("name", "revision", "dtype", "unit", "attn_implementation")},
+        "adapter": _adapter_identity(adapter),
+        "pack": dict(pack_cfg.__dict__),
+        "questions_sha256": _sha256(questions_path),
+        "prepared": {r.name: _sha256(r) for r in reports},
+        "split": split,
+    }
+    identity["id"] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:16]
+    return identity
+
+
+def _camera_lookup(questions_path):
+    streams = Path(questions_path).parent / "streams.json"
+    if not streams.exists():
+        return {}
+    return {name: spec.get("camera", name) for name, spec in json.loads(streams.read_text()).items()}
+
+
 def evaluate(questions_path, root, model_cfg, methods, budgets, output, split="test", pack=None,
              adapter=None, shard=(0, 1), device="cuda", limit=None):  # fmt: skip
     """Score every (question, method, budget); resumable, one JSON line per prediction."""
@@ -81,9 +122,27 @@ def evaluate(questions_path, root, model_cfg, methods, budgets, output, split="t
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     target = output / f"predictions.{shard[0]}of{shard[1]}.jsonl"
-    done = {(p["id"], p["method"], p["budget"]) for p in read_jsonl(target)} if target.exists() else set()
-    vlm = _vlm(model_cfg, device, adapter)
     base = PackConfig.from_dict({**(pack or {}), "unit": model_cfg.get("unit", 32)})
+    fingerprint = run_fingerprint(questions_path, root, model_cfg, adapter, base, split)
+    run_file = output / "run.json"
+    if run_file.exists():
+        previous = json.loads(run_file.read_text())
+        if previous["id"] != fingerprint["id"]:
+            changed = sorted(k for k in fingerprint if k != "id" and previous.get(k) != fingerprint[k])
+            raise ValueError(
+                f"{output} holds predictions from a different run (differs in {changed}); "
+                "use a new --output directory"
+            )
+    else:
+        run_file.write_text(json.dumps(fingerprint, indent=2) + "\n")
+    done = set()
+    if target.exists():
+        for p in read_jsonl(target):
+            if p.get("run") != fingerprint["id"]:
+                raise ValueError(f"{target} contains predictions without this run id; use a new --output")
+            done.add((p["id"], p["method"], p["budget"]))
+    cameras = _camera_lookup(questions_path)
+    vlm = _vlm(model_cfg, device, adapter)
     missing = 0
     with target.open("a") as handle:
         for question in questions:
@@ -100,8 +159,10 @@ def evaluate(questions_path, root, model_cfg, methods, budgets, output, split="t
                     started = time.perf_counter()
                     choice, scores, tokens = vlm.choose(segments, len(question["options"]))
                     record = {
+                        "run": fingerprint["id"],
                         "id": question["id"],
                         "stream": question["stream"],
+                        "camera": question.get("camera") or cameras.get(question["stream"], question["stream"]),
                         "type": question["type"],
                         "gap": question["gap"],
                         "censored": question.get("censored", False),
@@ -116,7 +177,12 @@ def evaluate(questions_path, root, model_cfg, methods, budgets, output, split="t
                     }
                     handle.write(json.dumps(record) + "\n")
                     handle.flush()
-    return {"questions": len(questions), "missing_snapshots": missing, "predictions": str(target)}
+    return {
+        "run": fingerprint["id"],
+        "questions": len(questions),
+        "missing_snapshots": missing,
+        "predictions": str(target),
+    }
 
 
 def _balanced(rows):
@@ -127,10 +193,14 @@ def _balanced(rows):
 
 
 def _bootstrap(rows, metric, samples=2000, seed=7):
-    """95% interval resampling whole cameras/streams, not questions (questions share video)."""
+    """95% interval resampling whole cameras (with all their streams), not questions or streams.
+
+    One camera contributes several streams (other dates, gaps between clips) and many questions that
+    share scene and viewpoint, so the camera is the independent unit.
+    """
     groups = defaultdict(list)
     for r in rows:
-        groups[r["stream"]].append(r)
+        groups[r.get("camera") or r["stream"]].append(r)
     keys, rng, values = sorted(groups), random.Random(seed), []
     if len(keys) < 2:
         return [math.nan, math.nan]
@@ -143,6 +213,9 @@ def _bootstrap(rows, metric, samples=2000, seed=7):
 
 def score(prediction_dir, output=None, exclude_censored=False):
     rows = [r for p in sorted(Path(prediction_dir).glob("predictions.*.jsonl")) for r in read_jsonl(p)]
+    runs = {r.get("run") for r in rows}
+    if len(runs) > 1:
+        raise ValueError(f"predictions in {prediction_dir} come from several runs: {sorted(map(str, runs))}")
     if exclude_censored:
         rows = [r for r in rows if not r["censored"]]
     groups = defaultdict(list)
@@ -181,7 +254,15 @@ def score(prediction_dir, output=None, exclude_censored=False):
                 for b, v in sorted(buckets.items())
             }
         table.append(entry)
-    report = {"rows": len(rows), "exclude_censored": exclude_censored, "results": table}
+    run_file = Path(prediction_dir) / "run.json"
+    report = {
+        "rows": len(rows),
+        "run": json.loads(run_file.read_text()) if run_file.exists() else None,
+        "bootstrap_unit": "camera",
+        "cameras": len({r.get("camera") or r["stream"] for r in rows}),
+        "exclude_censored": exclude_censored,
+        "results": table,
+    }
     if output:
         Path(output).write_text(json.dumps(report, indent=2) + "\n")
     return report

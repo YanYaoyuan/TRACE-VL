@@ -206,3 +206,68 @@ def test_predicted_alerts_are_causal_and_respect_duration():
     resolve_short = {**short, "event": "resolve", "t_end": 560.0, "t_end_known": 562.0, "status": "resolved"}
     alerts = predicted_alerts([appear, short, resolve_short], min_duration=120)
     assert [(a["id"], a["alert_time"]) for a in alerts] == [(1, 220.0)]
+
+
+def test_later_log_entries_cannot_remove_an_emitted_alert():
+    appear = {"event": "appear", "time": 106.0, "id": 1, "kind": "region", "box": [0.1, 0.1, 0.2, 0.2],
+              "t_start": 100.0, "t_known": 106.0, "t_end": None, "t_end_known": None, "status": "active",
+              "crops": {}}  # fmt: skip
+    before = predicted_alerts([appear], min_duration=120)
+    assert [a["alert_time"] for a in before] == [220.0]
+    late = {**appear, "event": "resolve", "time": 223.0, "t_end": 219.0, "t_end_known": 223.0}
+    assert [a["alert_time"] for a in predicted_alerts([appear, late], min_duration=120)] == [220.0]
+    early = {**appear, "event": "resolve", "time": 210.0, "t_end": 205.0, "t_end_known": 210.0}
+    assert predicted_alerts([appear, early], min_duration=120) == []
+    assert predicted_alerts([appear], min_duration=120, until=219.0) == []
+
+
+class _StubVLM:
+    def __init__(self):
+        self.calls = 0
+
+    def choose(self, segments, n_options):
+        self.calls += 1
+        return 0, [-0.1] + [-2.0] * (n_options - 1), 0
+
+
+def _evaluation_inputs(tmp_path):
+    bench, root = tmp_path / "bench", tmp_path / "prepared"
+    bench.mkdir()
+    (root / "snapshots" / "q1").mkdir(parents=True)
+    question = {"id": "q1", "stream": "s1", "camera": "site.G1", "split": "test", "type": "count",
+                "gap": None, "question": "How many?", "options": ["0", "1"], "answer": 0}  # fmt: skip
+    (bench / "questions.jsonl").write_text(json.dumps(question) + "\n")
+    snapshot = {"id": "q1", "stream": "s1", "query_time": 100.0, "frame_time": 100.0, "window": 60,
+                "region": None, "transitions": [], "transitions_known": 0}  # fmt: skip
+    (root / "snapshots" / "q1" / "snapshot.json").write_text(json.dumps(snapshot))
+    return bench / "questions.jsonl", root
+
+
+def test_resuming_evaluation_rejects_a_different_model(tmp_path, monkeypatch):
+    from trace_vl.inspection import run
+
+    questions, root = _evaluation_inputs(tmp_path)
+    stubs = []
+    monkeypatch.setattr(run, "_vlm", lambda *args, **kwargs: stubs.append(_StubVLM()) or stubs[-1])
+    output = tmp_path / "eval"
+    first = run.evaluate(questions, root, {"name": "model-a"}, ["none"], [512], output)
+    assert stubs[0].calls == 1
+    again = run.evaluate(questions, root, {"name": "model-a"}, ["none"], [512], output)
+    assert again["run"] == first["run"] and stubs[1].calls == 0  # same run: resumed, nothing redone
+    with pytest.raises(ValueError, match="different run"):
+        run.evaluate(questions, root, {"name": "model-b"}, ["none"], [512], output)
+    assert len(stubs) == 2  # model B was never even loaded
+    rows = run.read_jsonl(output / "predictions.0of1.jsonl")
+    assert len(rows) == 1 and rows[0]["run"] == first["run"] and rows[0]["camera"] == "site.G1"
+
+
+def test_bootstrap_resamples_cameras_not_streams():
+    from trace_vl.inspection.run import _bootstrap
+
+    rows = [
+        {"camera": f"cam{c}", "stream": f"cam{c}-s{s}", "correct": c}
+        for c in (0, 1)
+        for s in range(10)
+    ]
+    interval = _bootstrap(rows, lambda rs: sum(r["correct"] for r in rs) / len(rs))
+    assert interval == [0.0, 1.0]
