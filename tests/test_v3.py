@@ -284,3 +284,17 @@ def test_cst_checkpointing_matches_plain_forward_and_gradients():
         outs.append((total.detach(), modules.cst.layers[0].qkv.weight.grad.clone(), modules.cst.gate.grad.clone()))
     for a, b in zip(*outs):
         assert torch.allclose(a, b, rtol=1e-5, atol=1e-6)
+
+
+def test_transition_tracker_expires_before_matching_across_gaps():
+    """Regression (PR #3 review): a stale track must not be revived after an observation gap."""
+    from trace_vl.v3.modules import TransitionTracker
+
+    tracker = TransitionTracker(resolve_seconds=12.0)
+    vec = torch.tensor([[1.0, 0.0, 0.0]])
+    tracker.update(0.0, [(2.0, 2.0)], vec)
+    tracker.update(100.0, [(2.0, 2.0)], vec)
+    assert len(tracker.tracks) == 1 and tracker.tracks[0]["onset"] == 100.0
+    assert float(tracker.clock(100.0, 0.0)[0]) == 0.0  # age 0, not 100 s
+    tracker.update(105.0, [(2.0, 2.0)], vec)  # within resolve_seconds: same track continues
+    assert tracker.tracks[0]["onset"] == 100.0

@@ -318,6 +318,9 @@ class TransitionTracker:
         self.tracks: list[dict] = []  # {"onset", "last", "row", "col", "vec"}
 
     def update(self, t: float, centroids: list[tuple[float, float]], vectors: Tensor | None) -> None:
+        # Expire first: after an observation gap (dropped frames, sparse offline sampling) a stale track
+        # must not be revived with its old onset (PR #3 review: age 100 s after a 100 s gap).
+        self.tracks = [k for k in self.tracks if t - k["last"] <= self.resolve_seconds]
         if vectors is not None:
             vectors = F.normalize(vectors.detach().float(), dim=-1)
             for (row, col), vec in zip(centroids, vectors):
