@@ -7,9 +7,10 @@ Post each result as a comment on issue #4 using the template in `experiments.md`
 |---|---|
 | `backbone.py` | Qwen3.5-2B wrapper: per-step vision encoding, incremental LM calls, hybrid-cache eviction, LoRA |
 | `positions.py` | Qwen3.5 MRoPE positions for streaming (matches `get_rope_index`) |
-| `modules.py` | CST adapter, transition encoder, alert head, event (JEPA) head, retention scorer |
+| `modules.py` | CST adapter, transition encoder, transition tracker, retention scorer |
 | `kv.py` | full-attention KV policies: full / window / fifo / drift / tkm |
-| `session.py` | streaming session (native or v3), forked question answering, selective decoding |
+| `session.py` | streaming session (native or v3), forked question answering, per-step alert answers |
+| `alert.py` | Jev-style alert head (noul / choice), latent connections (layer taps, GDN state reads) |
 | `data.py` | timed multiple-choice records, OVO-Bench / Video-MME / MEVA converters, causal step reader |
 | `harness.py` | evaluation, scoring (video/camera bootstrap), profiling, the M1 equality check |
 | `train.py` | Stage 1 distillation (teacher = backbone with LoRA disabled), torchrun DDP |
@@ -74,8 +75,9 @@ CUDA_VISIBLE_DEVICES=0 uv run --locked trace-vl v3 train --config configs/v3/sta
 ```
 
 `data/v3/train.jsonl` uses the same record format with `"split": "train"`. MEVA train questions
-(`convert-meva --split train`) work immediately. Optional fields: `rules` + `alert_spans` train the
-alert head; `captions` train the event head. Check `outputs/v3/m1/metrics.jsonl`: finite losses,
+(`convert-meva --split train`) work immediately. Optional `alerts` field trains the alert head:
+`[{"id": "abnormal", "kind": "noul", "text": "Is anything abnormal happening?", "spans": [[start, end]]},
+{"id": "incident", "kind": "choice", "text": "Which incident?", "options": ["none", "fall"], "label_spans": [[1, s, e]]}]`. Check `outputs/v3/m1/metrics.jsonl`: finite losses,
 `peak_gb` under 30, `gate_abs_mean` moving off 0.
 
 ## M2: Stage 1 (2 × 5090)

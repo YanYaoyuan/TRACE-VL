@@ -3,8 +3,10 @@
 One sample = a clip ending at a question time. The teacher sees all 196 tokens per step with LoRA
 disabled; the student sees the v3 stream (CST + transition tokens) with LoRA enabled. Losses:
   KD (answer distribution) + CE (gold letter) + predictor regression + surprise budget
-  + optional alert BCE (records with `rules` and `alert_spans`)
-  + optional JEPA-style event loss (records with `captions`: [[start, end, text], ...]).
+  + optional alert-head classification (Jev-style noul / choice) where records carry `alerts`:
+    [{"id", "kind": "noul", "text", "spans": [[start, end], ...]},
+     {"id", "kind": "choice", "text", "options": [...], "label_spans": [[label, start, end], ...], "default": 0}]
+    (legacy `rules` + `alert_spans` [[rule, start, end], ...] become noul questions).
 Launch with torchrun for several GPUs (one process per GPU).
 """
 
@@ -22,6 +24,7 @@ import torch.distributed as dist
 from torch import nn
 from torch.nn import functional as F
 
+from .alert import DecisionMemory, Question, alert_loss, encode_questions
 from .backbone import Backbone
 from .config import V3Config
 from .data import StepReader, read_jsonl, step_times
@@ -31,28 +34,33 @@ from .positions import PositionCounter
 from .session import LETTERS
 
 
-def _prompt(bb: Backbone, rules: list[str]):
-    """Prompt ids and per-rule token spans (same layout as StreamSession)."""
-    ids, spans = bb.ids(bb.head_text), []
-    if rules:
-        ids += bb.ids("Monitoring rules:\n")
-        for i, rule in enumerate(rules):
-            ids += bb.ids(f"{i + 1}. ")
-            start = len(ids)
-            ids += bb.ids(rule)
-            spans.append((start, len(ids)))
-            ids += bb.ids("\n")
-        ids += bb.ids("Video stream:\n")
-    return ids, spans
+def alert_questions(record) -> tuple[list[Question], list[dict]]:
+    """Alert questions of a record and their label specs (legacy rules become noul questions)."""
+    specs = list(record.get("alerts") or [])
+    for i, rule in enumerate(record.get("rules") or []):
+        spans = [[a, b] for r, a, b in record.get("alert_spans", []) if int(r) == i]
+        specs.append({"id": f"rule{i}", "kind": "noul", "text": rule, "spans": spans})
+    return [Question(s["id"], s["kind"], s["text"], s.get("options", [])) for s in specs], specs
+
+
+def alert_target(spec: dict, t: float):
+    if spec["kind"] == "noul":
+        return float(any(a <= t <= b for a, b in spec.get("spans", [])))
+    label = spec.get("default", 0)
+    for value, a, b in spec.get("label_spans", []):
+        if a <= t <= b:
+            label = int(value)
+    return label
 
 
 def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, record, tbptt: int = 0):
     """Whole-clip LM input (no cache): returns embeds [1, L, d], positions [3, L], per-step info."""
     pos = PositionCounter()
-    prompt_ids, spans = _prompt(bb, record.get("rules") or [])
+    prompt_ids = bb.ids(bb.head_text)
     parts, positions = [bb.embed_ids(prompt_ids)], [pos.text(len(prompt_ids), bb.device)]
     cst_cache, te_cache, tracker = CSTCache(), TECache(), TransitionTracker()
-    step_ends, aux = [], {"pred": [], "budget": [], "tokens": [], "i_steps": 0, "clock": []}
+    step_ends, aux = [], {"pred": [], "budget": [], "tokens": [], "i_steps": 0, "clock": [], "spans": [], "xy": [],
+                          "kinds": []}  # fmt: skip
     dtype = next(modules.parameters()).dtype if modules is not None else bb.dtype
     length = len(prompt_ids)
     for k, (frames, t) in enumerate(zip(clips, times)):
@@ -66,13 +74,14 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
             cols = torch.arange(w, device=x.device).repeat(h)
             aux["i_steps"] += 1
             aux["clock"].append(torch.zeros(4))
+            kinds = ["frame"] * tokens.shape[0]
         else:
             if tbptt and k and k % tbptt == 0:
                 cst_cache.detach()
                 te_cache.detach()
             adapted, z = modules.cst(x.to(dtype), (h, w), t, cst_cache)
             info = modules.transition(adapted, z, (h, w), te_cache)
-            tokens, rows, cols = info.tokens, info.rows, info.cols
+            tokens, rows, cols, kinds = info.tokens, info.rows, info.cols, info.kinds
             if "pred_loss" in info.aux:
                 aux["pred"].append(info.aux["pred_loss"])
             if not info.is_i_step:
@@ -89,10 +98,13 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
         ts = bb.ids(f"<{t:.1f} seconds>") + [bb.vision_start]
         parts += [bb.embed_ids(ts), tokens[None].to(bb.dtype), bb.embed_ids([bb.vision_end])]
         positions += [pos.text(len(ts), bb.device), pos.points(rows, cols, h, w), pos.text(1, bb.device)]
+        aux["spans"].append((length + len(ts), length + len(ts) + tokens.shape[0]))
+        aux["xy"].append(torch.stack([cols.float() / max(1, w - 1), rows.float() / max(1, h - 1)], dim=-1))
+        aux["kinds"].append(kinds)
         length += len(ts) + tokens.shape[0] + 1
         step_ends.append(length - 1)
         aux["tokens"].append(tokens.shape[0])
-    return torch.cat(parts, dim=1), torch.cat(positions, dim=1), pos, step_ends, spans, aux
+    return torch.cat(parts, dim=1), torch.cat(positions, dim=1), pos, step_ends, aux
 
 
 def question_ids(bb: Backbone, record) -> list[int]:
@@ -109,13 +121,14 @@ class StudentLoss(nn.Module):
         self.v3 = modules
         self.lm_model = bb.model  # registers LoRA parameters with this module
 
-    def forward(self, clips, times, record, teacher_logp, caption_targets):
+    def forward(self, clips, times, record, teacher_logp, encoded=None, specs=None):
         bb, cfg, tc = self.bb, self.cfg, self.cfg.train
-        embeds, positions, pos, step_ends, spans, aux = build_sequence(bb, self.v3, clips, times, record, tc.tbptt_steps)
+        embeds, positions, pos, step_ends, aux = build_sequence(bb, self.v3, clips, times, record, tc.tbptt_steps)
         q_ids = question_ids(bb, record)
         embeds = torch.cat([embeds, bb.embed_ids(q_ids)], dim=1)
         positions = torch.cat([positions, pos.text(len(q_ids), bb.device)], dim=1)
-        hidden = bb.lm(embeds, positions, cache=None, use_cache=False)
+        taps = cfg.alert.taps if encoded is not None else ()
+        hidden, tapped = bb.lm_taps(embeds, positions, cache=None, use_cache=False, taps=taps)
         logits = bb.logits(hidden[:, -1:])[0, -1].float()
         letters = [bb.ids(letter)[0] for letter in LETTERS[: len(record["options"])]]
         losses = {"ce": F.cross_entropy(logits[None], torch.tensor([letters[record["answer"]]], device=logits.device))}
@@ -127,58 +140,63 @@ class StudentLoss(nn.Module):
         if aux["budget"]:
             target = max(0.0, (tc.target_tokens_per_step - cfg.transition.gist) / 3) * cfg.transition.mass_threshold
             losses["budget"] = F.relu(torch.stack(aux["budget"]) - target).mean()
-        dtype = next(self.v3.parameters()).dtype
-        step_hidden = hidden[0, step_ends].to(dtype)  # [steps, d]
-        if record.get("rules") and record.get("alert_spans"):
-            rule_hidden = torch.stack([hidden[0, a:b].mean(0) for a, b in spans]).to(dtype)
-            labels = torch.zeros(len(times), len(record["rules"]), device=hidden.device)
-            for rule, start, end in record["alert_spans"]:
-                for k, t in enumerate(times):
-                    if start <= t <= end:
-                        labels[k, int(rule)] = 1.0
-            clock_feats = torch.stack(aux["clock"]).to(hidden.device, dtype)  # transition-track clocks per step
-            alert = torch.stack([self.v3.alert(step_hidden[k], rule_hidden, clock_feats[k]) for k in range(len(times))])
-            losses["alert"] = F.binary_cross_entropy_with_logits(alert.float(), labels)
-        if caption_targets is not None:
-            mask, targets = caption_targets
-            if mask.any():
-                pred = self.v3.event(step_hidden[mask])
-                tgt = self.v3.event.embed_text(targets.to(dtype))[mask]
-                sim = pred @ tgt.t() / 0.07
-                losses["event"] = F.cross_entropy(sim.float(), torch.arange(sim.shape[0], device=sim.device))
+        stats = {}
+        if encoded is not None:
+            loss, alert_stats = self._alert_loss(embeds, positions, hidden, tapped, step_ends, aux, times, encoded, specs)
+            if loss is not None:
+                losses["alert"] = loss
+                stats.update(alert_stats)
         weights = {"ce": tc.ce_weight, "kd": tc.kd_weight, "pred": tc.pred_weight, "budget": tc.budget_weight,
-                   "alert": 1.0, "event": 0.5}  # fmt: skip
+                   "alert": tc.alert_weight}  # fmt: skip
         total = sum(weights[k] * v for k, v in losses.items())
-        stats = {"tokens_per_step": sum(aux["tokens"]) / max(1, len(aux["tokens"])), "i_step_fraction": aux["i_steps"] / max(1, len(times))}
+        stats.update(tokens_per_step=sum(aux["tokens"]) / max(1, len(aux["tokens"])),
+                     i_step_fraction=aux["i_steps"] / max(1, len(times)))  # fmt: skip
         return total, {k: float(v) for k, v in losses.items()}, stats
+
+    def _alert_loss(self, embeds, positions, hidden, tapped, step_ends, aux, times, encoded, specs):
+        """Alert head at up to `alert_steps` steps (always the last), with latent memory of earlier steps."""
+        bb, cfg = self.bb, self.cfg
+        n = len(times)
+        chosen = sorted(set(random.sample(range(n), min(n, cfg.alert.train_steps - 1)) + [n - 1]))
+        states = None
+        if random.random() < 1.0 / max(1, cfg.alert.state_every):
+            # End-of-clip GDN states from a no-grad pass with a cache (checkpointed training drops caches).
+            with torch.no_grad():
+                bb.language_model.eval()
+                cache = bb.new_cache()
+                bb.lm(embeds.detach(), positions, cache, use_cache=True)
+                bb.language_model.train()
+                states = bb.gdn_states(cache, cfg.alert.state_layers)
+        memory = DecisionMemory(cfg.alert.memory_tokens)
+        losses, logs = [], {}
+        for k in range(n):
+            if k in chosen:
+                start, end = aux["spans"][k]
+                results = self.v3.alert(encoded, tapped[:, 0, start:end], aux["xy"][k].to(hidden.device), memory,
+                                        times[k], aux["clock"][k], states if k == n - 1 else None)  # fmt: skip
+                targets = {spec["id"]: alert_target(spec, times[k]) for spec in specs}
+                loss, logs = alert_loss(results, targets)
+                if loss is not None:
+                    losses.append(loss)
+            keep = [i for i, kind in enumerate(aux["kinds"][k]) if kind in {"gist", "after", "delta"}]
+            start, end = aux["spans"][k]
+            latent = [hidden[0, step_ends[k] : step_ends[k] + 1]] + ([hidden[0, start:end][keep]] if keep else [])
+            memory.add(torch.cat(latent), times[k])
+        logs["alert_state_used"] = float(states is not None)
+        return (torch.stack(losses).mean() if losses else None), logs
 
 
 @torch.no_grad()
 def teacher_targets(bb: Backbone, clips, times, record):
-    """Full-token teacher with LoRA disabled: answer log-probs and caption embeddings per step."""
+    """Full-token teacher with LoRA disabled: answer log-probs."""
     context = bb.peft.disable_adapter() if bb.peft is not None else torch.no_grad()
     with context:
-        embeds, positions, pos, step_ends, _, _ = build_sequence(bb, None, clips, times, record)
+        embeds, positions, pos, _, _ = build_sequence(bb, None, clips, times, record)
         q_ids = question_ids(bb, record)
         embeds = torch.cat([embeds, bb.embed_ids(q_ids)], dim=1)
         positions = torch.cat([positions, pos.text(len(q_ids), bb.device)], dim=1)
         hidden = bb.lm(embeds, positions, cache=None, use_cache=False)
-        logp = bb.logits(hidden[:, -1:])[0, -1].float().log_softmax(-1)
-        captions = None
-        if record.get("captions"):
-            mask = torch.zeros(len(times), dtype=torch.bool, device=bb.device)
-            targets = torch.zeros(len(times), bb.hidden, device=bb.device)
-            for start, end, text in record["captions"]:
-                ids = bb.ids(text)
-                if not ids:
-                    continue
-                pooled = bb.lm(bb.embed_ids(ids), PositionCounter().text(len(ids), bb.device), cache=None,
-                               use_cache=False)[0].mean(0)  # fmt: skip
-                for k, t in enumerate(times):
-                    if start <= t <= end:
-                        mask[k], targets[k] = True, pooled.float()
-            captions = (mask, targets)
-    return logp, captions
+        return bb.logits(hidden[:, -1:])[0, -1].float().log_softmax(-1)
 
 
 def load_clip(record, video_root, cfg: V3Config, clip_seconds: float):
@@ -245,11 +263,13 @@ def train(cfg: V3Config, records_path: str, video_root: str, output: str, clip_s
                 clips, times = load_clip(record, video_root, cfg, clip_seconds)
                 if not times:
                     continue
-                teacher_logp, captions = teacher_targets(bb, clips, times, record)
+                teacher_logp = teacher_targets(bb, clips, times, record)
+                questions, specs = alert_questions(record)
+                encoded = encode_questions(bb, questions) if questions else None
                 sync = world == 1 or micro == tc.grad_accum - 1
                 context = module.no_sync() if not sync else torch.enable_grad()
                 with context, torch.autocast("cuda", dtype=torch.bfloat16):
-                    loss, parts, stats = module(clips, times, record, teacher_logp, captions)
+                    loss, parts, stats = module(clips, times, record, teacher_logp, encoded, specs)
                     (loss / tc.grad_accum).backward()
                 for k, v in parts.items():
                     logs[k] = logs.get(k, 0.0) + v / tc.grad_accum
@@ -293,9 +313,11 @@ def gradient_check(cfg: V3Config, steps: int = 6, threshold: float = 1e4, device
     clips = [frames] * steps
     times = [k + cfg.stream.frame_gap / 2 for k in range(steps)]
     record = {"question": "What is shown?", "options": ["a gray image", "a cat", "a car", "a tree"], "answer": 0}
-    teacher_logp, _ = teacher_targets(bb, clips, times, record)
+    record["alerts"] = [{"id": "abnormal", "kind": "noul", "text": "Is anything abnormal happening?", "spans": []}]
+    questions, specs = alert_questions(record)
+    teacher_logp = teacher_targets(bb, clips, times, record)
     with torch.autocast("cuda", dtype=torch.bfloat16):
-        loss, parts, stats = wrapper(clips, times, record, teacher_logp, None)
+        loss, parts, stats = wrapper(clips, times, record, teacher_logp, encode_questions(bb, questions), specs)
     loss.backward()
     groups = {"modules": list(modules.parameters()), "lora": [p for p in bb.model.parameters() if p.requires_grad]}
     norms = {}

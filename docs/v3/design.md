@@ -129,29 +129,37 @@ tokens ≈ 80 MB *(est.)*, constant in stream length.
 Retrieval is plain attention in those layers: differentiable, no top-k, and no question needed at
 write time. That is the key difference from v1's ranking and v2's heuristic sort.
 
-### 3.4 Non-autoregressive heads: alerts and event embeddings (kept from v1, extended)
+### 3.4 Alert head: Jev-style classification, latently connected (kept from v1)
 
-Surveillance needs a decision every step, not a sentence. Decoding text is slow and unnecessary for
-"should this fire?", so v3 keeps v1's alert head and adds a VL-JEPA-style embedding head
-([VL-JEPA](https://arxiv.org/abs/2512.10942), ICLR 2026: predict text embeddings instead of tokens and
-decode selectively). Both read the LM hidden state at each step's `<|vision_end|>` token, which the
-streaming forward computes anyway, so they cost one small MLP per step and no decoding.
+Surveillance often needs only a discriminative answer: is the scene normal, is there a hazard, which
+kind of incident. Decoding text for that is slow and unnecessary. v3 keeps v1's non-autoregressive alert
+head and gives it the interface of [Jev](https://docs.typesafe.ai/introduction) (TypeSafe AI's
+"System One" decision model, 15 Sep 2026): typed questions registered once, evaluated in parallel and in
+isolation against the current state, returning typed values instead of text. We borrow the interface
+for classification only; Jev itself is closed and text/JSON-only, and open-ended questions stay with the
+LM.
 
-- **Rule-conditioned alert head.** Rules are written into the prompt ("Monitoring rules: 1. … 2. …"),
-  so all 24 LM layers condition the stream on them, and the GDN state is rule-aware. For rule r the
-  query is the mean prompt hidden state over that rule's tokens:
-  logit_r(t) = MLP(W_s h_t ⊙ W_r q_r + W_c c_t), where c_t holds transition clocks (log ages of active
-  transitions, their count, mean surprise). The clocks let duration rules ("bag left > 10 min")
-  fire from memory rather than from the current frame. Many rules are scored in one pass.
-- **Event embedding head (JEPA-style).** e_t = normalize(MLP(h_t)) is trained with InfoNCE to match
-  the embedding of a caption covering t (teacher LM mean hidden state, through a small text
-  projection). Uses: (1) zero-shot rules by cosine(e_t, embed(rule text)) when no labels exist;
-  (2) **selective decoding**: generate a description only when 1 − cos(e_t, e_last_decoded) > τ, as
-  VL-JEPA does for streams.
-- Training: BCE on per-step rule labels where they exist (MEVA activities as rules; anomaly datasets
-  with frame labels, licence permitting); InfoNCE on captioned clips. Both heads train jointly with
-  Stage 1; the transition clocks are wired in the streaming session and are zero in the Stage 1
-  trainer (TODO: compute them from the transition encoder during training).
+- **Question kinds:** `noul` (yes/no, p ∈ [0, 1]: "Is anything abnormal happening?", "Is there a
+  hazard?") and `choice` (one of ≤ 255 labels with probabilities and a separate confidence: "Which
+  incident is this?"). Each question and label text is encoded once by the frozen LM in its own pass.
+- **Isolation:** each question is its own query (batch item) over the state; there is no attention
+  between questions, so adding one never changes another's answer (tested).
+- **Latent connections, no text:**
+  1. the current step's visual-token hidden states tapped from LM layers {11, 17, 23} (with grid
+     positions and a layer embedding);
+  2. the Gated DeltaNet recurrent states of layers {10, 18, 22}, read as associative memories with a
+     learned, L2-normalized key per question, r = Sᵀk per head, exactly how a GDN layer reads its own
+     state. This gives the whole stream's compressed history at constant cost;
+  3. a bounded memory (256 tokens) of earlier steps' latent tokens (step ends, gist/after/delta) with
+     their age;
+  4. transition clocks from the bounded `TransitionTracker` (ages and count of active transitions,
+     mean surprise), so duration rules ("bag left > 10 min") are answerable.
+- **Cost:** one small cross-attention stack (2 layers, width 512) per step for all registered
+  questions; no tokens are generated.
+- **Training:** BCE for noul and CE for choice, from per-step labels (`alerts` in records; legacy
+  `rules` + `alert_spans` map to noul questions); confidence is trained to predict whether the arg-max
+  is right. In training the GDN state is only available at the clip end, via an extra no-grad pass on
+  1 in 4 samples, and the state read is dropped with p = 0.3 so the head also works without it.
 
 ### 3.5 Parameter budget
 
@@ -160,7 +168,7 @@ streaming forward computes anyway, so they cost one small MLP per step and no de
 | Qwen3.5-2B (ViT ≈ 0.3B + LM ≈ 1.9B incl. embeddings) | ≈ 2.2B | ViT frozen; LM via LoRA |
 | CST adapter | ≈ 34M | yes |
 | Transition encoder (predictor, slots, token heads, gist) | ≈ 21M | yes |
-| Alert head + event head | ≈ 9M | yes |
+| Alert head (Jev-style, latent connections) | ≈ 14M | yes |
 | Retention scorer | < 1M | yes |
 | LoRA (r = 32 on q/k/v/o of full-attn layers and in/out projections of GDN layers) | ≈ 25M | yes |
 | **Total** | **≈ 2.29B** | ≈ 90M trainable |

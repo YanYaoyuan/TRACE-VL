@@ -334,47 +334,6 @@ class TransitionTracker:
 
 
 # ============================================================================ heads
-class AlertHead(nn.Module):
-    """Rule-conditioned, non-autoregressive alert logits read at the end of every step.
-
-    The rules are in the prompt, so the LM's state is already rule-aware; each rule's pooled prompt
-    hidden state is its query. Transition ages feed duration rules ("left for > N min").
-    """
-
-    def __init__(self, model_dim: int, hidden: int = 512):
-        super().__init__()
-        self.state = nn.Sequential(nn.LayerNorm(model_dim), nn.Linear(model_dim, hidden))
-        self.rule = nn.Sequential(nn.LayerNorm(model_dim), nn.Linear(model_dim, hidden))
-        self.clock = nn.Sequential(nn.Linear(4, 64), nn.GELU(), nn.Linear(64, hidden))
-        self.out = nn.Sequential(nn.GELU(), nn.Linear(hidden, hidden), nn.GELU(), nn.Linear(hidden, 1))
-
-    def forward(self, step_hidden: Tensor, rules: Tensor, clock: Tensor) -> Tensor:
-        """step_hidden [d] (hidden at the step's last token), rules [R, d], clock [4]. Returns [R] logits."""
-        s = self.state(step_hidden)[None]
-        r = self.rule(rules)
-        return self.out(s * r + self.clock(clock)[None]).squeeze(-1)
-
-
-class EventHead(nn.Module):
-    """JEPA-style event embedding per step (cf. VL-JEPA): predicts the embedding of a description.
-
-    Used for zero-shot rules (cosine to a rule's text embedding) and selective decoding (generate text
-    only when the predicted embedding moves by more than a threshold).
-    """
-
-    def __init__(self, model_dim: int, embed_dim: int = 512):
-        super().__init__()
-        self.net = nn.Sequential(nn.LayerNorm(model_dim), nn.Linear(model_dim, model_dim), nn.GELU(),
-                                 nn.Linear(model_dim, embed_dim))  # fmt: skip
-        self.text = nn.Sequential(nn.LayerNorm(model_dim), nn.Linear(model_dim, embed_dim))
-
-    def forward(self, step_hidden: Tensor) -> Tensor:
-        return F.normalize(self.net(step_hidden), dim=-1)
-
-    def embed_text(self, pooled_text_hidden: Tensor) -> Tensor:
-        return F.normalize(self.text(pooled_text_hidden), dim=-1)
-
-
 class RetentionScorer(nn.Module):
     """Score of keeping a transition group in the full-attention KV when the budget is full."""
 

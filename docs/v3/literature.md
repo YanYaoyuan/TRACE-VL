@@ -64,16 +64,19 @@ before each temporal patch) — **read** (secondary summaries + abstract).
 | [Distilling to hybrid attention via KL-guided layer selection](https://arxiv.org/abs/2512.20569) | 2025-12 | distillation into hybrids | distillation recipe reference | to read |
 | [Memoir](https://arxiv.org/abs/2607.20792) | 2026-07 | should a model write to memory while it thinks | — | to read |
 
-## 3b. Non-autoregressive outputs for streams
+## 3b. Non-autoregressive decisions for streams
 
-- [VL-JEPA](https://arxiv.org/abs/2512.10942) (Meta FAIR, ICLR 2026): predicts continuous embeddings
-  of target text instead of tokens; with 1.6B parameters it is comparable to classical VLMs on VQA,
-  and selective decoding (decode only when the predicted embedding stream changes) cuts decoding
-  operations about 2.85× with similar performance. Basis for v3's event-embedding head and selective
-  decoding. — read
-- [Event-VStream](https://arxiv.org/abs/2601.15655) (2026-01): small MLP predicts the next frame
-  embedding; prediction error marks event boundaries in streams without labels. Same principle as our
-  predictor surprise. — read
+- [Jev](https://docs.typesafe.ai/introduction) (TypeSafe AI, "System One" model, released 15 Sep 2026,
+  closed, hosted): state (text/JSON) + typed questions (Choice, Score, Noul, Box), all answered in one
+  parallel pass, each in isolation, returning typed values, probabilities and a separate confidence
+  instead of text; trained for calibrated decisions. v3's alert head borrows the interface for
+  classification only (noul / choice) and reads the video stream through latent connections. — read
+  (docs introduction + secondary explainers; performance claims are the vendor's)
+- [VL-JEPA](https://arxiv.org/abs/2512.10942) (Meta FAIR, ICLR 2026): predicts text embeddings
+  instead of tokens, with selective decoding. Related, **not used** (an earlier draft misread "JEV" as
+  VL-JEPA). — read
+- [Event-VStream](https://arxiv.org/abs/2601.15655) (2026-01): next-embedding prediction error marks
+  event boundaries; same principle as our predictor surprise. — read
 
 ## 4. Hybrid / linear attention for video
 

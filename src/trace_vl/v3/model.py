@@ -7,8 +7,9 @@ from pathlib import Path
 import torch
 from torch import nn
 
+from .alert import AlertHead
 from .config import V3Config
-from .modules import AlertHead, CSTAdapter, EventHead, RetentionScorer, TransitionEncoder
+from .modules import CSTAdapter, RetentionScorer, TransitionEncoder
 
 
 class TraceV3Modules(nn.Module):
@@ -17,8 +18,8 @@ class TraceV3Modules(nn.Module):
         self.cfg = cfg
         self.cst = CSTAdapter(cfg.cst, model_dim)
         self.transition = TransitionEncoder(cfg.transition, cfg.cst.dim, model_dim)
-        self.alert = AlertHead(model_dim)
-        self.event = EventHead(model_dim)
+        # Jev-style alert classification every step (noul / choice), latently connected to the backbone.
+        self.alert = AlertHead(model_dim, cfg.alert)
         self.retention = RetentionScorer()
 
     def parameter_report(self) -> dict:

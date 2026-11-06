@@ -60,6 +60,21 @@ class TransitionConfig:
 
 
 @dataclass
+class AlertConfig:
+    """Alert head (Jev-style classification: noul / choice) with latent connections to the backbone."""
+
+    hidden: int = 512
+    layers: int = 2
+    heads: int = 8
+    taps: list = field(default_factory=lambda: [11, 17, 23])  # LM layers whose hidden states are read
+    state_layers: list = field(default_factory=lambda: [10, 18, 22])  # Gated DeltaNet states queried by key
+    memory_tokens: int = 256  # earlier steps' latent tokens kept for alerts
+    state_dropout: float = 0.3  # train without the GDN-state read sometimes (it is only final-step in training)
+    train_steps: int = 16  # steps per clip at which the alert head is trained (always includes the last)
+    state_every: int = 4  # 1 in N samples gets an extra no-grad pass for end-of-clip GDN states
+
+
+@dataclass
 class MemoryConfig:
     policy: str = "full"  # full | window | drift | tkm | fifo
     sink_steps: int = 1  # first steps always kept (plus the prompt)
@@ -84,6 +99,7 @@ class TrainConfig:
     vis_weight: float = 0.0  # needs a negative stream per sample (doubles student cost)
     vis_margin: float = 0.2
     budget_weight: float = 0.01
+    alert_weight: float = 1.0
     target_tokens_per_step: float = 40.0
     kd_temperature: float = 1.0
     tbptt_steps: int = 0  # detach recurrent adapter state every N steps (0 = never)
@@ -98,6 +114,7 @@ class V3Config:
     cst: CSTConfig = field(default_factory=CSTConfig)
     transition: TransitionConfig = field(default_factory=TransitionConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
+    alert: AlertConfig = field(default_factory=AlertConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
 
     @classmethod
@@ -109,6 +126,7 @@ class V3Config:
             "cst": CSTConfig,
             "transition": TransitionConfig,
             "memory": MemoryConfig,
+            "alert": AlertConfig,
             "train": TrainConfig,
         }
         unknown = set(values) - set(parts) - {"extends", "data", "eval"}

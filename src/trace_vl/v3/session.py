@@ -1,11 +1,13 @@
 """Incremental streaming session over the hybrid backbone (inference path).
 
 Layout of the LM sequence (one user turn, as in Qwen's chat template):
-    <head> [Monitoring rules: ...] (prompt, protected)
+    <head> (prompt, protected)
     per step: "<12.5 seconds>" <|vision_start|> visual tokens <|vision_end|>
     at a question (on a forked cache): "\nQuestion ... Answer with the option letter only." <tail>
 `mode="native"` sends all 196 merged tokens per step (baseline); `mode="v3"` routes the step through
 the CST adapter and the transition encoder (I-steps keep all tokens; P-steps send gist + transitions).
+Registered alert questions (Jev-style classification: noul / choice) are answered every step by the
+alert head, latently connected to the backbone (tapped layers + Gated DeltaNet states), without decoding.
 """
 
 from __future__ import annotations
@@ -16,8 +18,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import torch
-from torch.nn import functional as F
 
+from .alert import DecisionMemory, Question, encode_questions, public
 from .backbone import Backbone
 from .config import V3Config
 from .kv import KVMemory
@@ -37,18 +39,20 @@ class StepResult:
     seconds_vision: float
     seconds_lm: float
     drift: float
-    alert_logits: list[float] = field(default_factory=list)
-    event: torch.Tensor | None = None
+    alerts: list[dict] = field(default_factory=list)  # answers to registered alert questions
+    seconds_alert: float = 0.0
     active_slots: int = 0
 
 
 class StreamSession:
     def __init__(self, backbone: Backbone, cfg: V3Config, modules: TraceV3Modules | None = None,
-                 mode: str = "native", rules: list[str] | None = None):  # fmt: skip
+                 mode: str = "native", questions: list[Question] | None = None):  # fmt: skip
         if mode not in {"native", "v3"}:
             raise ValueError("mode must be native or v3")
         if mode == "v3" and modules is None:
             raise ValueError("v3 mode needs TraceV3Modules")
+        if questions and modules is None:
+            raise ValueError("alert questions need TraceV3Modules (alert head)")
         self.bb, self.cfg, self.modules, self.mode = backbone, cfg, modules, mode
         self.cache = backbone.new_cache()
         self.pos = PositionCounter()
@@ -57,33 +61,17 @@ class StreamSession:
         self.step_index = 0
         self.tracker = TransitionTracker()  # persistent transition tracks for the alert clocks (bounded)
         self.letter_ids = [backbone.ids(letter)[0] for letter in LETTERS]
-        self.rules = rules or []
-        self.rule_hidden = None
+        self.decision_memory = DecisionMemory(cfg.alert.memory_tokens)
+        self.watching = encode_questions(backbone, questions) if questions else None
+        self.last_context = None  # (taps, xy, t, clock) of the latest step, for decide()
         self._prefill_prompt()
 
     # ------------------------------------------------------------------ prompt
     @torch.no_grad()
     def _prefill_prompt(self):
-        pieces = [self.bb.head_text]
-        spans = []
-        if self.rules:
-            pieces.append("Monitoring rules:\n")
-            for i, rule in enumerate(self.rules):
-                pieces.append(f"{i + 1}. ")
-                spans.append(len(pieces))
-                pieces.append(rule)
-                pieces.append("\n")
-            pieces.append("Video stream:\n")
-        ids, starts = [], []
-        for i, piece in enumerate(pieces):
-            if i in spans:
-                starts.append((len(ids), len(ids) + len(self.bb.ids(piece))))
-            ids += self.bb.ids(piece)
-        embeds = self.bb.embed_ids(ids)
-        hidden = self.bb.lm(embeds, self.pos.text(len(ids)), self.cache)
+        ids = self.bb.ids(self.bb.head_text)
+        self.bb.lm(self.bb.embed_ids(ids), self.pos.text(len(ids)), self.cache)
         self.memory.append(len(ids), "prompt", -1.0, ("prompt",), protected=True)
-        if spans:
-            self.rule_hidden = torch.stack([hidden[0, a:b].mean(0) for a, b in starts])
 
     # ------------------------------------------------------------------ steps
     def _resize(self, frames: np.ndarray) -> np.ndarray:
@@ -123,7 +111,8 @@ class StreamSession:
         before = bb.recurrent_state(self.cache)
         before = None if before is None else before.clone()
         started = clock.perf_counter()
-        hidden = bb.lm(embeds, positions, self.cache)
+        taps = self.cfg.alert.taps if self.modules is not None else ()
+        hidden, tapped = bb.lm_taps(embeds, positions, self.cache, taps=taps)
         seconds_lm = clock.perf_counter() - started
         after = bb.recurrent_state(self.cache)
         drift = 0.0
@@ -142,13 +131,23 @@ class StreamSession:
 
         result = StepResult(t, tokens.shape[0], info.is_i_step if info else True, len(self.memory),
                             seconds_vision, seconds_lm, drift)  # fmt: skip
-        if self.mode == "v3":
+        if info is not None:
             result.active_slots = int(info.aux.get("active_slots", 0))
-            last = hidden[0, -1].to(next(self.modules.parameters()).dtype)
-            result.event = self.modules.event(last)
-            if self.rule_hidden is not None:
-                logits = self.modules.alert(last, self.rule_hidden.to(last.dtype), self._clock(info, t).to(last))
-                result.alert_logits = logits.float().tolist()
+        if self.modules is not None:
+            n_text = len(ts_ids)
+            span = slice(n_text, n_text + tokens.shape[0])
+            xy = torch.stack([cols.float() / max(1, w - 1), rows.float() / max(1, h - 1)], dim=-1)
+            step_taps = tapped[:, 0, span]
+            clock_feats = self._clock(info, t)
+            self.last_context = (step_taps, xy, t, clock_feats)
+            if self.watching is not None:
+                started = clock.perf_counter()
+                result.alerts = public(self._decide(self.watching))
+                result.seconds_alert = clock.perf_counter() - started
+            # Latent memory for later alerts: the step end plus this step's transition/gist tokens.
+            keep = [i for i, kind in enumerate(kinds) if kind in {"gist", "after", "delta"}]
+            latent = [hidden[0, -1:]] + ([hidden[0, span][keep]] if keep else [])
+            self.decision_memory.add(torch.cat(latent), t)
         self.step_index += 1
         return result
 
@@ -181,7 +180,20 @@ class StreamSession:
                     feats = RetentionScorer.features(0.0, mass, drift, 0.0, 1.0, 0.0)
                     self.memory.scores[("slot", g)] = float(scorer(feats.to(info.tokens.device, dtype)))
 
-    # ------------------------------------------------------------------ questions
+    # ------------------------------------------------------------------ alerts (Jev-style classification)
+    def _decide(self, encoded):
+        if self.last_context is None:
+            raise ValueError("no step observed yet")
+        step_taps, xy, t, clock_feats = self.last_context
+        states = self.bb.gdn_states(self.cache, self.cfg.alert.state_layers)
+        return self.modules.alert(encoded, step_taps, xy, self.decision_memory, t, clock_feats, states)
+
+    @torch.no_grad()
+    def decide(self, questions: list[Question]) -> list[dict]:
+        """Classify the stream so far for ad-hoc alert questions, in one pass, without decoding."""
+        return public(self._decide(encode_questions(self.bb, questions)))
+
+    # ------------------------------------------------------------------ questions (generative LM)
     def _fork(self):
         return self.bb.fork(self.cache), copy.deepcopy(self.pos)
 
@@ -218,7 +230,7 @@ class StreamSession:
 
     @torch.no_grad()
     def describe(self, prompt: str = "Describe what is happening now in one sentence.", max_new_tokens: int = 40):
-        """Greedy text on a forked cache (used by selective decoding; not needed for alerts)."""
+        """Greedy text on a forked cache (explanations on demand; alerts do not need it)."""
         cache, pos = self._fork()
         ids = self.bb.ids("\n" + prompt + self.bb.tail_text)
         hidden = self.bb.lm(self.bb.embed_ids(ids), pos.text(len(ids)), cache)
@@ -243,9 +255,3 @@ class StreamSession:
             "transition_tracks": len(self.tracker.tracks),
         }
 
-
-def selective_decode(previous: torch.Tensor | None, current: torch.Tensor, threshold: float = 0.15) -> bool:
-    """VL-JEPA-style trigger: decode text only when the event embedding moved enough."""
-    if previous is None:
-        return True
-    return float(1 - F.cosine_similarity(previous, current, dim=-1)) > threshold

@@ -197,12 +197,65 @@ def test_configs_load():
         V3Config.from_dict({"memory": {"policy": "magic"}})
 
 
-def test_alert_head_shapes():
-    modules = TraceV3Modules(small_config(), model_dim=16)
-    logits = modules.alert(torch.randn(16), torch.randn(3, 16), torch.zeros(4))
-    assert logits.shape == (3,)
-    emb = modules.event(torch.randn(5, 16))
-    assert torch.allclose(emb.norm(dim=-1), torch.ones(5), atol=1e-5)
+def _encoded(dim=16):
+    from trace_vl.v3.alert import EncodedQuestions, Question
+
+    questions = [
+        Question("abnormal", "noul", "Is anything abnormal happening?"),
+        Question("incident", "choice", "Which incident is this?", ["none", "fight", "fall"]),
+    ]
+    return EncodedQuestions(questions, torch.randn(2, dim), [None, torch.randn(3, dim)])
+
+
+def test_alert_head_outputs_isolation_and_state_read():
+    from trace_vl.v3.alert import DecisionMemory, EncodedQuestions, alert_loss, public
+
+    torch.manual_seed(0)
+    modules = TraceV3Modules(small_config(), model_dim=16).eval()
+    enc = _encoded()
+    taps = torch.randn(len(modules.cfg.alert.taps), 6, 16)
+    xy = grid_coords(2, 3)
+    memory = DecisionMemory(8)
+    memory.add(torch.randn(5, 16), 1.0)
+    states = torch.randn(*modules.alert.state_shape)
+    with torch.no_grad():
+        both = modules.alert(enc, taps, xy, memory, 3.0, torch.zeros(4), states)
+        alone = modules.alert(EncodedQuestions(enc.questions[:1], enc.text[:1], enc.options[:1]), taps, xy, memory,
+                              3.0, torch.zeros(4), states)  # fmt: skip
+        no_state = modules.alert(enc, taps, xy, memory, 3.0, torch.zeros(4), None)
+    assert 0.0 <= float(both[0]["value"]) <= 1.0
+    assert torch.allclose(both[1]["probabilities"].sum(), torch.tensor(1.0)) and 0 <= float(both[1]["confidence"]) <= 1
+    # Isolation: adding another question does not change this question's answer.
+    assert torch.allclose(both[0]["value"], alone[0]["value"], atol=1e-6)
+    # The Gated DeltaNet state read is used when available.
+    assert not torch.allclose(both[0]["value"], no_state[0]["value"])
+    out = public(both)
+    assert out[0]["kind"] == "noul" and out[1]["choice"] in (0, 1, 2) and len(out[1]["probabilities"]) == 3
+    modules.train()
+    results = modules.alert(enc, taps, xy, memory, 3.0, torch.zeros(4), None)
+    loss, stats = alert_loss(results, {"abnormal": 1.0, "incident": 2})
+    loss.backward()
+    assert torch.isfinite(loss) and "alert_noul" in stats and "alert_choice" in stats
+    assert modules.alert.noul.weight.grad is not None
+
+
+def test_alert_question_validation_and_targets():
+    from trace_vl.v3.alert import Question
+    from trace_vl.v3.train import alert_questions, alert_target
+
+    with pytest.raises(ValueError):
+        Question("x", "box", "where?")  # only classification kinds
+    with pytest.raises(ValueError):
+        Question("x", "choice", "which?", [str(i) for i in range(256)])
+    with pytest.raises(ValueError):
+        Question("x", "noul", "is it?", ["yes"])
+    record = {"rules": ["A bag is left unattended."], "alert_spans": [[0, 10.0, 20.0]],
+              "alerts": [{"id": "inc", "kind": "choice", "text": "Which?", "options": ["none", "fall"],
+                          "label_spans": [[1, 5.0, 6.0]]}]}  # fmt: skip
+    questions, specs = alert_questions(record)
+    assert [q.id for q in questions] == ["inc", "rule0"]
+    assert alert_target(specs[1], 15.0) == 1.0 and alert_target(specs[1], 25.0) == 0.0
+    assert alert_target(specs[0], 5.5) == 1 and alert_target(specs[0], 7.0) == 0
 
 
 def test_grid_coords_range():

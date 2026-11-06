@@ -17,6 +17,7 @@ import numpy as np
 import torch
 
 from .config import BackboneConfig, StreamConfig
+from .positions import PositionCounter
 
 LORA_TARGET = (
     r".*language_model.*\.(self_attn\.(q_proj|k_proj|v_proj|o_proj)|linear_attn\.(in_proj_qkv|in_proj_z|out_proj))"
@@ -163,6 +164,53 @@ class Backbone:
             use_cache=use_cache,
         )
         return out.last_hidden_state
+
+    def lm_taps(self, embeds: torch.Tensor, positions: torch.Tensor, cache=None, use_cache=True, taps=()):
+        """Like `lm`, also returning the outputs of decoder layers `taps`: ([1, L, d], [T, 1, L, d] or None).
+
+        Uses forward hooks on the decoder layers, so it does not depend on how a transformers version
+        indexes `output_hidden_states`.
+        """
+        if not taps:
+            return self.lm(embeds, positions, cache, use_cache), None
+        captured, handles = {}, []
+        for index in taps:
+            if not 0 <= index < len(self.layer_types):
+                raise ValueError(f"tap layer {index} outside 0..{len(self.layer_types) - 1}")
+
+            def hook(_module, _inputs, output, index=index):
+                captured[index] = output[0] if isinstance(output, tuple) else output
+
+            handles.append(self.language_model.layers[index].register_forward_hook(hook))
+        try:
+            last = self.lm(embeds, positions, cache, use_cache)
+        finally:
+            for handle in handles:
+                handle.remove()
+        return last, torch.stack([captured[i] for i in taps])
+
+    def gdn_states(self, cache, layers) -> torch.Tensor | None:
+        """Recurrent (associative-memory) states of the given Gated DeltaNet layers: [G, H, K, V] or None."""
+        states = []
+        for index in layers:
+            if self.layer_types[index] != "linear_attention":
+                raise ValueError(f"layer {index} is not a Gated DeltaNet layer")
+            state = self.recurrent_state(cache, index)
+            if state is None:
+                return None
+            states.append(state[0])
+        return torch.stack(states) if states else None
+
+    @torch.no_grad()
+    def encode_texts(self, texts: list[str]) -> torch.Tensor:
+        """Mean last-layer hidden state of each text, each in its own LM pass (no cache): [len, d]."""
+        pooled = []
+        for text in texts:
+            ids = self.ids(text) or [self.tokenizer.eos_token_id]
+            hidden = self.lm(self.embed_ids(ids), PositionCounter().text(len(ids), self.device), cache=None,
+                             use_cache=False)  # fmt: skip
+            pooled.append(hidden[0].float().mean(0))
+        return torch.stack(pooled)
 
     def logits(self, hidden: torch.Tensor) -> torch.Tensor:
         return self.lm_head(hidden)

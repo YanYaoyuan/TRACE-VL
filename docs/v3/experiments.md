@@ -44,18 +44,20 @@ learned evidence selection) and re-plan in the tracker.
 Efficiency, reported for every row: LM tokens per second of video, KV MB at 10 / 60 min, latency per
 step (ms), peak training memory, and GPU-hours to train.
 
-### Alerts (non-autoregressive heads)
+### Alerts (Jev-style classification head)
 
 | Metric | Definition |
 |---|---|
-| step-level AUROC / AP per rule | alert logits vs per-step rule labels |
-| event-level precision / recall | an alert episode matches a labelled interval within tolerance |
-| time to alarm | first firing step minus interval start (or due time for duration rules) |
-| throughput | steps/s with heads only vs with text decoding at every step vs selective decoding (VL-JEPA-style); report decode calls saved |
+| step/frame AUROC and AP per noul question | e.g. "Is anything abnormal happening?" vs frame-level anomaly labels |
+| choice accuracy, macro-F1, ECE | incident type; calibration of probabilities and of the confidence output |
+| time to alarm | first step above threshold minus the labelled onset (or the due time for duration rules) |
+| throughput | steps/s with the alert head vs asking the LM a yes/no question every step (`ask`) |
 
-Baselines for alerts: (a) the same backbone asked a yes/no question per rule at every step
-(autoregressive, slow); (b) v2's detector + rule replay (`trace-vl inspection alerts`); (c) the event
-head's zero-shot cosine without alert labels.
+Small datasets (fit the 20–30 GB limit; check each licence): CUHK Avenue and ShanghaiTech Campus
+(frame-level anomaly labels, fixed cameras), plus MEVA activities turned into noul rules.
+Baselines: (a) the LM asked a yes/no question per step (autoregressive, slow); (b) v2's detector +
+rule replay; (c) the alert head without latent state reads (taps only), as an ablation of the GDN-state
+connection.
 
 ## 4. Data
 
