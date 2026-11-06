@@ -56,7 +56,7 @@ def alert_target(spec: dict, t: float):
 def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, record, tbptt: int = 0):
     """Whole-clip LM input (no cache): returns embeds [1, L, d], positions [3, L], per-step info."""
     pos = PositionCounter()
-    prompt_ids = bb.ids(bb.head_text)
+    prompt_ids = bb.ids(bb.head_text) + [bb.vision_start]  # outer video start (public processor protocol)
     parts, positions = [bb.embed_ids(prompt_ids)], [pos.text(len(prompt_ids), bb.device)]
     cst_cache, te_cache, tracker = CSTCache(), TECache(), TransitionTracker()
     step_ends, aux = [], {"pred": [], "budget": [], "tokens": [], "i_steps": 0, "clock": [], "spans": [], "xy": [],
@@ -109,7 +109,7 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
 
 def question_ids(bb: Backbone, record) -> list[int]:
     lines = [f"{LETTERS[i]}. {o}" for i, o in enumerate(record["options"])]
-    return bb.ids("\n" + record["question"] + "\n" + "\n".join(lines) + "\nAnswer with the option letter only." + bb.tail_text)
+    return [bb.vision_end] + bb.ids("\n" + record["question"] + "\n" + "\n".join(lines) + "\nAnswer with the option letter only." + bb.tail_text)
 
 
 class StudentLoss(nn.Module):

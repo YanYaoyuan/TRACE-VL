@@ -241,68 +241,75 @@ def profile(cfg: V3Config, steps: int = 600, mode: str = "native", checkpoint: s
 @torch.no_grad()
 def check_equality(cfg: V3Config, video: str | None = None, steps: int = 4, device="cuda",
                    dtype: str = "float32") -> dict:  # fmt: skip
-    """M1 gate (a): our incremental streaming path reproduces the reference HF forward, and the zero-gated
-    v3 path (all I-steps) reproduces the native path.
+    """M1/M0 gate: the streaming path reproduces Qwen3.5's PUBLIC processor protocol.
 
-    The gate runs in float32: bf16 incremental decoding vs one-shot prefill differs by ~0.1 in letter
-    log-probs from rounding alone (PR #3 review: bf16 0.125, fp32 5.7e-5 on the same case), so a bf16
-    run is informational only.
+    The reference starts from `processor.apply_chat_template` with a video item (as an official pipeline
+    would), not from a hand-built layout (PR #3 review: the old gate built both sides from the same
+    layout and missed the processor's outer <|vision_start|> ... <|vision_end|> wrapper). Our native and
+    zero-gated v3 sessions consume the processor's own per-temporal-patch tensors, and we compare
+    (1) the exact token ids, (2) letter log-probs vs the full HF forward. float32 is the gate; bf16
+    differs by ~0.1 from rounding alone and is informational.
     """
+    from transformers.video_utils import VideoMetadata, read_video_opencv
+
     cfg = V3Config.from_dict({**cfg.to_dict(), "backbone": {**cfg.to_dict()["backbone"], "dtype": dtype}})
     backbone = Backbone(cfg.backbone, cfg.stream, device)
-    rng = np.random.default_rng(0)
+    processor, vp = backbone.processor, backbone.processor.video_processor
     if video:
-        reader = StepReader({"video": Path(video).name}, Path(video).parent)
-        clips = [reader.step(t, cfg.stream.frame_gap) for t in step_times(steps, 1.0, cfg.stream.frame_gap)[:steps]]
-        reader.close()
+        frames, meta = read_video_opencv(video, sample_indices_fn=vp.sample_frames)  # processor defaults
     else:
-        clips = [rng.integers(0, 255, (2, 448, 448, 3), dtype=np.uint8) for _ in range(steps)]
-    times = [k + cfg.stream.frame_gap / 2 for k in range(steps)]
+        rng = np.random.default_rng(0)
+        frames = rng.integers(0, 255, (2 * steps, 448, 448, 3), dtype=np.uint8)
+        meta = VideoMetadata(total_num_frames=2 * steps, fps=2.0, width=448, height=448, duration=float(steps),
+                             video_backend="opencv", frames_indices=list(range(2 * steps)))  # fmt: skip
+    timestamps = processor._calculate_timestamps(meta.frames_indices, meta.fps, vp.temporal_patch_size)
     question, options = "What is shown in the video?", ["a person", "a car", "an animal", "nothing"]
+    lines = [f"{'ABCD'[i]}. {o}" for i, o in enumerate(options)]
+    text = "\n" + question + "\n" + "\n".join(lines) + "\nAnswer with the option letter only."
+    messages = [{"role": "user", "content": [{"type": "video", "video": frames}, {"type": "text", "text": text}]}]
+    inputs = processor.apply_chat_template(messages, tokenize=True, return_dict=True, return_tensors="pt",
+                                           add_generation_prompt=True, enable_thinking=cfg.backbone.thinking,
+                                           video_metadata=[meta], do_sample_frames=False)  # fmt: skip
+    grid = inputs["video_grid_thw"][0]
+    nt, gh, gw = (int(v) for v in grid)
+    pixels, per_patch = inputs["pixel_values_videos"], gh * gw
+    patch_grid = grid.clone()[None]
+    patch_grid[0, 0] = 1
 
-    native = StreamSession(backbone, cfg, None, "native")
-    for frames, t in zip(clips, times):
-        native.step(frames, t)
-    _, native_scores = native.ask(question, options)
+    def run(session):
+        for k, t in enumerate(timestamps[:nt]):
+            session.step(None, float(t), pixels=(pixels[k * per_patch : (k + 1) * per_patch], patch_grid))
+        return session.ask(question, options)[1]
+
+    native = StreamSession(backbone, cfg, None, "native", trace=True)
+    native_scores = run(native)
+    ours = native.trace_ids + native.trace_query
+    ref_ids = inputs["input_ids"][0].tolist()
+    first_mismatch = next((i for i, (a, b) in enumerate(zip(ours, ref_ids)) if a != b),
+                          None if len(ours) == len(ref_ids) else min(len(ours), len(ref_ids)))  # fmt: skip
 
     cfg_eq = V3Config.from_dict({**cfg.to_dict(), "transition": {**cfg.to_dict()["transition"], "i_step_every": 1}})
     modules = TraceV3Modules(cfg_eq, backbone.hidden).to(device, getattr(torch, dtype)).eval()
-    v3 = StreamSession(backbone, cfg_eq, modules, "v3")
-    for frames, t in zip(clips, times):
-        v3.step(frames, t)
-    _, v3_scores = v3.ask(question, options)
+    v3_scores = run(StreamSession(backbone, cfg_eq, modules, "v3"))
 
-    # Reference: one HF forward over the same token sequence; positions come from get_rope_index.
-    ids, pixels, grids = backbone.ids(backbone.head_text), [], []
-    types = [0] * len(ids)
-    for frames, t in zip(clips, times):
-        pv, grid = backbone.preprocess(native._resize(frames))
-        h, w = backbone.merged_grid(grid)
-        ts = backbone.ids(f"<{t:.1f} seconds>") + [backbone.vision_start]
-        ids += ts + [backbone.video_token] * (h * w) + [backbone.vision_end]
-        types += [0] * len(ts) + [2] * (h * w) + [0]
-        pixels.append(pv)
-        grids.append(grid)
-    lines = [f"{'ABCD'[i]}. {o}" for i, o in enumerate(options)]
-    tail = backbone.ids("\n" + question + "\n" + "\n".join(lines) + "\nAnswer with the option letter only." + backbone.tail_text)
-    ids += tail
-    types += [0] * len(tail)
     backbone.model.model.rope_deltas = None
-    out = backbone.model(
-        input_ids=torch.tensor([ids], device=backbone.device),
-        mm_token_type_ids=torch.tensor([types], device=backbone.device),
-        pixel_values_videos=torch.cat(pixels).to(backbone.device),
-        video_grid_thw=torch.cat(grids).to(backbone.device),
-        use_cache=False,
-    )
-    ref = out.logits[0, -1].float().log_softmax(-1)[native.letter_ids[: len(options)]].tolist()
+    data = {k: v.to(backbone.device) for k, v in inputs.items() if torch.is_tensor(v)}
+    data["pixel_values_videos"] = data["pixel_values_videos"].to(backbone.dtype)
+    logits = backbone.model(**data, use_cache=False, logits_to_keep=1).logits[0, -1].float()
+    ref = logits.log_softmax(-1)[native.letter_ids[: len(options)]].tolist()
     diff_ref = max(abs(a - b) for a, b in zip(ref, native_scores))
     diff_v3 = max(abs(a - b) for a, b in zip(v3_scores, native_scores))
     gate = dtype == "float32"
+    tokens_equal = first_mismatch is None
     return {
-        "dtype": dtype, "reference_scores": ref, "native_scores": native_scores, "v3_zero_gate_scores": v3_scores,
+        "dtype": dtype, "video": video, "temporal_patches": nt, "grid": [nt, gh, gw],
+        "tokens_equal": tokens_equal, "token_lengths": [len(ours), len(ref_ids)], "first_token_mismatch": first_mismatch,
+        "mismatch_context": None if tokens_equal else {
+            "ours": backbone.tokenizer.decode(ours[max(0, first_mismatch - 3) : first_mismatch + 3]),
+            "processor": backbone.tokenizer.decode(ref_ids[max(0, first_mismatch - 3) : first_mismatch + 3])},
+        "reference_scores": ref, "native_scores": native_scores, "v3_zero_gate_scores": v3_scores,
         "max_abs_diff_native_vs_reference": diff_ref, "max_abs_diff_v3_vs_native": diff_v3,
         "thresholds": {"native_vs_reference": 1e-3 if gate else 0.25, "v3_vs_native": 1e-5 if gate else 1e-3},
-        "pass": diff_ref < (1e-3 if gate else 0.25) and diff_v3 < (1e-5 if gate else 1e-3),
+        "pass": tokens_equal and diff_ref < (1e-3 if gate else 0.25) and diff_v3 < (1e-5 if gate else 1e-3),
         "is_gate": gate, "modules": modules.parameter_report(),
     }  # fmt: skip

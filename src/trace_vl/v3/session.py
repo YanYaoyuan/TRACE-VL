@@ -1,9 +1,11 @@
 """Incremental streaming session over the hybrid backbone (inference path).
 
-Layout of the LM sequence (one user turn, as in Qwen's chat template):
-    <head> (prompt, protected)
+Layout of the LM sequence = Qwen3.5's public processor protocol for one video in a user turn
+(`processor.apply_chat_template` with a video item; verified token-for-token by `trace-vl v3 check`):
+    <head> <|vision_start|>                                   (prompt + OUTER video start, protected)
     per step: "<12.5 seconds>" <|vision_start|> visual tokens <|vision_end|>
-    at a question (on a forked cache): "\nQuestion ... Answer with the option letter only." <tail>
+    at a question, on a forked cache only: <|vision_end|> (OUTER video end) "\nQuestion ..." <tail>
+The live stream never closes the outer video, so streaming continues after every question.
 `mode="native"` sends all 196 merged tokens per step (baseline); `mode="v3"` routes the step through
 the CST adapter and the transition encoder (I-steps keep all tokens; P-steps send gist + transitions).
 Registered alert questions (Jev-style classification: noul / choice) are answered every step by the
@@ -46,7 +48,7 @@ class StepResult:
 
 class StreamSession:
     def __init__(self, backbone: Backbone, cfg: V3Config, modules: TraceV3Modules | None = None,
-                 mode: str = "native", questions: list[Question] | None = None):  # fmt: skip
+                 mode: str = "native", questions: list[Question] | None = None, trace: bool = False):  # fmt: skip
         if mode not in {"native", "v3"}:
             raise ValueError("mode must be native or v3")
         if mode == "v3" and modules is None:
@@ -64,25 +66,35 @@ class StreamSession:
         self.decision_memory = DecisionMemory(cfg.alert.memory_tokens)
         self.watching = encode_questions(backbone, questions) if questions else None
         self.last_context = None  # (taps, xy, t, clock) of the latest step, for decide()
+        self.trace_ids = [] if trace else None  # token ids as the processor would write them (checks)
+        self.trace_query = None
         self._prefill_prompt()
 
     # ------------------------------------------------------------------ prompt
     @torch.no_grad()
     def _prefill_prompt(self):
-        ids = self.bb.ids(self.bb.head_text)
+        # The public processor wraps the whole video in an outer <|vision_start|> ... <|vision_end|> pair
+        # around the per-patch blocks (PR #3 official-processor control).
+        ids = self.bb.ids(self.bb.head_text) + [self.bb.vision_start]
         self.bb.lm(self.bb.embed_ids(ids), self.pos.text(len(ids)), self.cache)
         self.memory.append(len(ids), "prompt", -1.0, ("prompt",), protected=True)
+        if self.trace_ids is not None:
+            self.trace_ids += ids
 
     # ------------------------------------------------------------------ steps
     def _resize(self, frames: np.ndarray) -> np.ndarray:
         return self.bb.resize_step(frames)
 
     @torch.no_grad()
-    def step(self, frames: np.ndarray, t: float) -> StepResult:
-        """Consume one step: 2 RGB uint8 frames [2, H, W, 3] centred at stream time t (seconds)."""
+    def step(self, frames: np.ndarray | None, t: float, pixels=None) -> StepResult:
+        """Consume one step: 2 RGB uint8 frames [2, H, W, 3] centred at stream time t (seconds).
+
+        `pixels=(pixel_values, grid_thw)` feeds already-processed patches of one temporal patch instead
+        (e.g. the processor's own output, for protocol checks).
+        """
         bb = self.bb
         started = clock.perf_counter()
-        pixel_values, grid_thw = bb.preprocess(self._resize(frames))
+        pixel_values, grid_thw = pixels if pixels is not None else bb.preprocess(self._resize(frames))
         x = bb.encode(pixel_values, grid_thw)
         h, w = bb.merged_grid(grid_thw)
         info = None
@@ -120,6 +132,8 @@ class StreamSession:
             drift = float((after.float() - before.float()).norm() / before.float().norm().clamp_min(1e-6))
 
         n_text = len(ts_ids)
+        if self.trace_ids is not None:
+            self.trace_ids += ts_ids + [bb.video_token] * tokens.shape[0] + [bb.vision_end]
         self.memory.append(n_text, "text", t, ("step", self.step_index))
         self.memory.append(tokens.shape[0], kinds, t, groups)
         self.memory.append(1, "text", t, ("step", self.step_index))
@@ -197,6 +211,12 @@ class StreamSession:
     def _fork(self):
         return self.bb.fork(self.cache), copy.deepcopy(self.pos)
 
+    def _close_video(self, cache, pos) -> list[int]:
+        """Close the outer video on a fork (never on the live stream)."""
+        ids = [self.bb.vision_end]
+        self.bb.lm(self.bb.embed_ids(ids), pos.text(1, self.bb.device), cache)
+        return ids
+
     @torch.no_grad()
     def _marker_step(self, cache, pos, frames: np.ndarray, t: float):
         """Append a full-token query image (e.g. the current frame with a red box) to a forked cache."""
@@ -217,12 +237,15 @@ class StreamSession:
         fork only, so it never enters the stream memory.
         """
         cache, pos = self._fork()
-        if marker is not None:
+        if marker is not None:  # a frame of the video: inside the outer wrapper, before it is closed
             self._marker_step(cache, pos, *marker)
             question = "The red box in the last image marks the area the question is about.\n" + question
+        closing = self._close_video(cache, pos)
         lines = [f"{LETTERS[i]}. {o}" for i, o in enumerate(options)]
         text = "\n" + question + "\n" + "\n".join(lines) + "\nAnswer with the option letter only." + self.bb.tail_text
         ids = self.bb.ids(text)
+        if self.trace_ids is not None:
+            self.trace_query = closing + ids
         hidden = self.bb.lm(self.bb.embed_ids(ids), pos.text(len(ids)), cache)
         logits = self.bb.logits(hidden[:, -1:])[0, -1].float()
         scores = logits.log_softmax(-1)[self.letter_ids[: len(options)]]
@@ -232,6 +255,7 @@ class StreamSession:
     def describe(self, prompt: str = "Describe what is happening now in one sentence.", max_new_tokens: int = 40):
         """Greedy text on a forked cache (explanations on demand; alerts do not need it)."""
         cache, pos = self._fork()
+        self._close_video(cache, pos)
         ids = self.bb.ids("\n" + prompt + self.bb.tail_text)
         hidden = self.bb.lm(self.bb.embed_ids(ids), pos.text(len(ids)), cache)
         out = []
