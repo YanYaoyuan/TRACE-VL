@@ -7,6 +7,7 @@ FP32 equality gate. One unconstrained greedy next-token and constrained A-D are 
 """
 import argparse
 import gc
+import inspect
 import json
 import time
 import traceback
@@ -31,7 +32,10 @@ p.add_argument('--limit-videos', type=int, default=30)
 p.add_argument('--device', default='cuda:0')
 p.add_argument('--dtype', choices=['bfloat16', 'float32'], default='bfloat16')
 p.add_argument('--align-outer-markers', action='store_true')
+p.add_argument('--shard', default='0/1', help='Zero-based index/count; disjoint video groups')
 args = p.parse_args()
+shard_index, shard_count = map(int, args.shard.split('/'))
+assert 0 <= shard_index < shard_count
 out = Path(args.output)
 out.mkdir(parents=True, exist_ok=True)
 torch.set_num_threads(4)
@@ -47,6 +51,7 @@ vp_defaults = {key: asdict(getattr(vp, key)) if is_dataclass(getattr(vp, key)) e
     'sampling': 'HF sample_frames defaults', 'decoder': 'HF read_video_opencv', 'dtype': args.dtype,
     'reference': 'public processor + full model forward, logits_to_keep=1',
     'align_outer_markers': args.align_outer_markers,
+    'shard': args.shard,
     'matched': 'same processor pixel_values, per-patch grid, timestamps, question and template; no eviction'}, indent=2)+'\n')
 class AlignedSession(StreamSession):
     @torch.no_grad()
@@ -67,7 +72,7 @@ for line in Path(args.records).read_text().splitlines():
     groups[r['video']].append(r)
 result_file = out / 'predictions.jsonl'
 completed = {json.loads(x)['id'] for x in result_file.read_text().splitlines()} if result_file.exists() else set()
-for video, records in list(groups.items())[:args.limit_videos]:
+for video, records in list(groups.items())[:args.limit_videos][shard_index::shard_count]:
     if all(r['id'] in completed for r in records):
         continue
     original_preprocess, original_resize = bb.preprocess, bb.resize_step
@@ -90,15 +95,19 @@ for video, records in list(groups.items())[:args.limit_videos]:
             assert nt == len(timestamps), (nt, len(timestamps))
             pixels = inputs['pixel_values_videos']
             if session is None:
-                session = (AlignedSession if args.align_outer_markers else StreamSession)(bb, cfg, mode='native')
+                trace_args = {'trace': True} if 'trace' in inspect.signature(StreamSession).parameters else {}
+                session = (AlignedSession if args.align_outer_markers else StreamSession)(bb, cfg, mode='native', **trace_args)
                 per_step = gh * gw
                 for k, t in enumerate(timestamps):
                     patch_pixels = pixels[k * per_step:(k + 1) * per_step]
                     patch_grid = grid.clone()[None]
                     patch_grid[0, 0] = 1
-                    bb.resize_step = lambda x: x
-                    bb.preprocess = lambda _frames, pv=patch_pixels, g=patch_grid: (pv, g)
-                    session.step(np.zeros((2, 32, 32, 3), dtype=np.uint8), float(t))
+                    if 'pixels' in inspect.signature(session.step).parameters:
+                        session.step(None, float(t), pixels=(patch_pixels, patch_grid))
+                    else:
+                        bb.resize_step = lambda x: x
+                        bb.preprocess = lambda _frames, pv=patch_pixels, g=patch_grid: (pv, g)
+                        session.step(np.zeros((2, 32, 32, 3), dtype=np.uint8), float(t))
                 bb.preprocess, bb.resize_step = original_preprocess, original_resize
             if record['id'] in completed:
                 continue
@@ -122,6 +131,9 @@ for video, records in list(groups.items())[:args.limit_videos]:
                 'input_tokens': inputs['input_ids'].shape[1], 'kv_tokens': bb.kv_length(session.cache),
                 'peak_gb': torch.cuda.max_memory_allocated(bb.device)/1e9,
                 'elapsed_video': round(time.perf_counter()-started, 3)}
+            if getattr(session, 'trace_ids', None) is not None:
+                row['tokens_equal'] = session.trace_ids + session.trace_query == inputs['input_ids'][0].tolist()
+                assert row['tokens_equal'], record['id']
             with result_file.open('a') as handle:
                 handle.write(json.dumps(row)+'\n')
             print(json.dumps({k:v for k,v in row.items() if k not in {'official_scores','matched_scores'}}), flush=True)
