@@ -30,9 +30,11 @@ changes the latency numbers.
 ## M0: backbone harness and baselines
 
 ```bash
-# 1. Equality gate first (also part of M1): incremental streaming == HF forward; zero-gated v3 == native
+# 1. Equality gate first (also part of M1), in float32: incremental streaming == HF forward (< 1e-3),
+#    zero-gated v3 == native (< 1e-5). bf16 differs by ~0.1 from rounding alone (informational: --dtype bfloat16).
 CUDA_VISIBLE_DEVICES=0 uv run --locked trace-vl v3 check --config configs/v3/native_full.yaml --video path/to/short.mp4
-#    expect "pass": true. If max_abs_diff_native_vs_reference is large, positions or timestamps differ: stop and post it.
+# 1b. Gradient regression on a static clip (real backbone): total unclipped norm must stay < 1e4
+CUDA_VISIBLE_DEVICES=0 uv run --locked trace-vl v3 gradcheck --config configs/v3/stage1.yaml
 
 # 2. Cost profile on synthetic frames (10 min = 600 steps) for each KV policy
 for c in native_full native_window native_drift native_fifo; do
