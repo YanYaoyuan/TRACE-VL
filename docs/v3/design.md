@@ -129,16 +129,41 @@ tokens ≈ 80 MB *(est.)*, constant in stream length.
 Retrieval is plain attention in those layers: differentiable, no top-k, and no question needed at
 write time. That is the key difference from v1's ranking and v2's heuristic sort.
 
-### 3.4 Parameter budget
+### 3.4 Non-autoregressive heads: alerts and event embeddings (kept from v1, extended)
+
+Surveillance needs a decision every step, not a sentence. Decoding text is slow and unnecessary for
+"should this fire?", so v3 keeps v1's alert head and adds a VL-JEPA-style embedding head
+([VL-JEPA](https://arxiv.org/abs/2512.10942), ICLR 2026: predict text embeddings instead of tokens and
+decode selectively). Both read the LM hidden state at each step's `<|vision_end|>` token, which the
+streaming forward computes anyway, so they cost one small MLP per step and no decoding.
+
+- **Rule-conditioned alert head.** Rules are written into the prompt ("Monitoring rules: 1. … 2. …"),
+  so all 24 LM layers condition the stream on them, and the GDN state is rule-aware. For rule r the
+  query is the mean prompt hidden state over that rule's tokens:
+  logit_r(t) = MLP(W_s h_t ⊙ W_r q_r + W_c c_t), where c_t holds transition clocks (log ages of active
+  transitions, their count, mean surprise). The clocks let duration rules ("bag left > 10 min")
+  fire from memory rather than from the current frame. Many rules are scored in one pass.
+- **Event embedding head (JEPA-style).** e_t = normalize(MLP(h_t)) is trained with InfoNCE to match
+  the embedding of a caption covering t (teacher LM mean hidden state, through a small text
+  projection). Uses: (1) zero-shot rules by cosine(e_t, embed(rule text)) when no labels exist;
+  (2) **selective decoding**: generate a description only when 1 − cos(e_t, e_last_decoded) > τ, as
+  VL-JEPA does for streams.
+- Training: BCE on per-step rule labels where they exist (MEVA activities as rules; anomaly datasets
+  with frame labels, licence permitting); InfoNCE on captioned clips. Both heads train jointly with
+  Stage 1; the transition clocks are wired in the streaming session and are zero in the Stage 1
+  trainer (TODO: compute them from the transition encoder during training).
+
+### 3.5 Parameter budget
 
 | Component | Params *(est.)* | Trainable |
 |---|---|---|
 | Qwen3.5-2B (ViT ≈ 0.3B + LM ≈ 1.9B incl. embeddings) | ≈ 2.2B | ViT frozen; LM via LoRA |
 | CST adapter | ≈ 34M | yes |
 | Transition encoder (predictor, slots, token heads, gist) | ≈ 21M | yes |
+| Alert head + event head | ≈ 9M | yes |
 | Retention scorer | < 1M | yes |
 | LoRA (r = 32 on q/k/v/o of full-attn layers and in/out projections of GDN layers) | ≈ 25M | yes |
-| **Total** | **≈ 2.28B** | ≈ 80M trainable |
+| **Total** | **≈ 2.29B** | ≈ 90M trainable |
 
 Replace the estimates with `parameter_report()` in M1.
 

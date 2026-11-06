@@ -1,0 +1,4 @@
+# B2 reference: window + most recent older steps within the same budget (recency only).
+extends: native_drift.yaml
+memory:
+  policy: fifo

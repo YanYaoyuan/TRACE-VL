@@ -64,6 +64,17 @@ before each temporal patch) — **read** (secondary summaries + abstract).
 | [Distilling to hybrid attention via KL-guided layer selection](https://arxiv.org/abs/2512.20569) | 2025-12 | distillation into hybrids | distillation recipe reference | to read |
 | [Memoir](https://arxiv.org/abs/2607.20792) | 2026-07 | should a model write to memory while it thinks | — | to read |
 
+## 3b. Non-autoregressive outputs for streams
+
+- [VL-JEPA](https://arxiv.org/abs/2512.10942) (Meta FAIR, ICLR 2026): predicts continuous embeddings
+  of target text instead of tokens; with 1.6B parameters it is comparable to classical VLMs on VQA,
+  and selective decoding (decode only when the predicted embedding stream changes) cuts decoding
+  operations about 2.85× with similar performance. Basis for v3's event-embedding head and selective
+  decoding. — read
+- [Event-VStream](https://arxiv.org/abs/2601.15655) (2026-01): small MLP predicts the next frame
+  embedding; prediction error marks event boundaries in streams without labels. Same principle as our
+  predictor surprise. — read
+
 ## 4. Hybrid / linear attention for video
 
 - [Video DeltaNet](https://arxiv.org/abs/2609.20744) (2026-09): local softmax for nearby frames +

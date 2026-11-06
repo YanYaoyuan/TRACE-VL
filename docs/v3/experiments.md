@@ -44,6 +44,19 @@ learned evidence selection) and re-plan in the tracker.
 Efficiency, reported for every row: LM tokens per second of video, KV MB at 10 / 60 min, latency per
 step (ms), peak training memory, and GPU-hours to train.
 
+### Alerts (non-autoregressive heads)
+
+| Metric | Definition |
+|---|---|
+| step-level AUROC / AP per rule | alert logits vs per-step rule labels |
+| event-level precision / recall | an alert episode matches a labelled interval within tolerance |
+| time to alarm | first firing step minus interval start (or due time for duration rules) |
+| throughput | steps/s with heads only vs with text decoding at every step vs selective decoding (VL-JEPA-style); report decode calls saved |
+
+Baselines for alerts: (a) the same backbone asked a yes/no question per rule at every step
+(autoregressive, slow); (b) v2's detector + rule replay (`trace-vl inspection alerts`); (c) the event
+head's zero-shot cosine without alert labels.
+
 ## 4. Data
 
 Use only sources whose licenses allow research use; record license and version per dataset in
