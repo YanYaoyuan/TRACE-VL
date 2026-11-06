@@ -11,17 +11,16 @@ import inspect
 import json
 import time
 import traceback
-from dataclasses import asdict, is_dataclass
 from collections import defaultdict
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
 import numpy as np
 import torch
-from transformers.video_utils import read_video_opencv
-
 from trace_vl.v3.backbone import Backbone
 from trace_vl.v3.config import load_v3_config
 from trace_vl.v3.session import StreamSession
+from transformers.video_utils import read_video_opencv
 
 p = argparse.ArgumentParser()
 p.add_argument('--config', required=True)
