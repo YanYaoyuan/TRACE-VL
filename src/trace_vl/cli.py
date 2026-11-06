@@ -343,6 +343,8 @@ def _v3_parser(commands):
         c = sub.add_parser(name)
         c.add_argument("input")
         c.add_argument("--output", required=True)
+        if name == "convert-ovo":
+            c.add_argument("--video-root", help="keep only questions whose video exists here (partial download)")
     c = sub.add_parser("convert-meva")
     c.add_argument("--bench", default="data/meva/bench")
     c.add_argument("--split", default="test")
@@ -392,7 +394,7 @@ def _v3(args):
         print(json.dumps(value, indent=2, default=str))
 
     if args.action == "convert-ovo":
-        return show(v3data.convert_ovo(args.input, args.output))
+        return show(v3data.convert_ovo(args.input, args.output, args.video_root))
     if args.action == "convert-videomme":
         return show(v3data.convert_videomme(args.input, args.output))
     if args.action == "convert-meva":

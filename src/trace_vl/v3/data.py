@@ -32,17 +32,20 @@ OVO_MCQ_TASKS = {
 }  # fmt: skip
 
 
-def convert_ovo(annotation: str, output: str) -> dict:
+def convert_ovo(annotation: str, output: str, video_root: str | None = None) -> dict:
     """OVO-Bench (`data/ovo_bench_new.json`): backward and real-time multiple-choice tasks.
 
     Forward-active tasks (REC, SSR, CRR) poll the model at several times and need a separate protocol;
     they are counted and skipped here.
     """
-    rows, skipped = [], {}
+    rows, skipped, missing = [], {}, 0
     for item in json.loads(Path(annotation).read_text()):
         task = item["task"]
         if task not in OVO_MCQ_TASKS:
             skipped[task] = skipped.get(task, 0) + 1
+            continue
+        if video_root and not (Path(video_root) / item["video"]).is_file():
+            missing += 1  # partial download: keep only questions whose video is on disk
             continue
         rows.append({
             "id": f"ovo-{item['id']}", "source": "ovo-bench", "task": f"{OVO_MCQ_TASKS[task]}/{task}",
@@ -50,7 +53,8 @@ def convert_ovo(annotation: str, output: str) -> dict:
             "options": item["options"], "answer": int(item["gt"]), "region": None, "split": "test",
         })  # fmt: skip
     write_jsonl(output, rows)
-    return {"records": len(rows), "skipped_forward_tasks": skipped}
+    return {"records": len(rows), "skipped_forward_tasks": skipped, "missing_videos_skipped": missing,
+            "videos": len({r["video"] for r in rows})}  # fmt: skip
 
 
 def convert_videomme(parquet: str, output: str) -> dict:
