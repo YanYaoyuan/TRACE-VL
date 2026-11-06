@@ -12,6 +12,10 @@ TRACE-VL 是一个**流式视频理解模型**：视频按时间顺序到达，�
 
 ## 模型（v2：预训练 VLM + 转移证据记忆）
 
+![TRACE-VL v2 架构](assets/architecture_v2.png)
+
+可编辑矢量图：[architecture_v2.svg](assets/architecture_v2.svg)，由 `python scripts/draw_architecture_v2.py` 生成。
+
 ```text
 视频 (2 fps) ─> 双背景变化检测器 ─> 区域级转移（变化前裁剪、变化后裁剪、t_start / t_known / t_end）
              ─> 有界转移存储（已恢复的先淘汰，仍存在的最后淘汰）

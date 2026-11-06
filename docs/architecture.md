@@ -10,6 +10,8 @@ v1 用随机初始化的时空桥接把视觉特征压成冻结 LLM 的前缀，
 
 ### 数据流
 
+![TRACE-VL v2 架构](../assets/architecture_v2.png)
+
 ```text
 视频帧 (sample_fps=2)
   └─ ChangeDetector（双背景差分，因果）
