@@ -21,6 +21,26 @@ question embedding -> retrieve past capsules -> evidence resampler -> LLM prefix
 - 规则条件告警。未来问答不参加观测与写入。问题仅在读出阶段选择历史事件，附带 `observed_start`、`known_at` 和 before-valid 的时间编码，然后转换为语言模型视觉前缀。
 - 文本、告警、写入和可选 utility 损失；TBPTT detach；冻结骨干和可选 LoRA；单机 DDP。
 
+## v2 设计修正（可选开关，默认关闭）
+
+针对四帧与32帧试验中“视频错配后 EM 不变”和长展开数值爆炸，新增以下 `model` 开关。默认值与原实现逐位一致（已对比 main 的 loss、梯度与前缀），旧 checkpoint 与已发布报告不受影响；`configs/local_2b_v2.yaml`（四帧）和 `configs/tuning/v2_32frames.yaml`（32帧）全部开启。
+
+| 开关 | 问题 | 修正 |
+|---|---|---|
+| `prompt_format: chat` | 前缀+问题+答案直接拼接，无 chat 模板与分隔，Qwen3 后训练格式失配 | 使用 tokenizer chat 模板（关闭 thinking），视觉前缀以 `Video:` 标记放入 user 轮内；截断只作用于问题，保留答案提示后缀 |
+| `state_update: bounded` | `proposed` 对 `previous` 残差，门控混合等价于无衰减积分，导致工作状态放大 | 去掉残差并 LayerNorm 后再门控，成为有界值的凸组合 |
+| `state_kv_norm: true` | 工作状态未经归一化直接作为每层时间 attention 的 K/V | 复用该层 `temporal_norm` |
+| `retrieval_gradient: true` | top-k 事件检索不可导，打分从未被训练；32帧时一半事件被未训练规则丢弃 | straight-through：前向值不变，打分经 softmax 概率获得梯度 |
+| `query_projection: separate` | 问题编码绑定为视觉投影第一层的转置，两个功能争用同一权重 | 独立线性层，初始化为原绑定映射，可从旧权重热启动 |
+| `token_selection: pool` | 按特征离差选 patch 易选到 ViT 高范数伪影，且每帧位置不同 | 固定网格平均池化（96=8×12，224=14×16），跨帧位置一致 |
+| `motion_layout: grid` | 运动 token 为整列条带，位置全为 (0.5,0.5)，无 xy 编码 | 方形网格池化并加入真实位置编码 |
+
+训练侧新增（`training`，默认不变）：`lr_schedule: cosine`、`warmup_steps`、`min_lr_ratio`；`exclude_norm_decay` 对 bias、LayerNorm 与可学习查询不做权重衰减；`loss_weights.contrast` 与 `contrast_margin` 为视觉对比 hinge：同批内滚动交换视觉前缀，要求正确视频下答案损失比错配视频低至少 margin（每卡 batch≥2 才生效）。
+
+`--init-from` 允许从原 checkpoint 热启动到上述任意开关组合。`scripts/diagnose_prefix.py` 在训练前检查前缀是否随视频变化：报告各阶段的 between-video 方差占比（接近0表示与视频无关的塌缩）以及前缀与 LLM 词嵌入的范数比。原始余弦相似度受共享偏置主导，即使未训练也接近1，仅供参考。
+
+这些修正尚未在真实数据上验证效果；判据是视觉错配控制的差距显著大于0，而不仅是 EM 提高。
+
 ## 尚未实现或未验证
 
 | 设计概念 | 当前边界 |

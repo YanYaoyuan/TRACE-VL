@@ -43,6 +43,15 @@ class ModelConfig:
     lora_rank: int = 0
     dropout: float = 0.0
     text_limit: int = 256
+    # v2 design fixes. Defaults reproduce the original behavior so existing checkpoints and reports
+    # remain valid; configs/local_2b_v2.yaml enables all of them.
+    prompt_format: str = "raw"
+    state_update: str = "residual"
+    state_kv_norm: bool = False
+    retrieval_gradient: bool = False
+    query_projection: str = "tied"
+    token_selection: str = "saliency"
+    motion_layout: str = "strips"
 
     def __post_init__(self):
         if self.backend not in {"tiny", "hf"}:
@@ -78,6 +87,16 @@ class ModelConfig:
             raise ValueError("write_threshold must be between 0 and 1")
         if self.query_encoding not in {"embedding_mean", "last_hidden"}:
             raise ValueError("invalid query_encoding")
+        choices = {
+            "prompt_format": {"raw", "chat"},
+            "state_update": {"residual", "bounded"},
+            "query_projection": {"tied", "separate"},
+            "token_selection": {"saliency", "pool"},
+            "motion_layout": {"strips", "grid"},
+        }
+        for key, allowed in choices.items():
+            if getattr(self, key) not in allowed:
+                raise ValueError(f"{key} must be one of {sorted(allowed)}")
 
     @classmethod
     def from_dict(cls, values: dict) -> "ModelConfig":
@@ -88,6 +107,12 @@ class ModelConfig:
 
     def to_dict(self):
         return asdict(self)
+
+
+def factor_grid(count: int) -> tuple[int, int]:
+    """Most square (rows, cols) with rows * cols == count and rows <= cols."""
+    rows = max(r for r in range(1, int(count**0.5) + 1) if count % r == 0)
+    return rows, count // rows
 
 
 def load_config(path: str | Path) -> dict:

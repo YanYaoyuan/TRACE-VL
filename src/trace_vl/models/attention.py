@@ -23,7 +23,14 @@ class CacheEntry:
 
 class CausalSTBlock(nn.Module):
     def __init__(
-        self, dim: int, heads: int, ratio: int, cache_frames: int, cache_seconds: float, dropout: float = 0.0
+        self,
+        dim: int,
+        heads: int,
+        ratio: int,
+        cache_frames: int,
+        cache_seconds: float,
+        dropout: float = 0.0,
+        state_kv_norm: bool = False,
     ):
         super().__init__()
         self.dim, self.heads, self.head_dim = dim, heads, dim // heads
@@ -36,6 +43,7 @@ class CausalSTBlock(nn.Module):
         self.ffn_norm = nn.LayerNorm(dim)
         self.ffn = nn.Sequential(nn.Linear(dim, dim * ratio), nn.GELU(), nn.Linear(dim * ratio, dim))
         self.dropout = dropout
+        self.state_kv_norm = state_kv_norm
 
     def _heads(self, x):
         return x.reshape(x.shape[0], x.shape[1], self.heads, self.head_dim).transpose(1, 2)
@@ -69,7 +77,9 @@ class CausalSTBlock(nn.Module):
         bias = self.position_bias(features.to(normalized.dtype)).permute(0, 3, 1, 2)
         bias = bias.masked_fill(~allowed[:, None, None, :], -torch.inf)
         # State keys are always available, including for padded frames. This prevents all-masked rows.
-        sk, sv = self._heads(self.k(previous_state)), self._heads(self.v(previous_state))
+        # Optionally reuse the temporal LayerNorm so state drift cannot dominate every layer's attention.
+        state = self.temporal_norm(previous_state) if self.state_kv_norm else previous_state
+        sk, sv = self._heads(self.k(state)), self._heads(self.v(state))
         keys, values = torch.cat([keys, sk], 2), torch.cat([values, sv], 2)
         state_bias = torch.zeros(*bias.shape[:-1], sk.shape[2], device=x.device, dtype=bias.dtype)
         bias = torch.cat([bias, state_bias], dim=-1)

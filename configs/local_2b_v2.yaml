@@ -1,0 +1,33 @@
+# v2 design fixes on the 4-frame ActivityNet/LLaVA-Video pilot (same data, backbones and global batch).
+# Compare against configs/local_2b_ddp_5epochs.yaml with scripts/diagnose_visual_dependency.py: the goal
+# is a matched-vs-mismatched video gap clearly above zero, not only a higher EM.
+# Launch: CUDA_VISIBLE_DEVICES=0,1 uv run --locked torchrun --standalone --nproc_per_node=2 \
+#   -m trace_vl train --config configs/local_2b_v2.yaml --output outputs/v2-4frames
+extends: local_2b_pilot_cfr.yaml
+model:
+  prompt_format: chat          # Qwen3 chat template; visual prefix inside the user turn
+  state_update: bounded        # convex gated update, no undamped residual integration
+  state_kv_norm: true          # LayerNorm the working state before it becomes temporal K/V
+  normalize_memory: true
+  retrieval_gradient: true     # straight-through top-k so retrieval scores learn
+  query_projection: separate   # question encoder decoupled from the visual projector
+  token_selection: pool        # 96 RGB tokens = stable 8x12 pooled grid of the 24x24 patches
+  motion_layout: grid          # 16 motion tokens = 4x4 grid with real positions
+training:
+  batch_size: 2                # per rank; the contrast loss needs >= 2 samples to swap videos
+  grad_accum: 1                # global batch 4, as in the baseline
+  max_steps: 2250
+  save_every: 450
+  keep_steps: [450, 900, 2250]
+  lr: 0.0001
+  lr_schedule: cosine
+  warmup_steps: 100
+  min_lr_ratio: 0.1
+  exclude_norm_decay: true
+  loss_weights:
+    answer: 1.0
+    alert: 0.0
+    write: 0.0
+    utility: 0.0
+    contrast: 0.5              # hinge: answer loss under the right video < under a swapped video
+    contrast_margin: 0.2

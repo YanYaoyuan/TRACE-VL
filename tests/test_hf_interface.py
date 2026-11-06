@@ -9,8 +9,11 @@ from trace_vl.config import ModelConfig  # noqa: E402
 from trace_vl.models.model import TraceVL  # noqa: E402
 
 
-@pytest.mark.parametrize("query_encoding", ["embedding_mean", "last_hidden"])
-def test_local_siglip_qwen3_forward_and_generation(tmp_path, query_encoding):
+@pytest.mark.parametrize(
+    "query_encoding,prompt_format",
+    [("embedding_mean", "raw"), ("last_hidden", "raw"), ("embedding_mean", "chat")],
+)
+def test_local_siglip_qwen3_forward_and_generation(tmp_path, query_encoding, prompt_format):
     from tokenizers import Tokenizer
     from tokenizers.models import WordLevel
     from tokenizers.pre_tokenizers import Whitespace
@@ -44,6 +47,10 @@ def test_local_siglip_qwen3_forward_and_generation(tmp_path, query_encoding):
     raw.pre_tokenizer = Whitespace()
     tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=raw, pad_token="<pad>", eos_token="<eos>", unk_token="<unk>"
+    )
+    tokenizer.chat_template = (
+        "{% for m in messages %}<{{ m['role'] }}> {{ m['content'] }} </{{ m['role'] }}> {% endfor %}"
+        "{% if add_generation_prompt %}<assistant> {% endif %}"
     )
     tokenizer.save_pretrained(language_dir)
     language = Qwen3ForCausalLM(
@@ -83,8 +90,10 @@ def test_local_siglip_qwen3_forward_and_generation(tmp_path, query_encoding):
         vision_model=str(vision_dir),
         language_model=str(language_dir),
         query_encoding=query_encoding,
+        prompt_format=prompt_format,
     )
     model = TraceVL(cfg).train()
+    assert bool(model.language.format.head) == (prompt_format == "chat")
     torch.testing.assert_close(model.language.encode_text([""], query_encoding), torch.zeros(1, 32))
     batch = {
         "frames": torch.rand(1, 2, 3, 32, 32),
