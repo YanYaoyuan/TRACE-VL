@@ -1,4 +1,9 @@
-# Fixed-camera inspection with transition memory
+# TRACE-VL v2 on fixed-camera inspection: benchmark and run guide
+
+TRACE-VL is a streaming video understanding model with transition evidence memory (see the
+[model doc](architecture.md)). Fixed-camera property inspection is its first application and
+evaluation setting. This page covers that setting: the claim, the MEVA benchmark, the label audit and
+how to run it.
 
 Status: implemented, not yet run on GPU or real video. Nothing below is a result.
 
