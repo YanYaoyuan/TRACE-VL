@@ -129,3 +129,8 @@ Reports and raw JSON are on the tester's review branch
 Not established by these tests: any accuracy advantage of v3 (a 12-step ActivityNet diagnostic gave 12/13 vs
 11/13 on a 13-question video-disjoint set), official benchmark scores (30 selected videos, no subtitles,
 non-thinking, option likelihoods), and surveillance false-alarm/miss rates.
+
+
+## 9. Paired 4×A100 pilot: 100 updates per arm
+
+The owner-completed short-video validation run is recorded in [a100-pilot-001](results/a100-pilot-001.md), with the [supplied numerical summary](results/a100-pilot-001-summary.json). It covers 488 questions from 29 videos on the pre-gate-fix `f37d2d3` implementation. Budget matching passes, but transition accuracy is 85.25% versus native 88.32% and B4 85.66%; the paired transition-minus-B4 interval crosses zero. Rank-0 training logs are predominantly gist-only. **M2 remains open.** The report documents the procedure, provenance, memory/timing definitions, and the infeasible inherited P-step target (40 versus a maximum of 32) to address before the new-objective rerun.
