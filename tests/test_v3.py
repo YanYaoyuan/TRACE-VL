@@ -377,18 +377,57 @@ def test_evaluate_rejects_duplicate_record_ids(tmp_path):
         evaluate(V3Config(), str(path), str(tmp_path), str(tmp_path / "out"))
 
 
-def test_b4_pooled_p_steps_have_fixed_count_and_positions():
-    cfg = small_config(i_step_every=100)
-    cfg.transition.p_step_mode, cfg.transition.pooled_tokens = "pooled", 4
-    modules = TraceV3Modules(cfg, model_dim=16).eval()
-    cst, te = CSTCache(), TECache()
-    for k in range(3):
-        x = torch.rand(12, 16) + 0.5
-        adapted, z = modules.cst(x, (3, 4), float(k), cst)
-        info = modules.transition(adapted, z, (3, 4), te)
-    assert not info.is_i_step and info.tokens.shape[0] == 4 and set(info.kinds) == {"gist"}
-    assert info.rows.max() <= 2 and info.cols.max() <= 3 and len(set(zip(info.rows.tolist(), info.cols.tolist()))) == 4
+def test_pool_regions_exact_cardinality_and_partition():
+    """Regression (PR #3 review): factorize-then-clamp returned 14/24/12 tokens for K=31/32/32."""
+    from trace_vl.v3.modules import pool_regions
+
+    for h, w, k in [(14, 14, 31), (3, 65, 32), (65, 3, 32), (14, 14, 1), (14, 14, 196), (7, 11, 13), (1, 1, 1)]:
+        regions = pool_regions(h, w, k)
+        assert len(regions) == k
+        cover = torch.zeros(h, w, dtype=torch.int64)
+        for y0, y1, x0, x1 in regions:
+            assert y1 > y0 and x1 > x0
+            cover[y0:y1, x0:x1] += 1
+        assert bool((cover == 1).all())  # exact, non-overlapping partition
+    for bad in (0, -1, 197):
+        with pytest.raises(ValueError):
+            pool_regions(14, 14, bad)
+    for bad in (0, -1, True):
+        with pytest.raises(ValueError):
+            V3Config.from_dict({"transition": {"pooled_tokens": bad}})
+
+
+def _b4_pair(pooled_match=True, k=4):
+    cfgs = []
+    for mode in ("transition", "pooled"):
+        cfg = small_config(i_step_every=100)  # mass_threshold 0: slots are active
+        cfg.transition.p_step_mode, cfg.transition.pooled_match, cfg.transition.pooled_tokens = mode, pooled_match, k
+        cfgs.append(cfg)
+    outs = []
+    for cfg in cfgs:
+        torch.manual_seed(5)
+        modules = TraceV3Modules(cfg, model_dim=16).eval()
+        cst, te = CSTCache(), TECache()
+        torch.manual_seed(6)
+        for step in range(3):
+            adapted, z = modules.cst(torch.rand(12, 16) + 0.5, (3, 4), float(step), cst)
+            info = modules.transition(adapted, z, (3, 4), te)
+        outs.append((info, adapted))
+    return outs
+
+
+def test_b4_keeps_slot_memory_and_matches_budget():
+    """B4 replaces only the emitted P-step tokens: CST memory / clock inputs are identical (PR #3 review)."""
+    (trans, _), (pooled, adapted) = _b4_pair()
+    assert not trans.is_i_step and not pooled.is_i_step and trans.aux["active_slots"] > 0
+    assert pooled.tokens.shape[0] == trans.tokens.shape[0] == trans.aux["transition_tokens"]  # matched budget
+    assert torch.equal(pooled.aux["slot_memory"], trans.aux["slot_memory"])
+    assert pooled.aux["active_centroids"] == trans.aux["active_centroids"]
+    assert set(pooled.kinds) == {"gist"}
     ref = adapted.norm(dim=-1).mean()
-    assert torch.allclose(info.tokens.norm(dim=-1), torch.full((4,), float(ref)), rtol=1e-4)
-    with pytest.raises(ValueError):
-        V3Config.from_dict({"transition": {"p_step_mode": "random"}})
+    assert torch.allclose(pooled.tokens.norm(dim=-1), torch.full_like(pooled.tokens[:, 0], float(ref)), rtol=1e-4)
+
+
+def test_b4_fixed_budget_mode():
+    (_, _), (pooled, _) = _b4_pair(pooled_match=False, k=5)
+    assert pooled.tokens.shape[0] == 5 and pooled.rows.max() <= 2 and pooled.cols.max() <= 3

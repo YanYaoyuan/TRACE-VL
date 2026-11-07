@@ -366,6 +366,17 @@ def _v3_parser(commands):
     c.add_argument("--steps", type=int, default=6)
     c.add_argument("--threshold", type=float, default=1e4)
     c.add_argument("--device", default="cuda")
+    c = sub.add_parser("budget", help="matched visual-token budget audit (transition vs B4) on calibration videos")
+    c.add_argument("--config", default="configs/v3/v3_tkm.yaml")
+    c.add_argument("--checkpoint", help="transition-arm modules.pt")
+    c.add_argument("--config-b4", default="configs/v3/v3_pooled_b4.yaml")
+    c.add_argument("--checkpoint-b4", help="B4-arm modules.pt")
+    c.add_argument("--records", required=True, help="calibration records (train/val split, never test)")
+    c.add_argument("--video-root", required=True)
+    c.add_argument("--max-videos", type=int, default=8)
+    c.add_argument("--max-seconds", type=float, default=180.0)
+    c.add_argument("--tolerance", type=float, default=0.05)
+    c.add_argument("--device", default="cuda")
     c = sub.add_parser("profile", help="latency / KV memory on synthetic frames")
     c.add_argument("--config", default="configs/v3/native_full.yaml")
     c.add_argument("--mode", choices=["native", "v3"], default="native")
@@ -431,6 +442,14 @@ def _v3(args):
         from .v3.train import gradient_check
 
         return show(gradient_check(cfg, args.steps, args.threshold, args.device))
+    if args.action == "budget":
+        from .v3.config import load_v3_config as _load
+        from .v3.harness import budget_audit
+
+        cfg_b4, _ = _load(args.config_b4)
+        arms = [("transition", cfg, args.checkpoint), ("b4_pooled", cfg_b4, args.checkpoint_b4)]
+        return show(budget_audit(arms, args.records, args.video_root, args.device, args.max_videos,
+                                 args.max_seconds, args.tolerance))  # fmt: skip
     if args.action == "profile":
         from .v3.harness import profile
 

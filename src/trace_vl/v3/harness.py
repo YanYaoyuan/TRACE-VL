@@ -17,6 +17,7 @@ from .backbone import Backbone
 from .config import V3Config
 from .data import StepReader, draw_region, read_jsonl, step_times
 from .model import TraceV3Modules
+from .modules import CSTCache, TECache
 from .session import StreamSession
 
 
@@ -141,6 +142,7 @@ def _run_video(cfg, backbone, modules, mode, reader, records, handle, run_id):
     times = step_times(min(last_query, reader.duration), step_s, gap, cfg.stream.max_steps if offline else 0)
     session = StreamSession(backbone, cfg, modules, mode)
     started, consumed, steps_tokens, i_steps = clock.perf_counter(), 0, 0, 0
+    p_tokens = 0
     queue = list(records)
     for t in times:
         # Answer every question whose time has come before consuming frames beyond it (causality).
@@ -150,6 +152,8 @@ def _run_video(cfg, backbone, modules, mode, reader, records, handle, run_id):
         consumed += 1
         steps_tokens += result.tokens
         i_steps += int(result.is_i_step)
+        p_tokens += 0 if result.is_i_step else result.tokens
+        session.p_step_tokens = p_tokens  # running total, read by _answer for the budget fields
     for record in queue:
         _answer(session, reader, record, handle, consumed, steps_tokens, i_steps, started, gap, run_id)
 
@@ -167,6 +171,8 @@ def _answer(session, reader, record, handle, consumed, steps_tokens, i_steps, st
         "run": run_id, "id": record["id"], "source": record["source"], "task": record["task"], "answer": record["answer"],
         "prediction": choice, "scores": [round(s, 4) for s in scores], "query_time": record["query_time"],
         "steps": consumed, "lm_tokens_per_step": steps_tokens / max(1, consumed), "i_step_fraction": i_steps / max(1, consumed),
+        "p_step_tokens_mean": getattr(session, "p_step_tokens", 0) / max(1, consumed - i_steps) if consumed > i_steps else None,
+        "total_visual_tokens": steps_tokens,
         "kv_tokens": stats["kv_tokens"], "kv_mb": stats["kv_bytes"] / 2**20, "state_mb": stats["state_bytes"] / 2**20,
         "answer_seconds": round(clock.perf_counter() - t0, 3), "elapsed_seconds": round(clock.perf_counter() - started, 1),
         "camera": record.get("camera"), "gap": record.get("gap"), "video_key": record.get("stream") or record.get("video"),
@@ -319,3 +325,57 @@ def check_equality(cfg: V3Config, video: str | None = None, steps: int = 4, devi
         "pass": tokens_equal and diff_ref < (1e-3 if gate else 0.25) and diff_v3 < (1e-5 if gate else 1e-3),
         "is_gate": gate, "modules": modules.parameter_report(),
     }  # fmt: skip
+
+
+@torch.no_grad()
+def budget_audit(arms: list[tuple[str, V3Config, str | None]], records_path: str, video_root: str, device="cuda",
+                 max_videos: int = 8, max_seconds: float = 180.0, tolerance: float = 0.05) -> dict:  # fmt: skip
+    """Visual-token budget per arm on fixed calibration videos (no LM, no accuracy): the matched-budget gate
+    for transition vs B4 (PR #3 review). Calibration records must not come from a test split."""
+    records = read_jsonl(records_path)
+    if any(r.get("split") == "test" for r in records):
+        raise ValueError("budget calibration must not use test-split records")
+    videos, seen = [], set()
+    for r in records:
+        key = r.get("stream") or r.get("video")
+        if key not in seen:
+            seen.add(key)
+            videos.append(r)
+    videos = sorted(videos, key=lambda r: r.get("stream") or r.get("video"))[:max_videos]
+    backbone = Backbone(arms[0][1].backbone, arms[0][1].stream, device)
+    report = {"videos": [r.get("stream") or r.get("video") for r in videos], "arms": {}}
+    for name, cfg, checkpoint in arms:
+        modules = _modules(cfg, backbone, checkpoint, device)
+        dtype = next(modules.parameters()).dtype
+        p_tokens, i_tokens, steps = [], [], 0
+        for record in videos:
+            reader = StepReader(record, video_root)
+            try:
+                times = step_times(min(reader.duration, max_seconds), cfg.stream.step_seconds, cfg.stream.frame_gap)
+                cst, te = CSTCache(), TECache()
+                for t in times:
+                    pv, grid = backbone.preprocess(backbone.resize_step(reader.step(t, cfg.stream.frame_gap)))
+                    x = backbone.encode(pv, grid)
+                    h, w = backbone.merged_grid(grid)
+                    adapted, z = modules.cst(x.to(dtype), (h, w), t, cst)
+                    info = modules.transition(adapted, z, (h, w), te)
+                    (i_tokens if info.is_i_step else p_tokens).append(info.tokens.shape[0])
+                    steps += 1
+            finally:
+                reader.close()
+        total = sum(p_tokens) + sum(i_tokens)
+        report["arms"][name] = {
+            "checkpoint": checkpoint, "p_step_mode": cfg.transition.p_step_mode, "steps": steps,
+            "i_step_fraction": len(i_tokens) / max(1, steps),
+            "p_step_tokens_mean": float(np.mean(p_tokens)) if p_tokens else None,
+            "i_step_tokens_mean": float(np.mean(i_tokens)) if i_tokens else None,
+            "total_visual_tokens": total, "tokens_per_step": total / max(1, steps),
+        }  # fmt: skip
+    names = [a[0] for a in arms]
+    if len(names) == 2:
+        a, b = (report["arms"][n]["total_visual_tokens"] for n in names)
+        gap = abs(b - a) / max(1, a)
+        report["budget_gap"] = gap
+        report["matched"] = gap <= tolerance
+        report["tolerance"] = tolerance
+    return report

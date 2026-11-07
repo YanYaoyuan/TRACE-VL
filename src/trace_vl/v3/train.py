@@ -60,7 +60,7 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
     parts, positions = [bb.embed_ids(prompt_ids)], [pos.text(len(prompt_ids), bb.device)]
     cst_cache, te_cache, tracker = CSTCache(), TECache(), TransitionTracker()
     step_ends, aux = [], {"pred": [], "budget": [], "tokens": [], "i_steps": 0, "clock": [], "spans": [], "xy": [],
-                          "kinds": []}  # fmt: skip
+                          "kinds": [], "is_i": []}  # fmt: skip
     dtype = next(modules.parameters()).dtype if modules is not None else bb.dtype
     length = len(prompt_ids)
     for k, (frames, t) in enumerate(zip(clips, times)):
@@ -73,6 +73,7 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
             rows = torch.arange(h, device=x.device).repeat_interleave(w)
             cols = torch.arange(w, device=x.device).repeat(h)
             aux["i_steps"] += 1
+            aux["is_i"].append(True)
             aux["clock"].append(torch.zeros(4))
             kinds = ["frame"] * tokens.shape[0]
         else:
@@ -87,6 +88,7 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
             if not info.is_i_step:
                 aux["budget"].append(info.masses.sum())
             aux["i_steps"] += int(info.is_i_step)
+            aux["is_i"].append(info.is_i_step)
             slot_memory = info.aux.get("slot_memory")
             tracker.update(t, info.aux.get("active_centroids", []), slot_memory)
             aux["clock"].append(tracker.clock(t, float(info.surprise.mean())))
@@ -149,8 +151,10 @@ class StudentLoss(nn.Module):
         weights = {"ce": tc.ce_weight, "kd": tc.kd_weight, "pred": tc.pred_weight, "budget": tc.budget_weight,
                    "alert": tc.alert_weight}  # fmt: skip
         total = sum(weights[k] * v for k, v in losses.items())
+        p_tokens = [n for n, i in zip(aux["tokens"], aux["is_i"]) if not i]
         stats.update(tokens_per_step=sum(aux["tokens"]) / max(1, len(aux["tokens"])),
-                     i_step_fraction=aux["i_steps"] / max(1, len(times)))  # fmt: skip
+                     p_step_tokens_mean=sum(p_tokens) / len(p_tokens) if p_tokens else None,
+                     total_visual_tokens=sum(aux["tokens"]), i_step_fraction=aux["i_steps"] / max(1, len(times)))  # fmt: skip
         return total, {k: float(v) for k, v in losses.items()}, stats
 
     def _alert_loss(self, embeds, positions, hidden, tapped, step_ends, aux, times, encoded, specs):

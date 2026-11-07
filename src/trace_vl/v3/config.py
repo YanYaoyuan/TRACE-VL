@@ -61,7 +61,8 @@ class TransitionConfig:
     # Baseline B4 (experiments.md §2): "pooled" replaces gist + transition tokens on P-steps by a fixed
     # grid of average-pooled frame tokens; set pooled_tokens to the transition run's measured tokens/step.
     p_step_mode: str = "transition"  # transition | pooled
-    pooled_tokens: int = 36
+    pooled_match: bool = True  # B4 emits, per P-step, exactly as many tokens as the transition branch would
+    pooled_tokens: int = 36  # fixed K per P-step when pooled_match is false (must be 1 <= K <= grid cells)
 
 
 @dataclass
@@ -140,6 +141,9 @@ class V3Config:
         config = cls(**{name: _build(kind, values.get(name)) for name, kind in parts.items()})
         if config.transition.p_step_mode not in {"transition", "pooled"}:
             raise ValueError("transition.p_step_mode must be transition or pooled")
+        k = config.transition.pooled_tokens
+        if isinstance(k, bool) or not isinstance(k, int) or k < 1:
+            raise ValueError("transition.pooled_tokens must be a positive integer")
         if config.memory.policy not in {"full", "window", "drift", "tkm", "fifo"}:
             raise ValueError("memory.policy must be full, window, drift, tkm or fifo")
         if config.cst.dim % config.cst.heads:

@@ -1,5 +1,5 @@
-# B4 control for M2 on 4 x A100-40GB: same schedule and data as stage1_a100.yaml, pooled P-steps.
+# B4 control arm for M2 on 4 x A100-40GB: same schedule, data and seeds as stage1_a100.yaml.
 extends: stage1_a100.yaml
 transition:
   p_step_mode: pooled
-  pooled_tokens: 32
+  pooled_match: true

@@ -1,8 +1,8 @@
-# Baseline B4: identical to v3_tkm (CST, I-steps every 8, memory policy) but P-steps send a fixed grid of
-# average-pooled frame tokens instead of gist + before/after/delta tokens. Set pooled_tokens to the
-# transition run's measured P-step tokens (held-out mean was 37.2 tokens/step incl. I-steps in the local
-# 200-step run; use the P-step mean from metrics, rounded to a factorable count such as 32 or 36).
+# Baseline B4 (clean representation ablation): identical to v3_tkm, including the slot machinery that feeds
+# CST memory and transition clocks; only the LM-facing P-step tokens differ. With pooled_match (default)
+# each P-step emits exactly as many average-pooled frame-region tokens as the transition branch would emit
+# on that step, so the visual-token budget is matched by construction. Audit with `trace-vl v3 budget`.
 extends: v3_tkm.yaml
 transition:
   p_step_mode: pooled
-  pooled_tokens: 32
+  pooled_match: true

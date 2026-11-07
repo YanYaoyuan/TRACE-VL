@@ -25,6 +25,36 @@ def grid_coords(h: int, w: int, device=None) -> Tensor:
     return torch.stack([xx.flatten(), yy.flatten()], dim=-1)
 
 
+def pool_regions(h: int, w: int, k: int) -> list[tuple[int, int, int, int]]:
+    """Partition an h x w grid into exactly k non-overlapping, non-empty rectangles (row bands with balanced
+    column splits), for any 1 <= k <= h * w; unsupported budgets raise instead of silently shrinking."""
+    if not (isinstance(k, int) and 1 <= k <= h * w):
+        raise ValueError(f"cannot pool a {h}x{w} grid into {k} regions (need 1 <= k <= {h * w})")
+    bands = min(h, k, max(math.ceil(k / w), round(math.sqrt(k * h / w))))
+    base, extra = divmod(k, bands)  # bands >= ceil(k / w) guarantees every band count <= w
+    regions = []
+    for i in range(bands):
+        y0, y1 = (i * h) // bands, ((i + 1) * h) // bands
+        count = base + (1 if i < extra else 0)
+        for j in range(count):
+            regions.append((y0, y1, (j * w) // count, ((j + 1) * w) // count))
+    return regions
+
+
+def exact_pool(x: Tensor, h: int, w: int, k: int) -> tuple[Tensor, Tensor, Tensor]:
+    """Average-pool [h*w, D] grid tokens into exactly k region tokens with their (row, col) centres."""
+    regions = pool_regions(h, w, k)
+    weights = torch.zeros(k, h * w, device=x.device, dtype=torch.float32)
+    rows, cols = [], []
+    for index, (y0, y1, x0, x1) in enumerate(regions):
+        cells = [y * w + xx for y in range(y0, y1) for xx in range(x0, x1)]
+        weights[index, cells] = 1.0 / len(cells)
+        rows.append((y0 + y1 - 1) // 2)
+        cols.append((x0 + x1 - 1) // 2)
+    pooled = (weights @ x.float()).to(x.dtype)
+    return pooled, torch.tensor(rows, device=x.device), torch.tensor(cols, device=x.device)
+
+
 def match_norm(tokens: Tensor, ref_norm: Tensor, floor: float = 1e-3) -> Tensor:
     """Rescale tokens to the reference norm (scale detached), so synthesized tokens stay in the LM's range."""
     norms = tokens.norm(dim=-1, keepdim=True)
@@ -257,8 +287,6 @@ class TransitionEncoder(nn.Module):
             cache.steps_since_i = 0
             return StepTokens(x, rows, cols, ["frame"] * n, [-1] * n, True, surprise, masses, aux)
         cache.steps_since_i += 1
-        if cfg.p_step_mode == "pooled":
-            return self._pooled_step(x, h, w, surprise, masses, aux)
 
         # Gist: G learned queries pool the step (convex combinations of real tokens).
         gist_attn = (self.gist_queries @ self.gist_key(z + pos).t() / math.sqrt(z.shape[-1])).softmax(-1)  # [G, N]
@@ -296,6 +324,15 @@ class TransitionEncoder(nn.Module):
         aux["slot_memory"] = (
             self.to_memory(torch.stack([t[1] for t in trans_tokens])) if trans_tokens else None
         )
+        n_transition = sum(t.shape[0] for t in tokens)
+        aux["transition_tokens"] = n_transition
+        if cfg.p_step_mode == "pooled":
+            # B4: identical slot machinery (CST memory and clock inputs above are unchanged); only the
+            # LM-facing P-step representation is replaced, by exactly K average-pooled frame regions.
+            k = n_transition if cfg.pooled_match else cfg.pooled_tokens
+            pooled, p_rows, p_cols = exact_pool(x, h, w, k)
+            pooled = match_norm(pooled, ref_norm)
+            return StepTokens(pooled, p_rows, p_cols, ["gist"] * k, [-1] * k, False, surprise, masses, aux)
         return StepTokens(
             torch.cat(tokens),
             torch.cat([r.reshape(-1) for r in t_rows]).long(),
@@ -308,22 +345,6 @@ class TransitionEncoder(nn.Module):
             aux,
         )
 
-
-    def _pooled_step(self, x, h, w, surprise, masses, aux):
-        """Baseline B4: same I-steps, but P-steps send a fixed grid of average-pooled frame tokens."""
-        count = self.cfg.pooled_tokens
-        rows_n = max(r for r in range(1, int(count**0.5) + 1) if count % r == 0)  # most square factorization
-        cols_n = count // rows_n
-        rows_n, cols_n = min(rows_n, h), min(cols_n, w)
-        grid = x.view(h, w, -1).permute(2, 0, 1)[None]  # [1, D, h, w]
-        pooled = F.adaptive_avg_pool2d(grid.float(), (rows_n, cols_n))[0].flatten(1).t().to(x.dtype)  # [n, D]
-        pooled = match_norm(pooled, x.detach().norm(dim=-1).mean())
-        r = ((torch.arange(rows_n, device=x.device) + 0.5) * h / rows_n - 0.5).round().clamp(0, h - 1)
-        c = ((torch.arange(cols_n, device=x.device) + 0.5) * w / cols_n - 0.5).round().clamp(0, w - 1)
-        rows, cols = r.repeat_interleave(cols_n).long(), c.repeat(rows_n).long()
-        n = pooled.shape[0]
-        aux.update(active_slots=0, active_masses=[], active_centroids=[], slot_memory=None)
-        return StepTokens(pooled, rows, cols, ["gist"] * n, [-1] * n, False, surprise, masses, aux)
 
 
 # ============================================================================ transition tracks

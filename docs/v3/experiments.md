@@ -24,7 +24,7 @@ learned evidence selection) and re-plan in the tracker.
 | B1 | StreamingVLM recipe: sink + window + long text window, contiguous positions, chunked SFT on the same data | strongest simple streaming baseline |
 | B2 | training-free bounded memory: (a) DeltaS-style GDN-drift chunk eviction; (b) curvature keyframes (CurveStream-style); (c) uniform token pooling | query-agnostic compression without training |
 | B3 | v2 pixel transitions + crops (external evidence, existing code) | our previous design |
-| B4 | v3 with transition tokens replaced by pooled tokens at the same token count | isolates the transition encoder |
+| B4 | v3 with only the LM-facing P-step tokens replaced by average-pooled frame regions; the slot machinery feeding CST memory and transition clocks is identical, and with `pooled_match` each P-step emits exactly as many tokens as the transition branch would (`v3_pooled_b4.yaml`, `stage1_a100_b4.yaml`). Budget gate: `v3 budget` on fixed train/val calibration videos, total visual tokens within ±5%, chosen without test accuracy | isolates the transition representation |
 | B5 | v3 without CST (TE on raw merged tokens) | isolates the adapter |
 | Ext | published numbers: StreamTTT-4B, FOLIO (Qwen3-VL-8B), StreamFlow, Tempo, Qwen3.5-4B | context only (different protocols) |
 
