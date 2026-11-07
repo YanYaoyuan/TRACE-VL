@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import random
 import tempfile
 from collections import Counter
 from pathlib import Path
@@ -32,6 +33,21 @@ def canonicalize(rows):
     return result,duplicates
 
 
+def limit_video_groups(rows,maximum,seed=7):
+    if not maximum:
+        return rows
+    grouped={}
+    for row in rows:
+        grouped.setdefault(row['video'],[]).append(row)
+    keys=sorted(grouped)
+    random.Random(seed).shuffle(keys)
+    selected=[]
+    for video in keys:
+        if len(selected)+len(grouped[video])<=maximum:
+            selected.extend(grouped[video])
+    return selected
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--annotations',nargs='+',required=True)
@@ -40,9 +56,12 @@ def main():
     p.add_argument('--max-seconds',type=float,default=180)
     p.add_argument('--val-fraction',type=float,default=.1)
     p.add_argument('--min-records',type=int,default=1)
+    p.add_argument('--max-train-questions',type=int,default=0,help='0 = all; select whole video groups')
+    p.add_argument('--max-val-questions',type=int,default=0,help='0 = all; select whole video groups')
     p.add_argument('--annotations-only',action='store_true',help='Schema validation only; not training-ready')
     args=p.parse_args()
     assert 0<args.val_fraction<1
+    assert args.max_train_questions>=0 and args.max_val_questions>=0
     assert args.annotations_only or args.video_root is not None,'Training preparation needs --video-root'
     assert not args.output.exists(),'Use a fresh output directory'
     annotation_paths=[Path(x).resolve(strict=True) for x in args.annotations]
@@ -53,6 +72,8 @@ def main():
             video_root=None if args.annotations_only else str(args.video_root),val_fraction=args.val_fraction)
         parsed=[json.loads(x) for x in parsed_path.read_text().splitlines()]
         rows,duplicates=canonicalize(parsed)
+    rows=limit_video_groups([r for r in rows if r['split']=='train'],args.max_train_questions)+\
+         limit_video_groups([r for r in rows if r['split']=='val'],args.max_val_questions)
     media={}
     excluded={}
     if not args.annotations_only:
@@ -80,7 +101,9 @@ def main():
                 media[video]={'bytes':stat.st_size,'mtime_ns':stat.st_mtime_ns,
                               'seconds':count/fps,'fps':fps,'frames':count,'decode_checks':checks}
         rows=[r for r in rows if r['video'] in media]
-    assert len(rows)>=args.min_records,f'Only {len(rows)} usable QA; inspect missing videos/exclusions'
+    assert len(rows)>=args.min_records,(f'Only {len(rows)} usable QA (need {args.min_records}); '
+        f'missing annotation items={conversion.get("missing_videos_skipped",0)}, '
+        f'excluded videos={len(excluded)}, examples={list(excluded.items())[:3]}')
     assert len(rows)==len({r['id'] for r in rows})
     train=[r for r in rows if r['split']=='train']
     val=[r for r in rows if r['split']=='val']
@@ -90,6 +113,8 @@ def main():
         'parsed_questions':len(parsed),'original_distinct_ids':len({r['id'] for r in parsed}),
         'usable_questions':len(rows),'unique_question_ids':len({r['id'] for r in rows}),
         'exact_duplicates_skipped':duplicates,'train_questions':len(train),'val_questions':len(val),
+        'question_limits':{'train':args.max_train_questions,'val':args.max_val_questions,'seed':7,
+                           'unit':'whole video groups'},
         'train_videos':len({r['video'] for r in train}),'val_videos':len({r['video'] for r in val}),
         'answer_counts':dict(Counter(r['answer'] for r in rows)),'video_disjoint':True,
         'excluded_videos':excluded,'media':media,'max_seconds':args.max_seconds,
