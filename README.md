@@ -54,6 +54,10 @@ TRACE-VL 是一个**流式视频理解模型**：视频按时间顺序到达，�
 
 ## 运行（本机 2×RTX 5090）
 
+阿里云服务器可使用 `bash scripts/setup_aliyun.sh` 安装 Linux x86_64 / Python 3.10 训练环境：
+普通包和 CUDA 12.8 wheel 均走阿里云镜像，完整保留基准锁中的版本、条件标记和哈希，根锁文件保持原样。
+操作、验证和已有锁文件改动的处理见 [阿里云环境说明](docs/aliyun_environment.md)。
+
 Python 3.10，uv 锁定依赖，PyTorch 2.8.0 / CUDA 12.8；`vlm` 依赖组包含 transformers、peft 与 torchvision（cu128）。`evaluate` 在输出目录写入 `run.json` 指纹（模型、adapter 权重哈希、打包设置、问题与快照报告哈希），模型或数据不同时拒绝续写，需换新的 `--output`；`score` 的置信区间按摄像头整体重采样。
 
 ```bash
