@@ -20,7 +20,8 @@ from trace_vl.v3.positions import PositionCounter
 def small_config(**transition):
     return V3Config.from_dict(
         {"cst": {"dim": 32, "layers": 2, "heads": 4, "window": 3},
-         "transition": {"slots": 4, "gist": 2, "max_active": 2, "mass_threshold": 0.0, "before_lag": 1, **transition}}
+         "transition": {"slots": 4, "gist": 2, "max_active": 2, "mass_threshold": 0.0, "before_lag": 1, **transition},
+         "train": {"target_p_step_tokens": 5}}
     )  # fmt: skip
 
 
@@ -515,3 +516,15 @@ def test_eval_emission_equals_hard_threshold():
     masses = info.masses
     expected = min(cfg.transition.max_active, int((masses >= cfg.transition.mass_threshold).sum()))
     assert info.aux["active_slots"] == expected
+
+
+def test_p_step_budget_target_must_be_feasible():
+    """PR #3 A100 report: the inherited target 40 exceeded the attainable P-step range 8..32."""
+    assert V3Config().train.target_p_step_tokens == 20.0
+    with pytest.raises(ValueError, match="infeasible"):
+        V3Config.from_dict({"train": {"target_p_step_tokens": 40}})
+    with pytest.raises(ValueError, match="infeasible"):
+        V3Config.from_dict({"train": {"target_p_step_tokens": 4}})
+    with pytest.raises(ValueError, match="replaced"):
+        V3Config.from_dict({"train": {"target_tokens_per_step": 40}})
+    V3Config.from_dict({"train": {"target_p_step_tokens": 32}})  # upper edge is attainable

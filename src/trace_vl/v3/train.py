@@ -139,7 +139,7 @@ class StudentLoss(nn.Module):
         if aux["budget"]:
             # Two-sided: pulls activity up when transitions are absent and down when too many fire. The old
             # relu(mass - target) only suppressed surprise and had zero gradient once all slots were off.
-            target = float(tc.target_tokens_per_step)
+            target = float(tc.target_p_step_tokens)  # feasibility checked in V3Config
             expected = torch.stack([e if torch.is_tensor(e) else torch.tensor(float(e)) for e in aux["budget"]])
             losses["budget"] = (((expected.float() - target) / target) ** 2).mean()
         stats = {}

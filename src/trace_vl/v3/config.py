@@ -111,7 +111,10 @@ class TrainConfig:
     vis_margin: float = 0.2
     budget_weight: float = 0.01
     alert_weight: float = 1.0
-    target_tokens_per_step: float = 40.0
+    # Expected tokens per P-step (gist + 3 x active slots), feasible range [gist, gist + 3 * max_active].
+    # Predeclared pilot value 20 (PR #3 A100 report); the old I-inclusive name is rejected, not reinterpreted.
+    target_p_step_tokens: float = 20.0
+    target_tokens_per_step: float | None = None
     kd_temperature: float = 1.0
     tbptt_steps: int = 0  # detach recurrent adapter state every N steps (0 = never)
     save_every: int = 500
@@ -146,6 +149,18 @@ class V3Config:
         config = cls(**{name: _build(kind, values.get(name)) for name, kind in parts.items()})
         if config.transition.p_step_mode not in {"transition", "pooled"}:
             raise ValueError("transition.p_step_mode must be transition or pooled")
+        if config.train.target_tokens_per_step is not None:
+            raise ValueError(
+                "train.target_tokens_per_step was replaced by train.target_p_step_tokens (expected tokens per "
+                "P-step: gist + 3 x active slots); set that instead"
+            )
+        low = config.transition.gist
+        high = config.transition.gist + 3 * config.transition.max_active
+        if not low <= config.train.target_p_step_tokens <= high:
+            raise ValueError(
+                f"train.target_p_step_tokens={config.train.target_p_step_tokens} is infeasible: a P-step emits "
+                f"between {low} (gist only) and {high} (gist + 3 x max_active) tokens"
+            )
         if config.transition.activity_temperature <= 0:
             raise ValueError("transition.activity_temperature must be positive")
         k = config.transition.pooled_tokens

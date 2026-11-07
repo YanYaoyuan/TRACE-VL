@@ -15,5 +15,5 @@ train:
   ce_weight: 0.5
   pred_weight: 0.5
   budget_weight: 0.01
-  target_tokens_per_step: 40
+  target_p_step_tokens: 20   # expected P-step tokens (gist 8 + 3 x ~4 active slots); range 8..32
   save_every: 250

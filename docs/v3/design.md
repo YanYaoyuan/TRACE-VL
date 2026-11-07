@@ -110,7 +110,8 @@ LLM input per step:
   gradient once every slot is below it, and a one-sided budget (penalize mass above target) drives
   surprise toward exactly that regime, so transitions can silently stop firing. The encoder therefore keeps
   a soft activity p_k = σ((mass_k − τ)/T) per slot. The budget loss is two-sided on the expected P-step
-  tokens (gist + 3·Σp_k vs `target_tokens_per_step`), training emits slots by Bernoulli(p_k) sampling, and
+  tokens (gist + 3·Σp_k vs `target_p_step_tokens`, which must lie in [gist, gist + 3·max_active]; 20 is the
+  predeclared pilot value), training emits slots by Bernoulli(p_k) sampling, and
   emitted trios carry a straight-through factor (1 + p_k − sg(p_k)), so the task loss also tells the gate
   whether a transition helped. Evaluation emits deterministically (p_k ≥ 0.5, i.e. mass ≥ τ). Training
   and the budget audit report active-slot distributions and CST memory depth, so a comparison where no
