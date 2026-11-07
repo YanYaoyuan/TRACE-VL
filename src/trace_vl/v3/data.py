@@ -32,7 +32,55 @@ OVO_MCQ_TASKS = {
 }  # fmt: skip
 
 
-def convert_ovo(annotation: str, output: str, video_root: str | None = None) -> dict:
+# OVO-Bench forward-active prompt templates, verbatim from the official repo (constant.py).
+OVO_REC_TEMPLATE = """
+You're watching a video in which people may perform a certain type of action repetively. 
+The person performing this kind of action are referred to as 'they' in the following statement.
+You're task is to count how many times have different people in the video perform this kind of action in total.
+One complete motion counts as one. 
+Now, answer the following question: {}
+Provide your answer as a single number (e.g., 0, 1, 2, 3…) indicating the total count.
+Do not include any additional text or explanation in your response.
+"""
+OVO_SSR_TEMPLATE = """
+You're watching a tutorial video which contain a sequential of steps. 
+The following is one step from the whole procedures: 
+{}
+Your task is to determine if the man or woman in the video is currently performing this step.
+Answer only with “Yes” or “No”.
+Do not include any additional text or explanation in your response.
+"""
+OVO_CRR_TEMPLATE = """
+You're responsible of answering questions based on the video content. 
+The following question are relevant to the latest frames, i.e. the end of the video.
+{}
+Decide whether existing visual content, especially latest frames, i.e. frames that near the end of the video, provide enough information for answering the question.
+Answer only with “Yes” or “No”.
+Do not include any additional text or explanation in your response.
+"""
+
+
+def _ovo_forward(item) -> list[dict]:
+    """One record per polling time (test_info entry), answered with the official prompt; scoring follows the
+    official scorer (REC: digits of the response == count; SSR/CRR: Yes/No vs `type`)."""
+    rows, task = [], item["task"]
+    for i, info in enumerate(item["test_info"]):
+        if task == "REC":
+            prompt = OVO_REC_TEMPLATE.format("How many times did they " + item["activity"] + "?")
+            kind, answer = "count", str(info["count"])
+        elif task == "SSR":
+            prompt, kind, answer = OVO_SSR_TEMPLATE.format(info["step"]), "yesno", "Yes" if info["type"] == 1 else "No"
+        else:  # CRR
+            prompt, kind, answer = OVO_CRR_TEMPLATE.format(item["question"]), "yesno", "Yes" if info["type"] == 1 else "No"
+        rows.append({
+            "id": f"ovo-{item['id']}-{i}", "source": "ovo-bench", "task": f"forward/{task}", "video": item["video"],
+            "query_time": float(info["realtime"]), "kind": kind, "prompt": prompt.strip(), "answer": answer,
+            "region": None, "split": "test",
+        })  # fmt: skip
+    return rows
+
+
+def convert_ovo(annotation: str, output: str, video_root: str | None = None, forward: bool = False) -> dict:
     """OVO-Bench (`data/ovo_bench_new.json`): backward and real-time multiple-choice tasks.
 
     Forward-active tasks (REC, SSR, CRR) poll the model at several times and need a separate protocol;
@@ -41,11 +89,14 @@ def convert_ovo(annotation: str, output: str, video_root: str | None = None) -> 
     rows, skipped, missing = [], {}, 0
     for item in json.loads(Path(annotation).read_text()):
         task = item["task"]
-        if task not in OVO_MCQ_TASKS:
-            skipped[task] = skipped.get(task, 0) + 1
-            continue
         if video_root and not (Path(video_root) / item["video"]).is_file():
             missing += 1  # partial download: keep only questions whose video is on disk
+            continue
+        if task not in OVO_MCQ_TASKS:
+            if forward and task in {"REC", "SSR", "CRR"}:
+                rows.extend(_ovo_forward(item))
+            else:
+                skipped[task] = skipped.get(task, 0) + 1
             continue
         rows.append({
             "id": f"ovo-{item['id']}", "source": "ovo-bench", "task": f"{OVO_MCQ_TASKS[task]}/{task}",
@@ -93,6 +144,63 @@ def convert_meva(questions: str, streams: str, output: str, split: str | None = 
         })  # fmt: skip
     write_jsonl(output, rows)
     return {"records": len(rows)}
+
+
+def convert_tocbench(answer_json: str, output: str, video_root: str | None = None) -> dict:
+    """TOC-Bench (answer_final.json) -> offline records. mcq_4 / statement-pair / numerical become lettered
+    options; ordering items are generated and compared as a letter sequence. This is a local option-likelihood
+    protocol, not the official TOC-Bench prompting or extractor."""
+    data = json.loads(Path(answer_json).read_text())
+    items = next(v for v in data.values() if isinstance(v, list)) if isinstance(data, dict) else data
+    rows, missing, skipped = [], 0, 0
+    for item in items:
+        video = f"videos/{item['video_id']}.mp4"
+        if video_root and not (Path(video_root) / video).is_file():
+            missing += 1
+            continue
+        fmt, meta = item["format"], item.get("metadata", {})
+        base = {"id": f"toc-{item['qa_id']}", "source": "toc-bench", "task": f"{fmt}/{meta.get('dim')}",
+                "video": video, "query_time": None, "region": None, "split": "test", "tier": meta.get("tier")}  # fmt: skip
+        if fmt == "mcq_4":
+            options = [item[f"option_{c}"] for c in "ABCD"]
+            rows.append({**base, "question": item["question"], "options": options, "answer": "ABCD".index(item["correct_answer"])})
+        elif fmt == "sp":
+            options = [item["statement_A"], item["statement_B"]]
+            question = item["question"] + " Which statement is true?"
+            rows.append({**base, "question": question, "options": options, "answer": "AB".index(item["correct_answer"])})
+        elif fmt == "numerical":
+            options = list(item["allowed_answers"])
+            if item["correct_answer"] not in options:
+                skipped += 1
+                continue
+            rows.append({**base, "question": item["question"], "options": options, "answer": options.index(item["correct_answer"])})
+        elif fmt.startswith("ordering"):
+            events = "\n".join(f"{e['label']}. {e['event_text']}" for e in item["events"])
+            prompt = (f"{item['question']}\n{events}\nAnswer with the letters in order from earliest to latest, "
+                      "separated by commas (e.g., B, A, C).")  # fmt: skip
+            rows.append({**base, "kind": "order", "prompt": prompt, "answer": "".join(item["correct_order"]),
+                         "n_events": len(item["events"])})  # fmt: skip
+        else:
+            skipped += 1
+    write_jsonl(output, rows)
+    return {"records": len(rows), "missing_videos_skipped": missing, "skipped": skipped,
+            "videos": len({r["video"] for r in rows}), "by_format": {f: sum(r["task"].startswith(f) for r in rows)
+                                                                    for f in ("mcq_4", "sp", "numerical", "ordering")}}  # fmt: skip
+
+
+def parse_count(text: str) -> str:
+    """Official OVO-Bench REC extraction: concatenate every digit run in the response."""
+    return "".join(re.findall(r"\d+", text or ""))
+
+
+def parse_order(text: str, n: int) -> str:
+    """Letters A.. in order of first appearance (as standalone tokens), first n of them."""
+    letters = "ABCDEFGH"[:n]
+    seen = []
+    for match in re.findall(r"\b([A-H])\b", text or ""):
+        if match in letters and match not in seen:
+            seen.append(match)
+    return "".join(seen[:n])
 
 
 OPTION_LINE = re.compile(r"^\s*\(?([A-H])[\.\):]\s*(.+?)\s*$")

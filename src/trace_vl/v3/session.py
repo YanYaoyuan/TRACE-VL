@@ -239,6 +239,18 @@ class StreamSession:
         return int(scores.argmax()), scores.tolist()
 
     @torch.no_grad()
+    def ask_yesno(self, prompt: str) -> tuple[str, list[float]]:
+        """Free-form yes/no prompt (e.g. OVO-Bench SSR/CRR): compare the fp32 log-probs of "Yes" and "No" as the
+        first answer token on a forked cache."""
+        cache, pos = self._fork()
+        self._close_video(cache, pos)
+        ids = self.bb.ids("\n" + prompt + self.bb.tail_text)
+        hidden = self.bb.lm(self.bb.embed_ids(ids), pos.text(len(ids)), cache)
+        candidates = [self.bb.ids("Yes")[0], self.bb.ids("No")[0]]
+        scores = self.bb.letter_logprobs(hidden[0, -1], candidates)
+        return ("Yes" if scores[0] >= scores[1] else "No"), scores.tolist()
+
+    @torch.no_grad()
     def describe(self, prompt: str = "Describe what is happening now in one sentence.", max_new_tokens: int = 40):
         """Greedy text on a forked cache (explanations on demand; alerts do not need it)."""
         cache, pos = self._fork()

@@ -122,3 +122,20 @@ Not implemented yet (next development work, tracked in issue #4): the **Stage 2 
 10-60 min streams with the inference KV policy, chunked SFT, retention-scorer supervision) and alert-head
 training data at scale (frame-labelled anomaly sets such as CUHK Avenue / ShanghaiTech Campus;
 licences to check).
+
+## Transition-sensitive evaluation (added for M2)
+
+```bash
+# OVO-Bench incl. forward-active tasks (official prompts; REC count digits / SSR, CRR Yes-No as in the official scorer)
+uv run --locked trace-vl v3 convert-ovo /data/ovo/ovo_bench_new.json --forward --video-root /data/ovo --output data/v3/ovo_all.jsonl
+# TOC-Bench (object state / temporal consistency): answer_final.json from github.com/cjzcjz666/toc_bench,
+# videos (15.2 GB) from huggingface.co/datasets/anonymous-video-benchmark/toc_bench (check its licence first)
+uv run --locked trace-vl v3 convert-tocbench /data/toc/answer_final.json --video-root /data/toc --output data/v3/toc.jsonl
+# MEVA long-gap (our benchmark)
+uv run --locked trace-vl v3 convert-meva --bench data/meva/bench --split test --output data/v3/meva_test.jsonl
+```
+
+Evaluate each with `v3 eval` for native / transition / B4 exactly as for Video-MME; report per-task accuracy
+(`score` groups by `source/task`). TOC-Bench here is a local option-likelihood protocol (ordering items by
+generation), not the official TOC-Bench extractor; OVO forward follows the official prompts and scoring rules
+with first-token Yes/No likelihood for SSR/CRR.

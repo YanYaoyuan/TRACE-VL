@@ -15,7 +15,7 @@ import torch
 
 from .backbone import Backbone
 from .config import V3Config
-from .data import StepReader, draw_region, read_jsonl, step_times
+from .data import StepReader, draw_region, parse_count, parse_order, read_jsonl, step_times
 from .model import TraceV3Modules, stream_step
 from .modules import CSTCache, TECache
 from .session import StreamSession
@@ -165,7 +165,19 @@ def _answer(session, reader, record, handle, consumed, steps_tokens, i_steps, st
         t_m = max(gap / 2, min(t_q, reader.duration) - gap / 2)
         marker = (draw_region(reader.step(t_m, gap), record["region"]), t_m)
     t0 = clock.perf_counter()
-    choice, scores = session.ask(record["question"], record["options"], marker)
+    kind = record.get("kind", "mcq")
+    if kind == "mcq":
+        choice, scores = session.ask(record["question"], record["options"], marker)
+    elif kind == "yesno":
+        choice, scores = session.ask_yesno(record["prompt"])
+    elif kind == "count":
+        text = session.describe(record["prompt"], max_new_tokens=8)
+        choice, scores = parse_count(text), []
+    elif kind == "order":
+        text = session.describe(record["prompt"], max_new_tokens=16)
+        choice, scores = parse_order(text, record["n_events"]), []
+    else:
+        raise ValueError(f"unknown record kind {kind!r}")
     stats = session.stats()
     handle.write(json.dumps({
         "run": run_id, "id": record["id"], "source": record["source"], "task": record["task"], "answer": record["answer"],

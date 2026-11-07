@@ -528,3 +528,57 @@ def test_p_step_budget_target_must_be_feasible():
     with pytest.raises(ValueError, match="replaced"):
         V3Config.from_dict({"train": {"target_tokens_per_step": 40}})
     V3Config.from_dict({"train": {"target_p_step_tokens": 32}})  # upper edge is attainable
+
+
+def test_convert_ovo_forward_uses_official_templates(tmp_path):
+    from trace_vl.v3.data import convert_ovo
+
+    items = [
+        {"id": 7, "task": "REC", "video": "r.mp4", "activity": "jump",
+         "test_info": [{"realtime": 5.0, "count": 1}, {"realtime": 9.0, "count": 3}]},
+        {"id": 8, "task": "SSR", "video": "s.mp4", "test_info": [{"realtime": 4, "step": "cut bread", "type": 1}]},
+        {"id": 9, "task": "CRR", "video": "c.mp4", "question": "What happens to the car?",
+         "test_info": [{"realtime": 3, "type": 0}]},
+    ]  # fmt: skip
+    src = tmp_path / "ovo.json"
+    src.write_text(json.dumps(items))
+    off = convert_ovo(src, tmp_path / "a.jsonl")
+    assert off["records"] == 0 and off["skipped_forward_tasks"] == {"REC": 1, "SSR": 1, "CRR": 1}
+    on = convert_ovo(src, tmp_path / "b.jsonl", forward=True)
+    rows = {r["id"]: r for r in (json.loads(x) for x in (tmp_path / "b.jsonl").read_text().splitlines())}
+    assert on["records"] == 4
+    assert rows["ovo-7-1"]["kind"] == "count" and rows["ovo-7-1"]["answer"] == "3"
+    assert "How many times did they jump?" in rows["ovo-7-1"]["prompt"] and rows["ovo-7-1"]["query_time"] == 9.0
+    assert rows["ovo-8-0"]["answer"] == "Yes" and "cut bread" in rows["ovo-8-0"]["prompt"]
+    assert rows["ovo-9-0"]["answer"] == "No" and rows["ovo-9-0"]["task"] == "forward/CRR"
+
+
+def test_convert_tocbench_formats(tmp_path):
+    from trace_vl.v3.data import convert_tocbench
+
+    items = [
+        {"qa_id": "a", "video_id": "v1", "format": "sp", "question": "Does it enter?", "statement_A": "never",
+         "statement_B": "does", "correct_answer": "B", "metadata": {"dim": "event_existence", "tier": "tier1"}},
+        {"qa_id": "b", "video_id": "v1", "format": "numerical", "question": "How many?", "correct_answer": "4",
+         "allowed_answers": ["2", "3", "4", "5 or more"], "metadata": {"dim": "event_count"}},
+        {"qa_id": "c", "video_id": "v2", "format": "ordering_3", "question": "Order the events.",
+         "events": [{"label": "A", "event_text": "x"}, {"label": "B", "event_text": "y"}, {"label": "C", "event_text": "z"}],
+         "correct_order": ["B", "A", "C"], "metadata": {"dim": "event_ordering"}},
+        {"qa_id": "d", "video_id": "v2", "format": "mcq_4", "question": "When?", "option_A": "beginning",
+         "option_B": "late", "option_C": "never", "option_D": "end", "correct_answer": "D", "metadata": {"dim": "t"}},
+    ]  # fmt: skip
+    src = tmp_path / "answer_final.json"
+    src.write_text(json.dumps({"items": items, "version": "x"}))
+    report = convert_tocbench(src, tmp_path / "out.jsonl")
+    rows = {r["id"]: r for r in (json.loads(x) for x in (tmp_path / "out.jsonl").read_text().splitlines())}
+    assert report["records"] == 4 and report["videos"] == 2
+    assert rows["toc-a"]["answer"] == 1 and rows["toc-b"]["answer"] == 2 and rows["toc-d"]["answer"] == 3
+    assert rows["toc-c"]["kind"] == "order" and rows["toc-c"]["answer"] == "BAC" and rows["toc-c"]["n_events"] == 3
+
+
+def test_answer_parsers():
+    from trace_vl.v3.data import parse_count, parse_order
+
+    assert parse_count("3") == "3" and parse_count("There are 12 times.") == "12" and parse_count("none") == ""
+    assert parse_order("B, A, C", 3) == "BAC" and parse_order("Order: C then A then B.", 3) == "CAB"
+    assert parse_order("A, A, D, B", 3) == "AB"  # D is not an event of a 3-event item; duplicates ignored

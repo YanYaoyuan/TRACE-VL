@@ -344,11 +344,17 @@ def _v3_parser(commands):
         c.add_argument("input")
         c.add_argument("--output", required=True)
         c.add_argument("--video-root", help="keep only questions whose video exists here (partial download)")
+        if name == "convert-ovo":
+            c.add_argument("--forward", action="store_true", help="also convert forward-active REC/SSR/CRR polls")
     c = sub.add_parser("convert-llava-mc", help="LLaVA-Video-178K multiple-choice files -> Stage 1 records")
     c.add_argument("inputs", nargs="+")
     c.add_argument("--output", required=True)
     c.add_argument("--video-root", help="keep only questions whose video exists here")
     c.add_argument("--val-fraction", type=float, default=0.05)
+    c = sub.add_parser("convert-tocbench", help="TOC-Bench answer_final.json -> records (local protocol)")
+    c.add_argument("input")
+    c.add_argument("--output", required=True)
+    c.add_argument("--video-root", help="keep only questions whose video exists here")
     c = sub.add_parser("convert-meva")
     c.add_argument("--bench", default="data/meva/bench")
     c.add_argument("--split", default="test")
@@ -415,11 +421,13 @@ def _v3(args):
         print(json.dumps(value, indent=2, default=str))
 
     if args.action == "convert-ovo":
-        return show(v3data.convert_ovo(args.input, args.output, args.video_root))
+        return show(v3data.convert_ovo(args.input, args.output, args.video_root, args.forward))
     if args.action == "convert-videomme":
         return show(v3data.convert_videomme(args.input, args.output, args.video_root))
     if args.action == "convert-llava-mc":
         return show(v3data.convert_llava_mc(args.inputs, args.output, args.video_root, args.val_fraction))
+    if args.action == "convert-tocbench":
+        return show(v3data.convert_tocbench(args.input, args.output, args.video_root))
     if args.action == "convert-meva":
         bench = Path(args.bench)
         return show(v3data.convert_meva(bench / "questions.jsonl", bench / "streams.json", args.output, args.split))
