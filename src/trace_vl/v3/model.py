@@ -38,3 +38,24 @@ class TraceV3Modules(nn.Module):
         modules = cls(cfg, model_dim)
         modules.load_state_dict(saved["modules"], strict=strict)
         return modules
+
+
+def stream_step(modules: "TraceV3Modules", x: torch.Tensor, grid: tuple[int, int], t: float, cst_cache, te_cache):
+    """The single per-step path shared by streaming, training and the budget audit (PR #3 review):
+    CST adapter -> transition encoder -> write the step's slot memory back into the CST cache.
+
+    Keeping this in one place guarantees the recurrent visual state (and hence surprise, active slots and
+    token counts) evolves identically everywhere.
+    """
+    dtype = next(modules.parameters()).dtype
+    adapted, z = modules.cst(x.to(dtype), grid, t, cst_cache)
+    info = modules.transition(adapted, z, grid, te_cache)
+    slot_memory = info.aux.get("slot_memory")
+    if slot_memory is not None:
+        cap = modules.cfg.transition.memory_slots
+        times = torch.full((slot_memory.shape[0],), t, device=slot_memory.device, dtype=slot_memory.dtype)
+        cst_cache.memory = slot_memory if cst_cache.memory is None else torch.cat([cst_cache.memory, slot_memory])[-cap:]
+        cst_cache.memory_times = (
+            times if cst_cache.memory_times is None else torch.cat([cst_cache.memory_times, times])[-cap:]
+        )
+    return adapted, z, info

@@ -28,7 +28,7 @@ from .alert import DecisionMemory, Question, alert_loss, encode_questions
 from .backbone import Backbone
 from .config import V3Config
 from .data import StepReader, read_jsonl, step_times
-from .model import TraceV3Modules
+from .model import TraceV3Modules, stream_step
 from .modules import CSTCache, TECache, TransitionTracker
 from .positions import PositionCounter
 from .session import LETTERS
@@ -61,7 +61,6 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
     cst_cache, te_cache, tracker = CSTCache(), TECache(), TransitionTracker()
     step_ends, aux = [], {"pred": [], "budget": [], "tokens": [], "i_steps": 0, "clock": [], "spans": [], "xy": [],
                           "kinds": [], "is_i": []}  # fmt: skip
-    dtype = next(modules.parameters()).dtype if modules is not None else bb.dtype
     length = len(prompt_ids)
     for k, (frames, t) in enumerate(zip(clips, times)):
         with torch.no_grad():
@@ -80,8 +79,7 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
             if tbptt and k and k % tbptt == 0:
                 cst_cache.detach()
                 te_cache.detach()
-            adapted, z = modules.cst(x.to(dtype), (h, w), t, cst_cache)
-            info = modules.transition(adapted, z, (h, w), te_cache)
+            _, _, info = stream_step(modules, x, (h, w), t, cst_cache, te_cache)
             tokens, rows, cols, kinds = info.tokens, info.rows, info.cols, info.kinds
             if "pred_loss" in info.aux:
                 aux["pred"].append(info.aux["pred_loss"])
@@ -92,11 +90,6 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
             slot_memory = info.aux.get("slot_memory")
             tracker.update(t, info.aux.get("active_centroids", []), slot_memory)
             aux["clock"].append(tracker.clock(t, float(info.surprise.mean())))
-            if slot_memory is not None:
-                tt = torch.full((slot_memory.shape[0],), t, device=slot_memory.device, dtype=slot_memory.dtype)
-                cap = modules.cfg.transition.memory_slots
-                cst_cache.memory = slot_memory if cst_cache.memory is None else torch.cat([cst_cache.memory, slot_memory])[-cap:]
-                cst_cache.memory_times = tt if cst_cache.memory_times is None else torch.cat([cst_cache.memory_times, tt])[-cap:]
         ts = bb.ids(f"<{t:.1f} seconds>") + [bb.vision_start]
         parts += [bb.embed_ids(ts), tokens[None].to(bb.dtype), bb.embed_ids([bb.vision_end])]
         positions += [pos.text(len(ts), bb.device), pos.points(rows, cols, h, w), pos.text(1, bb.device)]

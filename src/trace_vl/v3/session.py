@@ -25,7 +25,7 @@ from .alert import DecisionMemory, Question, encode_questions, public
 from .backbone import Backbone
 from .config import V3Config
 from .kv import KVMemory
-from .model import TraceV3Modules
+from .model import TraceV3Modules, stream_step
 from .modules import CSTCache, RetentionScorer, TECache, TransitionTracker
 from .positions import PositionCounter
 
@@ -99,13 +99,10 @@ class StreamSession:
         h, w = bb.merged_grid(grid_thw)
         info = None
         if self.mode == "v3":
-            dtype = next(self.modules.parameters()).dtype
-            adapted, z = self.modules.cst(x.to(dtype), (h, w), t, self.cst_cache)
-            info = self.modules.transition(adapted, z, (h, w), self.te_cache)
+            _, _, info = stream_step(self.modules, x, (h, w), t, self.cst_cache, self.te_cache)
             tokens, rows, cols = info.tokens.to(bb.dtype), info.rows, info.cols
             kinds = info.kinds
             groups = [("step", self.step_index) if g < 0 else ("slot", g) for g in info.groups]
-            self._update_cst_memory(info, t)
             self.tracker.update(t, info.aux.get("active_centroids", []), info.aux.get("slot_memory"))
         else:
             tokens = x
@@ -164,15 +161,6 @@ class StreamSession:
             self.decision_memory.add(torch.cat(latent), t)
         self.step_index += 1
         return result
-
-    def _update_cst_memory(self, info, t: float):
-        slot_memory = info.aux.get("slot_memory")
-        if slot_memory is None:
-            return
-        cache, cap = self.cst_cache, self.cfg.transition.memory_slots
-        times = torch.full((slot_memory.shape[0],), t, device=slot_memory.device, dtype=slot_memory.dtype)
-        cache.memory = slot_memory if cache.memory is None else torch.cat([cache.memory, slot_memory])[-cap:]
-        cache.memory_times = times if cache.memory_times is None else torch.cat([cache.memory_times, times])[-cap:]
 
     def _clock(self, info, t: float) -> torch.Tensor:
         surprise = float(info.surprise.mean()) if info is not None else 0.0

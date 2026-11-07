@@ -431,3 +431,47 @@ def test_b4_keeps_slot_memory_and_matches_budget():
 def test_b4_fixed_budget_mode():
     (_, _), (pooled, _) = _b4_pair(pooled_match=False, k=5)
     assert pooled.tokens.shape[0] == 5 and pooled.rows.max() <= 2 and pooled.cols.max() <= 3
+
+
+def test_stream_step_writes_active_slot_memory_every_step():
+    """Regression (PR #3 review): the budget audit replay skipped the CST-memory write-back; all paths now share
+    stream_step, whose recurrent state must include the slot memory written on active P-steps."""
+    from trace_vl.v3.model import stream_step
+
+    cfg = small_config(i_step_every=100)  # mass_threshold 0 -> max_active (2) slots per P-step
+    torch.manual_seed(0)
+    modules = TraceV3Modules(cfg, model_dim=16).eval()
+    cst, te = CSTCache(), TECache()
+    depths, zs = [], []
+    torch.manual_seed(1)
+    frames = [torch.rand(6, 16) + 0.5 for _ in range(4)]
+    for k, x in enumerate(frames):
+        _, z, info = stream_step(modules, x, (2, 3), float(k), cst, te)
+        depths.append(0 if cst.memory is None else cst.memory.shape[0])
+        zs.append(z)
+    assert depths == [0, 2, 4, 6]
+    # Without the write-back the adapter state diverges once memory exists (what the old audit replayed).
+    cst2, te2 = CSTCache(), TECache()
+    for k, x in enumerate(frames):
+        adapted, z2 = modules.cst(x, (2, 3), float(k), cst2)
+        modules.transition(adapted, z2, (2, 3), te2)
+    assert not torch.allclose(zs[-1], z2)
+
+
+@pytest.mark.parametrize(
+    "rows,kwargs,message",
+    [
+        ([], {}, "empty"),
+        ([{"id": "a", "video": "v.mp4", "split": "test"}], {}, "train/val"),
+        ([{"id": "a", "video": "v.mp4"}], {}, "train/val"),
+        ([{"id": "a", "video": "v.mp4", "split": "val"}], {"tolerance": 0.0}, "tolerance"),
+        ([{"id": "a", "video": "v.mp4", "split": "val"}], {"max_videos": 0}, "max_videos"),
+    ],
+)
+def test_budget_audit_fails_closed(tmp_path, rows, kwargs, message):
+    from trace_vl.v3.harness import budget_audit
+
+    path = tmp_path / "cal.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    with pytest.raises(ValueError, match=message):
+        budget_audit([("transition", V3Config(), None)], str(path), str(tmp_path), "cpu", **kwargs)

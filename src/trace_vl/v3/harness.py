@@ -16,7 +16,7 @@ import torch
 from .backbone import Backbone
 from .config import V3Config
 from .data import StepReader, draw_region, read_jsonl, step_times
-from .model import TraceV3Modules
+from .model import TraceV3Modules, stream_step
 from .modules import CSTCache, TECache
 from .session import StreamSession
 
@@ -332,9 +332,14 @@ def budget_audit(arms: list[tuple[str, V3Config, str | None]], records_path: str
                  max_videos: int = 8, max_seconds: float = 180.0, tolerance: float = 0.05) -> dict:  # fmt: skip
     """Visual-token budget per arm on fixed calibration videos (no LM, no accuracy): the matched-budget gate
     for transition vs B4 (PR #3 review). Calibration records must not come from a test split."""
+    if max_videos < 1 or max_seconds <= 0 or not 0 < tolerance < 1:
+        raise ValueError("need max_videos >= 1, max_seconds > 0 and 0 < tolerance < 1")
     records = read_jsonl(records_path)
-    if any(r.get("split") == "test" for r in records):
-        raise ValueError("budget calibration must not use test-split records")
+    if not records:
+        raise ValueError("empty calibration file")
+    bad = sorted({str(r.get("split")) for r in records if r.get("split") not in {"train", "val"}})
+    if bad:
+        raise ValueError(f"calibration records must be explicitly split train/val, found {bad}")
     videos, seen = [], set()
     for r in records:
         key = r.get("stream") or r.get("video")
@@ -346,7 +351,6 @@ def budget_audit(arms: list[tuple[str, V3Config, str | None]], records_path: str
     report = {"videos": [r.get("stream") or r.get("video") for r in videos], "arms": {}}
     for name, cfg, checkpoint in arms:
         modules = _modules(cfg, backbone, checkpoint, device)
-        dtype = next(modules.parameters()).dtype
         p_tokens, i_tokens, steps = [], [], 0
         for record in videos:
             reader = StepReader(record, video_root)
@@ -357,13 +361,14 @@ def budget_audit(arms: list[tuple[str, V3Config, str | None]], records_path: str
                     pv, grid = backbone.preprocess(backbone.resize_step(reader.step(t, cfg.stream.frame_gap)))
                     x = backbone.encode(pv, grid)
                     h, w = backbone.merged_grid(grid)
-                    adapted, z = modules.cst(x.to(dtype), (h, w), t, cst)
-                    info = modules.transition(adapted, z, (h, w), te)
+                    _, _, info = stream_step(modules, x, (h, w), t, cst, te)  # same path as session/training
                     (i_tokens if info.is_i_step else p_tokens).append(info.tokens.shape[0])
                     steps += 1
             finally:
                 reader.close()
         total = sum(p_tokens) + sum(i_tokens)
+        if steps == 0 or total == 0:
+            raise ValueError(f"arm {name}: no valid calibration steps; a zero-observation audit cannot pass")
         report["arms"][name] = {
             "checkpoint": checkpoint, "p_step_mode": cfg.transition.p_step_mode, "steps": steps,
             "i_step_fraction": len(i_tokens) / max(1, steps),
