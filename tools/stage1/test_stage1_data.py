@@ -22,3 +22,11 @@ def test_gold_conflict_is_rejected():
     row={'id':'shared','video':'v.mp4','question':'What happens?','options':['run','sit'],'answer':0}
     with pytest.raises(ValueError,match='Conflicting gold'):
         module.canonicalize([row,{**row,'answer':1}])
+
+
+def test_limit_keeps_whole_videos_and_is_order_independent():
+    rows=[{'video':f'v{video}','id':f'{video}-{q}'} for video in range(6) for q in range(3)]
+    first=module.limit_video_groups(rows,8)
+    second=module.limit_video_groups(list(reversed(rows)),8)
+    assert len(first)==6 and {r['id'] for r in first}=={r['id'] for r in second}
+    assert all(sum(r['video']==video for r in first)==3 for video in {r['video'] for r in first})
