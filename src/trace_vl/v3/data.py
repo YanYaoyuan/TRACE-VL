@@ -352,3 +352,112 @@ def draw_region(frames: np.ndarray, region) -> np.ndarray:
     for frame in out:
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), max(2, round(max(h, w) / 200)))
     return out
+
+
+# ---------------------------------------------------------------------------- Stage 2 streams
+def _video_meta(path: Path) -> tuple[float, int, int] | None:
+    """(duration seconds, height, width) of a video, or None when unreadable."""
+    import cv2
+
+    capture = cv2.VideoCapture(str(path))
+    try:
+        if not capture.isOpened():
+            return None
+        fps, count = capture.get(cv2.CAP_PROP_FPS), int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        height, width = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)), int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        if fps <= 0 or count <= 1 or height <= 0 or width <= 0:
+            return None
+        return (count - 1) / fps, height, width
+    finally:
+        capture.release()
+
+
+def stage2_question(record: dict, time: float, evidence, delay: float, prefix: str | None = None) -> dict:
+    text = record["question"] if prefix is None else prefix + record["question"]
+    return {"id": record["id"], "time": round(float(time), 3), "question": text, "options": record["options"],
+            "answer": record["answer"], "evidence": evidence, "delay": round(float(delay), 3)}  # fmt: skip
+
+
+def build_stage2_streams(records_path: str, output: str, video_root: str, split: str = "train",
+                         stream_seconds: float = 300.0, max_clips: int = 24, questions_per_clip: int = 2,
+                         delay_min: float = 30.0, delay_max: float = 240.0, immediate_fraction: float = 0.25,
+                         pixels: int = 448 * 448, unit: int = 32, seed: int = 7) -> dict:  # fmt: skip
+    """Long training streams with delayed, time-referenced questions and evidence windows (Stage 2).
+
+    - Records without `query_time` (offline clips, e.g. LLaVA-Video MC): clips of the same frame-grid bucket
+      are concatenated into streams of about `stream_seconds`. Each question of a clip is asked either right
+      after the clip (`immediate_fraction`) or `delay_min..delay_max` seconds later, while later clips keep
+      streaming, and says which part of the stream it is about ("from 37 to 61 seconds", matching the
+      `<t seconds>` step markers). Evidence = that clip's interval.
+    - Records with `query_time` (timed questions on one long video, e.g. MEVA train): grouped per video into
+      one stream, asked at their own times; evidence = the record's `evidence` windows when present.
+    Questions are only asked at or after the end of their evidence, so the answer must come from memory.
+    """
+    import hashlib
+
+    from .backbone import frame_size
+
+    rng = np.random.default_rng(seed)
+    root = Path(video_root)
+    rows = [r for r in read_jsonl(records_path) if r.get("split", "train") == split]
+    if not rows:
+        raise ValueError(f"no records with split == {split}")
+    if not 0 <= immediate_fraction <= 1 or delay_min < 0 or delay_max < delay_min or stream_seconds <= 0:
+        raise ValueError("invalid delay / stream settings")
+    timed: dict[str, list[dict]] = {}
+    offline: dict[str, list[dict]] = {}
+    for r in rows:
+        (timed if r.get("query_time") is not None else offline).setdefault(r["video"], []).append(r)
+    streams, skipped = [], 0
+
+    def stream_id(parts) -> str:
+        return "s2-" + hashlib.sha256(json.dumps(parts).encode()).hexdigest()[:16]
+
+    for video, items in sorted(timed.items()):
+        meta = _video_meta(root / video)
+        if meta is None:
+            skipped += len(items)
+            continue
+        duration = min(meta[0], max(float(r["query_time"]) for r in items))
+        questions = [stage2_question(r, float(r["query_time"]), r.get("evidence"), 0.0) for r in items
+                     if float(r["query_time"]) <= meta[0]]  # fmt: skip
+        if questions:
+            streams.append({"id": stream_id([video]), "split": split, "source": "timed", "duration": round(duration, 3),
+                            "clips": [{"video": video, "offset": 0.0}],
+                            "questions": sorted(questions, key=lambda q: q["time"])})  # fmt: skip
+
+    buckets: dict[tuple, list[tuple[str, float]]] = {}
+    for video in sorted(offline):
+        meta = _video_meta(root / video)
+        if meta is None:
+            skipped += len(offline[video])
+            continue
+        buckets.setdefault(frame_size(meta[1], meta[2], pixels, unit), []).append((video, meta[0]))
+    for bucket in sorted(buckets):
+        videos = buckets[bucket]
+        order = rng.permutation(len(videos)).tolist()
+        while order:
+            clips, offset = [], 0.0
+            while order and offset < stream_seconds and len(clips) < max_clips:
+                video, duration = videos[order.pop()]
+                clips.append({"video": video, "offset": round(offset, 3), "end": round(offset + duration, 3)})
+                offset += duration
+            questions = []
+            for clip in clips:
+                picks = offline[clip["video"]]
+                picks = [picks[i] for i in rng.permutation(len(picks))[:questions_per_clip]]
+                start, end = clip["offset"], clip["end"]
+                for r in picks:
+                    delay = 0.0 if rng.random() < immediate_fraction else float(rng.uniform(delay_min, delay_max))
+                    ask = min(end + delay, offset)
+                    prefix = f"Consider the part of the video from {start:.0f} to {end:.0f} seconds. "
+                    questions.append(stage2_question(r, ask, [[start, end]], ask - end, prefix))
+            streams.append({"id": stream_id([c["video"] for c in clips]), "split": split, "source": "concat",
+                            "duration": round(offset, 3), "clips": clips,
+                            "questions": sorted(questions, key=lambda q: q["time"])})  # fmt: skip
+    write_jsonl(output, streams)
+    delays = [q["delay"] for s in streams for q in s["questions"]]
+    return {"streams": len(streams), "questions": len(delays), "skipped_records": skipped,
+            "hours": round(sum(s["duration"] for s in streams) / 3600, 2),
+            "delayed_fraction": round(sum(d > 0 for d in delays) / max(1, len(delays)), 3),
+            "mean_delay": round(sum(delays) / max(1, len(delays)), 1)}  # fmt: skip

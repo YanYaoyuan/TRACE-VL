@@ -179,7 +179,9 @@ class StreamSession:
                 dtype = next(scorer.parameters()).dtype
                 slot_ids = list(dict.fromkeys(g for g in info.groups if g >= 0))
                 for g, mass in zip(slot_ids, info.aux.get("active_masses", [])):
-                    feats = RetentionScorer.features(0.0, mass, drift, 0.0, 1.0, 0.0)
+                    # Drift feature 0: Stage 2 trains the scorer with chunked LM forwards that have no per-step
+                    # drift, so inference must not feed it a value it never saw.
+                    feats = RetentionScorer.features(0.0, float(mass), 0.0, 0.0, 1.0, 0.0)
                     self.memory.scores[("slot", g)] = float(scorer(feats.to(info.tokens.device, dtype)))
 
     # ------------------------------------------------------------------ alerts (Jev-style classification)

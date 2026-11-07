@@ -1,4 +1,4 @@
-"""v3 configuration (YAML sections: backbone, stream, cst, transition, memory, train)."""
+"""v3 configuration (YAML sections: backbone, stream, cst, transition, memory, alert, train, stage2)."""
 
 from __future__ import annotations
 
@@ -122,6 +122,19 @@ class TrainConfig:
 
 
 @dataclass
+class Stage2Config:
+    """Long-stream training through the streaming cache (KV policy + Gated DeltaNet state), see train_stage2.py."""
+
+    chunk_steps: int = 8  # steps per gradient chunk (truncated BPTT); chunks also end at question times
+    max_seconds: float = 600.0  # streams are cut to this length
+    steps: int = 1000
+    grad_accum: int = 2  # streams per optimizer update per rank
+    question_weight: float = 1.0  # CE of delayed questions answered on a forked cache
+    retention_weight: float = 0.5  # BCE of the TKM retention scorer against evidence windows
+    lr_scale: float = 0.5  # Stage 2 learning rates = train.lr / train.lora_lr x this
+
+
+@dataclass
 class V3Config:
     backbone: BackboneConfig = field(default_factory=BackboneConfig)
     stream: StreamConfig = field(default_factory=StreamConfig)
@@ -130,6 +143,7 @@ class V3Config:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     alert: AlertConfig = field(default_factory=AlertConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
+    stage2: Stage2Config = field(default_factory=Stage2Config)
 
     @classmethod
     def from_dict(cls, values: dict | None) -> "V3Config":
@@ -142,6 +156,7 @@ class V3Config:
             "memory": MemoryConfig,
             "alert": AlertConfig,
             "train": TrainConfig,
+            "stage2": Stage2Config,
         }
         unknown = set(values) - set(parts) - {"extends", "data", "eval"}
         if unknown:
@@ -166,6 +181,8 @@ class V3Config:
         k = config.transition.pooled_tokens
         if isinstance(k, bool) or not isinstance(k, int) or k < 1:
             raise ValueError("transition.pooled_tokens must be a positive integer")
+        if config.stage2.chunk_steps < 1 or config.stage2.max_seconds <= 0 or config.stage2.grad_accum < 1:
+            raise ValueError("stage2.chunk_steps / grad_accum must be >= 1 and stage2.max_seconds positive")
         if config.memory.policy not in {"full", "window", "drift", "tkm", "fifo"}:
             raise ValueError("memory.policy must be full, window, drift, tkm or fifo")
         if config.cst.dim % config.cst.heads:

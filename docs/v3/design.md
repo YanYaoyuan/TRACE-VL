@@ -206,8 +206,11 @@ v3 stream (I/P steps, bounded KV). Losses:
 Concatenated clips, MEVA streams, and synthetic long-gap tasks with questions inserted at random
 times ("is X still there?", "how long ago did Y change?", "how many times …?"). Train on overlapping
 chunks with the inference KV policy applied (StreamingVLM recipe), carrying the GDN state across
-chunks with truncated backprop. The retention scorer is supervised by the teacher's attention mass on
-evicted vs kept evidence for answers in the chunk.
+chunks with truncated backprop. The retention scorer is supervised with the evidence windows of later
+questions (BCE: keep what a future question is about); the design originally proposed the teacher's
+attention mass, which needs a full-token teacher over the whole stream and was dropped for cost.
+Implementation: `train_stage2.py` (functional Gated DeltaNet cache updates so gradients pass through the
+recurrent state; question forks share the KV and clone the GDN states; runbook "Stage 2").
 
 **Stage 3 (optional).** Answer-level preference optimization on long-gap questions.
 

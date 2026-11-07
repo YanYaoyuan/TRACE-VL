@@ -118,10 +118,48 @@ Evaluate checkpoints (`modules.pt` + `lora/`) with `v3 eval --mode v3 --checkpoi
 the held-out `val` split, OVO-Bench and Video-MME, against B0/B1/B2 at equal visual tokens
 (experiments.md §2), and post every run to issue #4.
 
-Not implemented yet (next development work, tracked in issue #4): the **Stage 2 trainer** (long
-10-60 min streams with the inference KV policy, chunked SFT, retention-scorer supervision) and alert-head
-training data at scale (frame-labelled anomaly sets such as CUHK Avenue / ShanghaiTech Campus;
-licences to check).
+Not implemented yet (tracked in issue #4): alert-head training data at scale (frame-labelled anomaly sets
+such as CUHK Avenue / ShanghaiTech Campus; licences to check). The Stage 2 trainer is below.
+
+## Stage 2: long streams through the streaming cache (after an M2 Stage 1 checkpoint)
+
+Stage 1 never sees the KV policy or the Gated DeltaNet state over minutes. Stage 2 trains the inference path
+itself (`src/trace_vl/v3/train_stage2.py`): steps -> CST + transition encoder -> chunk LM forward on the hybrid
+cache -> TKM eviction -> delayed questions on a forked cache (shared KV, cloned GDN states) -> CE. Chunks of
+`stage2.chunk_steps` (also cut at each question) are backpropagated and then every cache is detached
+(truncated BPTT). The retention scorer is trained with BCE against the evidence windows of later questions,
+and the same scores drive eviction during training. Gradients are all-reduced by hand (streams have
+different chunk counts, so DDP hooks would deadlock).
+
+```bash
+# 1. Streams: LLaVA-MC clips of the same frame grid concatenated to ~5 min; each question is asked right after
+#    its clip (25%) or 30-240 s later while other clips stream, and names its interval ("from 37 to 61 seconds").
+#    Records with query_time (e.g. MEVA train) become one stream per video with questions at their own times.
+uv run --locked trace-vl v3 build-stage2 data/v3/llava_mc.jsonl --video-root /data/llava_video \
+    --output data/v3/stage2_train.jsonl --stream-seconds 300
+uv run --locked trace-vl v3 build-stage2 data/v3/llava_mc.jsonl --video-root /data/llava_video \
+    --split val --output data/v3/stage2_val.jsonl --stream-seconds 300
+# 2. Smoke (1 x 5090): two updates; check finite grad norms, q_ce, evidence_kept, kv_tokens_end, peak_gb.
+uv run --locked trace-vl v3 train-stage2 --config configs/v3/stage2.yaml --streams data/v3/stage2_train.jsonl \
+    --video-root /data/llava_video --init outputs/v3/stage1/modules.pt --adapter outputs/v3/stage1/lora \
+    --output outputs/v3/stage2-smoke --max-steps 2
+# 3. Run: 2 x 5090 (configs/v3/stage2.yaml) or 4 x A100 (stage2_a100.yaml); B4 arm with stage2_b4.yaml from
+#    the Stage 1 B4 checkpoint, identical streams and seed.
+uv run --locked torchrun --nproc_per_node=4 -m trace_vl.cli v3 train-stage2 --config configs/v3/stage2_a100.yaml \
+    --streams data/v3/stage2_train.jsonl --video-root /data/llava_video \
+    --init outputs/v3/stage1-a100/modules.pt --adapter outputs/v3/stage1-a100/lora --output outputs/v3/stage2-a100
+```
+
+Metrics per update (`metrics.jsonl`): `q_ce` / `q_acc` (delayed questions), `evidence_kept` (fraction of
+visual tokens streamed inside the asked-about interval still in the KV cache at question time; the retention
+scorer should raise it above the `fifo` policy at the same budget), `mean_delay`, `retention_bce`,
+`p_steps_with_active`, `expected_p_tokens`, `kv_tokens_end`, `peak_gb`.
+
+Known limits (by design, documented for the review): question CE reaches only the chunk it is asked in, not
+evidence steps of earlier chunks (truncated BPTT); the retention scorer carries that signal from annotations.
+Eviction happens at chunk ends during training but after every step at inference (same policy, same budget).
+The retention scorer's drift feature is 0 in both paths (chunked forwards have no per-step drift). No KD
+teacher in Stage 2 (a full-token teacher over 5-10 min streams is too costly); the alert loss is not used yet.
 
 ## Transition-sensitive evaluation (added for M2)
 

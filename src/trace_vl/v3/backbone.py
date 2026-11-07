@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import math
+from contextlib import contextmanager
 
 import numpy as np
 import torch
@@ -30,6 +31,78 @@ def frame_size(height: int, width: int, pixels: int, unit: int) -> tuple[int, in
     h = max(unit, round(height * scale / unit) * unit)
     w = max(unit, round(width * scale / unit) * unit)
     return h, w
+
+
+@contextmanager
+def functional_linear_cache():
+    """Make Gated DeltaNet cache updates functional (assign, not copy_) for gradient-carrying streaming.
+
+    transformers updates the recurrent/conv states in place to keep static addresses for CUDA graphs. With
+    autograd that overwrites the initial state the GDN kernel saved for backward ("modified by an inplace
+    operation"). Stage 2 trains through cached streaming forwards, so inside this context the updates assign
+    new tensors instead. Inference does not need it.
+    """
+    from transformers.cache_utils import LinearAttentionLayer
+
+    original_recurrent = LinearAttentionLayer.update_recurrent_state
+    original_conv = LinearAttentionLayer.update_conv_state
+
+    def update_recurrent_state(self, recurrent_states, state_idx=0, **kwargs):
+        if not self.is_recurrent_states_initialized[state_idx]:
+            self.lazy_initialization(recurrent_states=recurrent_states, state_idx=state_idx)
+        self.recurrent_states[state_idx] = recurrent_states
+        return recurrent_states
+
+    def update_conv_state(self, conv_states, state_idx=0, conv_kernel_size=None, **kwargs):
+        if not self.is_conv_states_initialized[state_idx]:
+            self.lazy_initialization(conv_states=conv_states, state_idx=state_idx, conv_kernel_size=conv_kernel_size)
+        if not self.has_previous_state[state_idx]:
+            full = conv_states
+            self.has_previous_state[state_idx] = True
+            if full.shape[-1] < self.conv_kernel_size[state_idx]:
+                full = torch.nn.functional.pad(full, (self.conv_kernel_size[state_idx] - full.shape[-1], 0), value=0)
+        else:
+            full = torch.cat([self.conv_states[state_idx], conv_states], dim=-1)
+        self.conv_states[state_idx] = full[..., -self.conv_kernel_size[state_idx] :]
+        return full
+
+    LinearAttentionLayer.update_recurrent_state = update_recurrent_state
+    LinearAttentionLayer.update_conv_state = update_conv_state
+    try:
+        yield
+    finally:
+        LinearAttentionLayer.update_recurrent_state = original_recurrent
+        LinearAttentionLayer.update_conv_state = original_conv
+
+
+def detach_cache(cache):
+    """Detach every cached tensor in place on the cache object (truncated backprop between chunks)."""
+    for layer in cache.layers:
+        if getattr(layer, "keys", None) is not None and torch.is_tensor(layer.keys):
+            layer.keys, layer.values = layer.keys.detach(), layer.values.detach()
+        for name in ("recurrent_states", "conv_states"):
+            states = getattr(layer, name, None)
+            if isinstance(states, dict):
+                for k, v in states.items():
+                    if torch.is_tensor(v):
+                        states[k] = v.detach()
+
+
+def branch_cache(cache):
+    """Fork for a question during training: share the (large) full-attention KV tensors, clone the small GDN
+    states. Safe because KV updates concatenate into new tensors and GDN states are cloned (autograd-friendly,
+    unlike deepcopy of non-leaf tensors)."""
+    fork = copy.copy(cache)
+    fork.layers = []
+    for layer in cache.layers:
+        clone = copy.copy(layer)
+        for name in ("recurrent_states", "conv_states", "is_conv_states_initialized", "is_recurrent_states_initialized",
+                     "has_previous_state", "conv_kernel_size"):  # fmt: skip
+            value = getattr(layer, name, None)
+            if isinstance(value, dict):
+                setattr(clone, name, {k: (v.clone() if torch.is_tensor(v) else v) for k, v in value.items()})
+        fork.layers.append(clone)
+    return fork
 
 
 class Backbone:

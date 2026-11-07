@@ -1,0 +1,5 @@
+# B4 arm of Stage 2 (pooled P-steps, same slot machinery and budget) - init from the Stage 1 B4 checkpoint.
+extends: stage2.yaml
+transition:
+  p_step_mode: pooled
+  pooled_match: true

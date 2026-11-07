@@ -412,6 +412,24 @@ def _v3_parser(commands):
     c.add_argument("--max-steps", type=int)
     c.add_argument("--init")
     c.add_argument("--adapter")
+    c = sub.add_parser("build-stage2", help="long streams with delayed time-referenced questions (Stage 2 data)")
+    c.add_argument("records", help="Stage 1 records (e.g. convert-llava-mc output) or timed records")
+    c.add_argument("--output", required=True)
+    c.add_argument("--video-root", required=True)
+    c.add_argument("--split", choices=["train", "val"], default="train")
+    c.add_argument("--stream-seconds", type=float, default=300.0)
+    c.add_argument("--delay-min", type=float, default=30.0)
+    c.add_argument("--delay-max", type=float, default=240.0)
+    c.add_argument("--immediate-fraction", type=float, default=0.25)
+    c.add_argument("--seed", type=int, default=7)
+    c = sub.add_parser("train-stage2", help="Stage 2 long-stream training through the streaming cache (torchrun)")
+    c.add_argument("--config", default="configs/v3/stage2.yaml")
+    c.add_argument("--streams", required=True, help="build-stage2 output")
+    c.add_argument("--video-root", required=True)
+    c.add_argument("--output", required=True)
+    c.add_argument("--init", help="Stage 1 modules.pt")
+    c.add_argument("--adapter", help="Stage 1 lora/ directory")
+    c.add_argument("--max-steps", type=int)
 
 
 def _v3(args):
@@ -431,6 +449,11 @@ def _v3(args):
     if args.action == "convert-meva":
         bench = Path(args.bench)
         return show(v3data.convert_meva(bench / "questions.jsonl", bench / "streams.json", args.output, args.split))
+    if args.action == "build-stage2":
+        return show(v3data.build_stage2_streams(args.records, args.output, args.video_root, args.split,
+                                                args.stream_seconds, delay_min=args.delay_min,
+                                                delay_max=args.delay_max, immediate_fraction=args.immediate_fraction,
+                                                seed=args.seed))  # fmt: skip
     if args.action == "score":
         from .v3.harness import score
 
@@ -472,6 +495,11 @@ def _v3(args):
 
         return print(train(cfg, args.records, args.video_root, args.output, args.clip_seconds, args.max_steps,
                            args.init, args.adapter))  # fmt: skip
+    if args.action == "train-stage2":
+        from .v3.train_stage2 import train_stage2
+
+        return print(train_stage2(cfg, args.streams, args.video_root, args.output, args.init, args.adapter,
+                                  args.max_steps))  # fmt: skip
     raise ValueError(f"unknown v3 action {args.action}")
 
 
