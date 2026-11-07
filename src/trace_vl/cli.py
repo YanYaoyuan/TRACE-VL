@@ -445,7 +445,21 @@ def _v3_parser(commands):
     c.add_argument("--delay-min", type=float, default=30.0)
     c.add_argument("--delay-max", type=float, default=240.0)
     c.add_argument("--immediate-fraction", type=float, default=0.25)
+    c.add_argument("--distractor-fraction", type=float, default=0.4, help="clips never asked about (negatives)")
     c.add_argument("--seed", type=int, default=7)
+    c = sub.add_parser("eval-stage2", help="held-out long streams: delayed-question accuracy and evidence kept")
+    c.add_argument("--config", default="configs/v3/stage2.yaml")
+    c.add_argument("--streams", required=True)
+    c.add_argument("--video-root", required=True)
+    c.add_argument("--output", required=True)
+    c.add_argument("--mode", choices=["native", "v3"], default="v3")
+    c.add_argument("--checkpoint")
+    c.add_argument("--adapter")
+    c.add_argument("--policy", choices=["tkm", "mass", "fifo", "window", "full"],
+                   help="override memory.policy at the same budget (retention controls)")
+    c.add_argument("--split", default="val")
+    c.add_argument("--limit", type=int)
+    c.add_argument("--device", default="cuda")
     c = sub.add_parser("train-stage2", help="Stage 2 long-stream training through the streaming cache (torchrun)")
     c.add_argument("--config", default="configs/v3/stage2.yaml")
     c.add_argument("--streams", required=True, help="build-stage2 output")
@@ -486,7 +500,7 @@ def _v3(args):
         return show(v3data.build_stage2_streams(args.records, args.output, args.video_root, args.split,
                                                 args.stream_seconds, delay_min=args.delay_min,
                                                 delay_max=args.delay_max, immediate_fraction=args.immediate_fraction,
-                                                seed=args.seed))  # fmt: skip
+                                                seed=args.seed, distractor_fraction=args.distractor_fraction))  # fmt: skip
     if args.action == "score":
         from .v3.harness import score
 
@@ -533,6 +547,11 @@ def _v3(args):
 
         return show(evaluate_alerts(cfg, args.records, args.video_root, args.output, args.checkpoint, args.adapter,
                                     args.method, args.device, args.split, args.limit))  # fmt: skip
+    if args.action == "eval-stage2":
+        from .v3.train_stage2 import evaluate_streams
+
+        return show(evaluate_streams(cfg, args.streams, args.video_root, args.output, args.mode, args.checkpoint,
+                                     args.adapter, args.policy, args.device, args.split, args.limit))  # fmt: skip
     if args.action == "train-stage2":
         from .v3.train_stage2 import train_stage2
 

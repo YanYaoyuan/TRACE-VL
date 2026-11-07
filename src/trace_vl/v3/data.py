@@ -401,14 +401,17 @@ def stage2_question(record: dict, time: float, evidence, delay: float, prefix: s
 def build_stage2_streams(records_path: str, output: str, video_root: str, split: str = "train",
                          stream_seconds: float = 300.0, max_clips: int = 24, questions_per_clip: int = 2,
                          delay_min: float = 30.0, delay_max: float = 240.0, immediate_fraction: float = 0.25,
-                         pixels: int = 448 * 448, unit: int = 32, seed: int = 7) -> dict:  # fmt: skip
+                         pixels: int = 448 * 448, unit: int = 32, seed: int = 7,
+                         distractor_fraction: float = 0.4) -> dict:  # fmt: skip
     """Long training streams with delayed, time-referenced questions and evidence windows (Stage 2).
 
     - Records without `query_time` (offline clips, e.g. LLaVA-Video MC): clips of the same frame-grid bucket
       are concatenated into streams of about `stream_seconds`. Each question of a clip is asked either right
       after the clip (`immediate_fraction`) or `delay_min..delay_max` seconds later, while later clips keep
       streaming, and says which part of the stream it is about ("from 37 to 61 seconds", matching the
-      `<t seconds>` step markers). Evidence = that clip's interval.
+      `<t seconds>` step markers). Evidence = that clip's interval. A `distractor_fraction` of the clips is
+      never asked about (at least one clip per stream is): their memory is what retention may drop, so the
+      retention scorer sees negatives (PR #3 review: all-positive labels without them).
     - Records with `query_time` (timed questions on one long video, e.g. MEVA train): grouped per video into
       one stream, asked at their own times; evidence = the record's `evidence` windows when present.
     Questions are only asked at or after the end of their evidence, so the answer must come from memory.
@@ -422,6 +425,8 @@ def build_stage2_streams(records_path: str, output: str, video_root: str, split:
     rows = [r for r in read_jsonl(records_path) if r.get("split", "train") == split]
     if not rows:
         raise ValueError(f"no records with split == {split}")
+    if not 0 <= distractor_fraction < 1:
+        raise ValueError("distractor_fraction must be in [0, 1)")
     if not 0 <= immediate_fraction <= 1 or delay_min < 0 or delay_max < delay_min or stream_seconds <= 0:
         raise ValueError("invalid delay / stream settings")
     timed: dict[str, list[dict]] = {}
@@ -463,7 +468,13 @@ def build_stage2_streams(records_path: str, output: str, video_root: str, split:
                 clips.append({"video": video, "offset": round(offset, 3), "end": round(offset + duration, 3)})
                 offset += duration
             questions = []
-            for clip in clips:
+            queried = [bool(rng.random() >= distractor_fraction) for _ in clips]
+            if not any(queried):
+                queried[int(rng.integers(len(clips)))] = True
+            for clip, asked in zip(clips, queried):
+                clip["queried"] = asked
+                if not asked:
+                    continue
                 picks = offline[clip["video"]]
                 picks = [picks[i] for i in rng.permutation(len(picks))[:questions_per_clip]]
                 start, end = clip["offset"], clip["end"]
@@ -477,7 +488,13 @@ def build_stage2_streams(records_path: str, output: str, video_root: str, split:
                             "questions": sorted(questions, key=lambda q: q["time"])})  # fmt: skip
     write_jsonl(output, streams)
     delays = [q["delay"] for s in streams for q in s["questions"]]
+    concat = [c for s in streams if s["source"] == "concat" for c in s["clips"]]
+    queried_seconds = sum(c["end"] - c["offset"] for c in concat if c["queried"])
+    all_seconds = sum(c["end"] - c["offset"] for c in concat)
     return {"streams": len(streams), "questions": len(delays), "skipped_records": skipped,
             "hours": round(sum(s["duration"] for s in streams) / 3600, 2),
             "delayed_fraction": round(sum(d > 0 for d in delays) / max(1, len(delays)), 3),
-            "mean_delay": round(sum(delays) / max(1, len(delays)), 1)}  # fmt: skip
+            "mean_delay": round(sum(delays) / max(1, len(delays)), 1),
+            "distractor_clips": sum(not c["queried"] for c in concat),
+            "queried_seconds_fraction": round(queried_seconds / all_seconds, 3) if all_seconds else None,
+            "streams_reaching_target": sum(s["duration"] >= stream_seconds for s in streams)}  # fmt: skip

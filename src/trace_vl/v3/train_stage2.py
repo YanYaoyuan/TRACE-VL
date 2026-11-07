@@ -12,9 +12,11 @@ Gradients (truncated BPTT):
   is one LM forward on the cache (with grad only when a question is due), losses, backward, then every
   cache (KV, GDN, CST, transition) is detached. Question CE therefore trains LoRA (reading the compressed
   memory) and the modules of the current chunk; it does not reach the evidence steps of earlier chunks.
-- That gap is covered by the retention scorer: each transition group gets BCE against "a later question's
-  evidence window covers this step" (labels from the annotations, i.e. teacher forcing of what to keep),
-  and the same scores drive the TKM eviction during training, as at inference.
+- That gap is covered by the retention scorer: at every chunk end, every older KV group (transition slots and
+  whole steps, so the pooled B4 arm is scored the same way) is rescored with its current age and gets BCE
+  against "a question still to come is about this group's time" (labels from the annotations: teacher
+  forcing of what to keep). Unqueried distractor clips and already-answered evidence are the negatives. The
+  same scores drive the TKM eviction during training, as at inference.
 - The Gated DeltaNet cache updates are made functional (backbone.functional_linear_cache), otherwise the
   in-place state copies break autograd.
 - Streams have different numbers of chunks per rank, so DDP's hooks would deadlock; gradients are
@@ -40,11 +42,11 @@ from torch.nn import functional as F
 from .backbone import Backbone, branch_cache, detach_cache, functional_linear_cache
 from .config import V3Config
 from .data import StepReader, read_jsonl, step_times
-from .kv import KINDS, KVMemory
+from .kv import KINDS, KVMemory, RetentionBook, score_retention
 from .model import TraceV3Modules, stream_step
-from .modules import CSTCache, RetentionScorer, TECache
+from .modules import CSTCache, TECache
 from .positions import PositionCounter
-from .session import LETTERS
+from .session import LETTERS, observe_step
 from .train import question_ids
 
 VISUAL_KINDS = {KINDS[k] for k in ("frame", "gist", "before", "after", "delta")}
@@ -80,10 +82,12 @@ def chunk_plan(times: list[float], questions: list[dict], chunk_steps: int, gap:
     return plan
 
 
-def evidence_label(t: float, questions: list[dict]) -> float:
-    """1 if a question asked after t has an evidence window covering t (keep it for that question)."""
+def evidence_label(span: tuple[float, float], now: float, questions: list[dict]) -> float:
+    """1 if a question still to be asked (time > now) has an evidence window overlapping the group's time span.
+    Groups of unqueried (distractor) clips, and groups whose questions were already asked, are negatives."""
+    first, last = span
     for q in questions:
-        if float(q["time"]) > t and any(a <= t <= b for a, b in (q.get("evidence") or [])):
+        if float(q["time"]) > now and any(a <= last and first <= b for a, b in (q.get("evidence") or [])):
             return 1.0
     return 0.0
 
@@ -120,21 +124,20 @@ class Stage2Runner:
         plan = chunk_plan(times, questions, s2.chunk_steps, gap)
         n_steps = len(times)
         n_questions = max(1, sum(len(d) for _, d in plan))
-        cache, pos, memory = bb.new_cache(), PositionCounter(), KVMemory(cfg.memory)
+        cache, pos, memory, book = bb.new_cache(), PositionCounter(), KVMemory(cfg.memory), RetentionBook()
         cst_cache, te_cache = CSTCache(), TECache()
         prompt = bb.ids(bb.head_text) + [bb.vision_start]
         pending = [(bb.embed_ids(prompt), pos.text(len(prompt), bb.device))]
         memory.append(len(prompt), "prompt", -1.0, ("prompt",), protected=True)
         appended: list[tuple[float, int]] = []
         stats = {"steps": n_steps, "chunks": len(plan), "ce": [], "correct": [], "evidence_kept": [], "delays": [],
-                 "expected": [], "active": [], "retention": [], "tokens": 0}  # fmt: skip
-        dtype = next(modules.parameters()).dtype
+                 "expected": [], "active": [], "retention": [], "tokens": 0, "ret_pos": 0, "ret_neg": 0}  # fmt: skip
         cuda = bb.device.type == "cuda"
         reader = StepReader(record, video_root)
         try:
             with functional_linear_cache():
                 for step_ids, due in plan:
-                    parts = {"pred": [], "budget": [], "ret_logit": [], "ret_label": []}
+                    parts = {"pred": [], "budget": []}
                     t = times[step_ids[-1]]
                     for k in step_ids:
                         t = times[k]
@@ -163,16 +166,8 @@ class Stage2Runner:
                         memory.append(1, "text", t, ("step", k))
                         appended.append((t, n))
                         stats["tokens"] += n
-                        if cfg.memory.policy == "tkm":
-                            # Same scoring as StreamSession._score_groups, but trainable.
-                            memory.scores[("step", k)] = -1.0
-                            slot_ids = list(dict.fromkeys(g for g in info.groups if g >= 0))
-                            for g, mass in zip(slot_ids, info.aux.get("active_masses", [])):
-                                feats = RetentionScorer.features(0.0, float(mass), 0.0, 0.0, 1.0, 0.0)
-                                logit = modules.retention(feats.to(bb.device, dtype))
-                                memory.scores[("slot", g)] = float(logit)
-                                parts["ret_logit"].append(logit)
-                                parts["ret_label"].append(evidence_label(t, questions))
+                        if cfg.memory.policy in {"tkm", "mass"}:
+                            observe_step(book, info, t, k)  # same bookkeeping as StreamSession
 
                     # One LM forward for the chunk; gradients only matter when a question reads the cache.
                     embeds = torch.cat([e for e, _ in pending], 1)
@@ -182,10 +177,17 @@ class Stage2Runner:
                     with torch.set_grad_enabled(grad), torch.autocast("cuda", dtype=torch.bfloat16,
                                                                       enabled=cuda):  # fmt: skip
                         bb.lm(embeds if grad else embeds.detach(), positions, cache)
+                    # Retention: rescore every tracked group with its current age (trainable for tkm), then evict.
+                    keys, ret_logits = score_retention(book, memory, modules.retention, t)
+                    if ret_logits is not None:
+                        ret_labels = [evidence_label(book.span(g), t, questions) for g in keys]
+                        stats["ret_pos"] += int(sum(ret_labels))
+                        stats["ret_neg"] += len(ret_labels) - int(sum(ret_labels))
                     mask = memory.keep_mask(t)
                     if mask is not None:
                         bb.evict(cache, mask)
                         memory.apply(mask)
+                        book.prune(set(memory.group))
 
                     losses = []
                     for q in due:
@@ -213,9 +215,9 @@ class Stage2Runner:
                         expected = torch.stack([e if torch.is_tensor(e) else torch.tensor(float(e), device=bb.device)
                                                 for e in parts["budget"]]).float()  # fmt: skip
                         losses.append(tc.budget_weight * share * (((expected - target) / target) ** 2).mean())
-                    if parts["ret_logit"]:
-                        logit = torch.stack(parts["ret_logit"]).float()
-                        label = torch.tensor(parts["ret_label"], device=logit.device)
+                    if ret_logits is not None:
+                        logit = ret_logits.float()
+                        label = torch.tensor(ret_labels, device=logit.device)
                         bce = F.binary_cross_entropy_with_logits(logit, label)
                         losses.append(s2.retention_weight * share * bce)
                         stats["retention"].append(float(bce))
@@ -240,7 +242,8 @@ def summarize(stats: list[dict]) -> dict:
     out = {"questions": sum(len(s.get("ce", [])) for s in stats), "q_ce": mean("ce"), "q_acc": mean("correct"),
            "evidence_kept": mean("evidence_kept"), "mean_delay": mean("delays"), "expected_p_tokens": mean("expected"),
            "retention_bce": mean("retention"), "steps": sum(s.get("steps", 0) for s in stats),
-           "kv_tokens_end": sum(s.get("kv_tokens", 0) for s in stats) / max(1, len(stats))}  # fmt: skip
+           "kv_tokens_end": sum(s.get("kv_tokens", 0) for s in stats) / max(1, len(stats)),
+           "ret_pos": sum(s.get("ret_pos", 0) for s in stats), "ret_neg": sum(s.get("ret_neg", 0) for s in stats)}  # fmt: skip
     active = [a for s in stats for a in s.get("active", [])]
     if active:
         out["p_steps_with_active"] = sum(a > 0 for a in active) / len(active)
@@ -251,15 +254,23 @@ def summarize(stats: list[dict]) -> dict:
 
 
 def all_reduce_grads(params: list[torch.nn.Parameter], world: int):
-    """Average gradients across ranks in one flat buffer (missing gradients count as zero)."""
+    """Average gradients across ranks in one flat buffer. A parameter missing a gradient on one rank counts as
+    zero there; a parameter without a gradient on every rank keeps grad=None, so AdamW skips it (weight decay
+    included), exactly as on one GPU (PR #3 review: the unused alert head drifted under decay)."""
     if world <= 1:
         return
-    grads = [p.grad if p.grad is not None else torch.zeros_like(p) for p in params]
+    device = params[0].device
+    has = torch.tensor([float(p.grad is not None) for p in params], device=device)
+    dist.all_reduce(has)
+    used = [p for p, h in zip(params, has.tolist()) if h > 0]
+    if not used:
+        return
+    grads = [p.grad if p.grad is not None else torch.zeros_like(p) for p in used]
     flat = torch.cat([g.reshape(-1).float() for g in grads])
     dist.all_reduce(flat)
     flat /= world
     offset = 0
-    for p, g in zip(params, grads):
+    for p, g in zip(used, grads):
         n = g.numel()
         p.grad = flat[offset : offset + n].view_as(g).to(g.dtype)
         offset += n
@@ -290,7 +301,10 @@ def train_stage2(cfg: V3Config, streams_path: str, video_root: str, output: str,
             for p in modules.parameters():
                 dist.broadcast(p.data, 0)
         lora_params = [p for p in bb.model.parameters() if p.requires_grad]
-        module_params = list(modules.parameters())
+        # The alert head is not trained in Stage 2: frozen and out of the optimizer (no weight-decay drift).
+        for p in modules.alert.parameters():
+            p.requires_grad_(False)
+        module_params = [p for p in modules.parameters() if p.requires_grad]
         optimizer = torch.optim.AdamW(
             [{"params": module_params, "lr": tc.lr * s2.lr_scale, "weight_decay": tc.weight_decay},
              {"params": lora_params, "lr": tc.lora_lr * s2.lr_scale, "weight_decay": 0.0}],
@@ -338,3 +352,108 @@ def train_stage2(cfg: V3Config, streams_path: str, video_root: str, output: str,
     finally:
         if world > 1 and dist.is_initialized():
             dist.destroy_process_group()
+
+
+# ---------------------------------------------------------------------------- held-out long-stream evaluation
+def delay_bucket(delay: float) -> str:
+    return "0s" if delay <= 0 else "<60s" if delay < 60 else "60-120s" if delay < 120 else ">=120s"
+
+
+def summarize_streams(rows: list[dict], replicates: int = 2000, seed: int = 7) -> dict:
+    """Accuracy overall and per delay bucket, evidence kept, whole-stream bootstrap CI of accuracy."""
+    import numpy as np
+
+    if not rows:
+        return {"questions": 0}
+    by_stream: dict[str, list[int]] = {}
+    for r in rows:
+        by_stream.setdefault(r["stream"], []).append(r["correct"])
+    streams = sorted(by_stream)
+    rng = np.random.default_rng(seed)
+    accs = []
+    for _ in range(replicates):
+        pick = rng.integers(0, len(streams), len(streams))
+        values = [c for i in pick for c in by_stream[streams[i]]]
+        accs.append(sum(values) / len(values))
+    buckets: dict[str, list[int]] = {}
+    for r in rows:
+        buckets.setdefault(delay_bucket(r["delay"]), []).append(r["correct"])
+    kept = [r["evidence_kept"] for r in rows if r.get("evidence_kept") is not None]
+    return {"questions": len(rows), "streams": len(streams), "accuracy": sum(r["correct"] for r in rows) / len(rows),
+            "accuracy_ci95": [float(np.percentile(accs, 2.5)), float(np.percentile(accs, 97.5))],
+            "by_delay": {k: {"n": len(v), "accuracy": sum(v) / len(v)} for k, v in sorted(buckets.items())},
+            "evidence_kept": sum(kept) / len(kept) if kept else None,
+            "kv_tokens_mean": sum(r["kv_tokens"] for r in rows) / len(rows), "run": rows[0].get("run")}  # fmt: skip
+
+
+def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: str, mode: str = "v3",
+                     checkpoint: str | None = None, adapter: str | None = None, policy: str | None = None,
+                     device: str = "cuda", split: str = "val", limit: int | None = None) -> dict:  # fmt: skip
+    """Stream each held-out Stage 2 stream once with the inference session; ask its delayed questions at their
+    times. `policy` overrides memory.policy at the same budget (tkm vs mass / fifo / window controls)."""
+    from .backbone import Backbone
+    from .harness import _modules, run_fingerprint
+    from .session import StreamSession
+
+    if policy is not None:
+        cfg = V3Config.from_dict({**cfg.to_dict(), "memory": {**cfg.to_dict()["memory"], "policy": policy}})
+    if mode == "v3" and not checkpoint:
+        raise ValueError("--mode v3 needs a --checkpoint")
+    records = [r for r in read_jsonl(streams_path) if r.get("split") == split and r.get("questions")]
+    if not records:
+        raise ValueError(f"no streams with split == {split}")
+    if split == "train":
+        raise ValueError("evaluate held-out streams (val), not training streams")
+    records = records[:limit] if limit else records
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=True)
+    fingerprint = run_fingerprint(cfg, streams_path, f"stage2-{mode}-{split}", checkpoint, adapter, video_root, records)
+    run_file = output / "run.json"
+    if run_file.exists() and json.loads(run_file.read_text()).get("id") != fingerprint["id"]:
+        raise ValueError(f"{output} holds a different run; use a new --output")
+    run_file.write_text(json.dumps(fingerprint, indent=2) + "\n")
+    target = output / "predictions.jsonl"
+    done = set()
+    if target.exists():
+        for row in read_jsonl(target):
+            if row.get("run") != fingerprint["id"]:
+                raise ValueError(f"{target} has rows of another run; use a new --output")
+            done.add(row["stream"])
+    bb = Backbone(cfg.backbone, cfg.stream, device)
+    if adapter:
+        bb.add_lora(0, 0, adapter=adapter)
+        bb.model.eval()
+    modules = _modules(cfg, bb, checkpoint, device) if mode == "v3" else None
+    gap = cfg.stream.frame_gap
+    with target.open("a") as handle:
+        for record in records:
+            if record["id"] in done:
+                continue
+            times = stream_times(record, cfg.stream.step_seconds, gap, cfg.stage2.max_seconds)
+            if not times:
+                continue
+            due = {steps[-1]: qs for steps, qs in chunk_plan(times, record["questions"], len(times), gap) if qs}
+            session = StreamSession(bb, cfg, modules, mode=mode)
+            reader = StepReader(record, video_root)
+            rows, appended = [], []
+            try:
+                for k, t in enumerate(times):
+                    result = session.step(reader.step(t, gap), t)
+                    appended.append((t, result.tokens))
+                    for q in due.get(k, []):
+                        kept = evidence_kept(session.memory, appended, q.get("evidence"))
+                        choice, _ = session.ask(q["question"], q["options"])
+                        rows.append({"stream": record["id"], "id": q["id"], "t": q["time"], "delay": q.get("delay", 0.0),
+                                     "correct": int(choice == q["answer"]), "evidence_kept": kept,
+                                     "kv_tokens": len(session.memory), "run": fingerprint["id"]})  # fmt: skip
+            finally:
+                reader.close()
+            for row in rows:  # whole streams only, so a resumed run never holds a partial stream
+                handle.write(json.dumps(row) + "\n")
+            handle.flush()
+            del session
+            torch.cuda.empty_cache()
+    summary = summarize_streams(read_jsonl(target))
+    summary["policy"] = cfg.memory.policy
+    (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    return summary

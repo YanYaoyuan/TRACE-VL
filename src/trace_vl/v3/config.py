@@ -186,8 +186,8 @@ class V3Config:
             raise ValueError("transition.pooled_tokens must be a positive integer")
         if config.stage2.chunk_steps < 1 or config.stage2.max_seconds <= 0 or config.stage2.grad_accum < 1:
             raise ValueError("stage2.chunk_steps / grad_accum must be >= 1 and stage2.max_seconds positive")
-        if config.memory.policy not in {"full", "window", "drift", "tkm", "fifo"}:
-            raise ValueError("memory.policy must be full, window, drift, tkm or fifo")
+        if config.memory.policy not in {"full", "window", "drift", "tkm", "fifo", "mass"}:
+            raise ValueError("memory.policy must be full, window, drift, tkm, mass or fifo")
         if config.cst.dim % config.cst.heads:
             raise ValueError("cst.dim must be divisible by cst.heads")
         return config

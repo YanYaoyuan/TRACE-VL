@@ -8,8 +8,18 @@ import torch
 
 from trace_vl.v3.backbone import branch_cache, detach_cache, functional_linear_cache
 from trace_vl.v3.config import MemoryConfig, V3Config, load_v3_config
-from trace_vl.v3.kv import KVMemory
-from trace_vl.v3.train_stage2 import chunk_plan, evidence_kept, evidence_label, stream_times, summarize
+from trace_vl.v3.kv import KVMemory, RetentionBook, score_retention
+from trace_vl.v3.modules import RetentionScorer
+from trace_vl.v3.train_stage2 import (
+    all_reduce_grads,
+    chunk_plan,
+    delay_bucket,
+    evidence_kept,
+    evidence_label,
+    stream_times,
+    summarize,
+    summarize_streams,
+)
 
 
 def test_stage2_configs_load_and_validate():
@@ -46,12 +56,73 @@ def test_stream_times_respect_max_seconds():
     assert times[-1] + 0.25 <= 30.0 and len(times) == 30
 
 
-def test_evidence_label_only_for_later_questions():
-    questions = [{"time": 50.0, "evidence": [[10.0, 20.0]]}, {"time": 15.0, "evidence": [[30.0, 40.0]]}]
-    assert evidence_label(12.0, questions) == 1.0
-    assert evidence_label(35.0, questions) == 0.0  # its question (t=15) was asked before the evidence
-    assert evidence_label(25.0, questions) == 0.0
-    assert evidence_label(12.0, [{"time": 50.0, "evidence": None}]) == 0.0
+def test_evidence_label_only_for_questions_still_to_come():
+    questions = [{"time": 50.0, "evidence": [[10.0, 20.0]]}, {"time": 45.0, "evidence": [[30.0, 40.0]]}]
+    assert evidence_label((12.0, 12.0), 30.0, questions) == 1.0
+    assert evidence_label((19.0, 22.0), 30.0, questions) == 1.0  # overlapping span
+    assert evidence_label((25.0, 26.0), 30.0, questions) == 0.0  # distractor time: never asked about
+    assert evidence_label((35.0, 35.0), 46.0, questions) == 0.0  # its question (t=45) is already answered
+    assert evidence_label((12.0, 12.0), 50.0, questions) == 0.0
+    assert evidence_label((12.0, 12.0), 0.0, [{"time": 50.0, "evidence": None}]) == 0.0
+
+
+def test_retention_book_scores_slots_and_steps_with_current_age():
+    book = RetentionBook()
+    book.observe(("step", 0), 1.0, 0.2, is_slot=False)  # gist / pooled (B4) / I-step groups are scored too
+    book.observe(("slot", 7), 1.0, 3.0, is_slot=True)
+    book.observe(("step", 1), 2.0, 0.4, is_slot=False)
+    book.observe(("slot", 7), 2.0, 1.0, is_slot=True)  # same group again: newer, max mass, one more hit
+    keys = book.keys()
+    feats = book.features(12.0, keys)
+    assert feats.shape == (3, RetentionScorer.FEATURES)
+    slot = keys.index(("slot", 7))
+    assert feats[slot, 0] == pytest.approx(np.log1p(10.0)) and feats[slot, 1] == 3.0
+    assert feats[slot, 3] == pytest.approx(np.log1p(2)) and feats[slot, 4] == 1.0 and feats[slot, 5] == 0.0
+    assert book.span(("slot", 7)) == (1.0, 2.0)
+    later = book.features(30.0, keys)
+    assert later[slot, 0] > feats[slot, 0]  # age is recomputed at scoring time
+    memory = KVMemory(MemoryConfig(policy="tkm"))
+    torch.manual_seed(0)
+    scorer = RetentionScorer()
+    got, logits = score_retention(book, memory, scorer, 12.0)
+    assert got == keys and logits.requires_grad and set(memory.scores) == set(keys)
+    logits.sum().backward()
+    assert all(p.grad is not None for p in scorer.parameters())
+    mass = KVMemory(MemoryConfig(policy="mass"))
+    _, none = score_retention(book, mass, scorer, 12.0)
+    assert none is None and mass.scores == {("step", 0): 0.2, ("slot", 7): 3.0, ("step", 1): 0.4}
+    fifo = KVMemory(MemoryConfig(policy="fifo"))
+    assert score_retention(book, fifo, scorer, 12.0)[1] is None and fifo.scores == {}
+    book.prune({("slot", 7)})
+    assert book.keys() == [("slot", 7)]
+
+
+def test_mass_policy_is_a_valid_config():
+    assert V3Config.from_dict({"memory": {"policy": "mass"}}).memory.policy == "mass"
+
+
+def test_all_reduce_keeps_globally_unused_parameters_without_grad(tmp_path):
+    import torch.distributed as dist
+
+    dist.init_process_group("gloo", init_method=f"file://{tmp_path}/pg", rank=0, world_size=1)
+    try:
+        used, unused = torch.nn.Parameter(torch.ones(3)), torch.nn.Parameter(torch.ones(2))
+        used.grad = torch.full((3,), 4.0)
+        all_reduce_grads([used, unused], world=2)  # world=2 exercises the reduction path on one process
+        assert unused.grad is None  # AdamW skips it: no weight-decay drift of an untrained head
+        torch.testing.assert_close(used.grad, torch.full((3,), 2.0))
+    finally:
+        dist.destroy_process_group()
+
+
+def test_stream_summary_and_delay_buckets():
+    assert [delay_bucket(d) for d in (0.0, 30.0, 60.0, 200.0)] == ["0s", "<60s", "60-120s", ">=120s"]
+    rows = [{"stream": "a", "correct": 1, "delay": 0.0, "evidence_kept": 1.0, "kv_tokens": 10, "run": "r"},
+            {"stream": "a", "correct": 0, "delay": 90.0, "evidence_kept": 0.0, "kv_tokens": 20, "run": "r"},
+            {"stream": "b", "correct": 1, "delay": 90.0, "evidence_kept": None, "kv_tokens": 30, "run": "r"}]  # fmt: skip
+    out = summarize_streams(rows, replicates=20)
+    assert out["accuracy"] == pytest.approx(2 / 3) and out["evidence_kept"] == 0.5 and out["kv_tokens_mean"] == 20
+    assert out["by_delay"]["60-120s"] == {"n": 2, "accuracy": 0.5} and summarize_streams([]) == {"questions": 0}
 
 
 def test_evidence_kept_counts_visual_tokens_in_cache():
@@ -168,13 +239,18 @@ def test_build_stage2_streams(tmp_path):
     (tmp_path / "records.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     report = build_stage2_streams(str(tmp_path / "records.jsonl"), str(tmp_path / "streams.jsonl"), str(tmp_path),
                                   stream_seconds=25.0, questions_per_clip=2, delay_min=5.0, delay_max=8.0,
-                                  immediate_fraction=0.5)  # fmt: skip
+                                  immediate_fraction=0.5, distractor_fraction=0.5)  # fmt: skip
     streams = read_jsonl(tmp_path / "streams.jsonl")
     assert report["streams"] == len(streams) and report["skipped_records"] == 1
     timed = [s for s in streams if s["source"] == "timed"]
     assert len(timed) == 1 and timed[0]["questions"][0]["evidence"] == [[5.0, 12.0]]
     concat = [s for s in streams if s["source"] == "concat"]
     assert sum(len(s["clips"]) for s in concat) == 6  # every readable offline video used once
+    for s in concat:  # distractor clips are never asked about; every stream asks about at least one clip
+        assert any(c["queried"] for c in s["clips"])
+        asked = {tuple(q["evidence"][0]) for q in s["questions"]}
+        assert asked == {(c["offset"], c["end"]) for c in s["clips"] if c["queried"]}
+    assert report["distractor_clips"] == sum(not c["queried"] for s in concat for c in s["clips"])
     for s in concat:
         assert s["questions"] == sorted(s["questions"], key=lambda q: q["time"])
         for clip, nxt in zip(s["clips"], s["clips"][1:]):

@@ -126,13 +126,18 @@ Stage 1 never sees the KV policy or the Gated DeltaNet state over minutes. Stage
 itself (`src/trace_vl/v3/train_stage2.py`): steps -> CST + transition encoder -> chunk LM forward on the hybrid
 cache -> TKM eviction -> delayed questions on a forked cache (shared KV, cloned GDN states) -> CE. Chunks of
 `stage2.chunk_steps` (also cut at each question) are backpropagated and then every cache is detached
-(truncated BPTT). The retention scorer is trained with BCE against the evidence windows of later questions,
-and the same scores drive eviction during training. Gradients are all-reduced by hand (streams have
+(truncated BPTT). At every chunk end all older KV groups (transition slots and whole steps, so the pooled B4
+arm is scored the same way) are rescored with their current age; the retention scorer gets BCE against
+"a question still to come is about this group's time". Distractor clips that are never asked about, and
+evidence whose question was already answered, are the negatives (`ret_pos` / `ret_neg` in the metrics).
+The same scores drive eviction during training and at inference (`kv.RetentionBook`). Gradients are all-reduced by hand (streams have
 different chunk counts, so DDP hooks would deadlock).
 
 ```bash
 # 1. Streams: LLaVA-MC clips of the same frame grid concatenated to ~5 min; each question is asked right after
 #    its clip (25%) or 30-240 s later while other clips stream, and names its interval ("from 37 to 61 seconds").
+#    40% of the clips are distractors (never asked about): retention negatives. Check `queried_seconds_fraction`
+#    and `streams_reaching_target` in the report; the last stream of each frame-grid bucket can be short.
 #    Records with query_time (e.g. MEVA train) become one stream per video with questions at their own times.
 uv run --locked trace-vl v3 build-stage2 data/v3/llava_mc.jsonl --video-root /data/llava_video \
     --output data/v3/stage2_train.jsonl --stream-seconds 300
@@ -149,15 +154,33 @@ uv run --locked torchrun --nproc_per_node=4 -m trace_vl.cli v3 train-stage2 --co
     --init outputs/v3/stage1-a100/modules.pt --adapter outputs/v3/stage1-a100/lora --output outputs/v3/stage2-a100
 ```
 
+Held-out evaluation, representation x retention at the same KV budget (window 32 s + 4,096 older tokens):
+
+```bash
+for arm in transition b4; do for policy in tkm mass fifo; do
+  uv run --locked trace-vl v3 eval-stage2 --config configs/v3/stage2$([ $arm = b4 ] && echo _b4).yaml \
+    --streams data/v3/stage2_val.jsonl --video-root /data/llava_video --mode v3 --policy $policy \
+    --checkpoint outputs/v3/stage2-$arm/modules.pt --adapter outputs/v3/stage2-$arm/lora \
+    --output outputs/v3/s2eval-$arm-$policy
+done; done
+```
+
+`tkm` = learned retention, `mass` = surprise mass (non-learned), `fifo` = recency. Both arms use the same group
+bookkeeping, so learned-vs-non-learned retention and transition-vs-pooled representation are separate
+factors. `summary.json`: accuracy (whole-stream bootstrap CI), accuracy by delay bucket, `evidence_kept`.
+
 Metrics per update (`metrics.jsonl`): `q_ce` / `q_acc` (delayed questions), `evidence_kept` (fraction of
 visual tokens streamed inside the asked-about interval still in the KV cache at question time; the retention
 scorer should raise it above the `fifo` policy at the same budget), `mean_delay`, `retention_bce`,
-`p_steps_with_active`, `expected_p_tokens`, `kv_tokens_end`, `peak_gb`.
+`p_steps_with_active`, `expected_p_tokens`, `kv_tokens_end`, `ret_pos` / `ret_neg`, `peak_gb`. The alert head is
+frozen in Stage 2 (no optimizer state, no weight decay); multi-GPU gradient sync keeps `grad=None` for
+parameters no rank used.
 
 Known limits (by design, documented for the review): question CE reaches only the chunk it is asked in, not
 evidence steps of earlier chunks (truncated BPTT); the retention scorer carries that signal from annotations.
 Eviction happens at chunk ends during training but after every step at inference (same policy, same budget).
-The retention scorer's drift feature is 0 in both paths (chunked forwards have no per-step drift). No KD
+Retention features (both paths): age, surprise mass, hits, slot-vs-step; the drift feature is 0 (chunked
+forwards have no per-step drift). Labels come from clip-level evidence windows (coarse). No KD
 teacher in Stage 2 (a full-token teacher over 5-10 min streams is too costly); the alert loss is not used yet.
 
 ## Transition-sensitive evaluation (added for M2)

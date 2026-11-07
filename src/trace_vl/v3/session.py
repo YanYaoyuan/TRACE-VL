@@ -24,9 +24,9 @@ import torch
 from .alert import DecisionMemory, Question, encode_questions, public
 from .backbone import Backbone
 from .config import V3Config
-from .kv import KVMemory
+from .kv import KVMemory, RetentionBook, score_retention
 from .model import TraceV3Modules, stream_step
-from .modules import CSTCache, RetentionScorer, TECache, TransitionTracker
+from .modules import CSTCache, TECache, TransitionTracker
 from .positions import PositionCounter
 
 LETTERS = "ABCDEFGHIJ"
@@ -59,6 +59,7 @@ class StreamSession:
         self.cache = backbone.new_cache()
         self.pos = PositionCounter()
         self.memory = KVMemory(cfg.memory)
+        self.book = RetentionBook()
         self.cst_cache, self.te_cache = CSTCache(), TECache()
         self.step_index = 0
         self.tracker = TransitionTracker()  # persistent transition tracks for the alert clocks (bounded)
@@ -139,6 +140,7 @@ class StreamSession:
         if mask is not None:
             bb.evict(self.cache, mask)
             self.memory.apply(mask)
+            self.book.prune(set(self.memory.group))
 
         result = StepResult(t, tokens.shape[0], info.is_i_step if info else True, len(self.memory),
                             seconds_vision, seconds_lm, drift)  # fmt: skip
@@ -171,18 +173,12 @@ class StreamSession:
         step_group = ("step", self.step_index)
         if policy == "drift":
             self.memory.scores[step_group] = drift
-        elif policy == "tkm":
-            # Learned retention when trained; before that, surprise mass (transitions) beats gist/frames.
-            self.memory.scores[step_group] = -1.0
-            if info is not None:
-                scorer: RetentionScorer = self.modules.retention
-                dtype = next(scorer.parameters()).dtype
-                slot_ids = list(dict.fromkeys(g for g in info.groups if g >= 0))
-                for g, mass in zip(slot_ids, info.aux.get("active_masses", [])):
-                    # Drift feature 0: Stage 2 trains the scorer with chunked LM forwards that have no per-step
-                    # drift, so inference must not feed it a value it never saw.
-                    feats = RetentionScorer.features(0.0, float(mass), 0.0, 0.0, 1.0, 0.0)
-                    self.memory.scores[("slot", g)] = float(scorer(feats.to(info.tokens.device, dtype)))
+        elif policy in {"tkm", "mass"}:
+            # Same bookkeeping as Stage 2 (train_stage2.observe_step): every older group, transition slots and
+            # whole steps (gist / pooled / I-step) alike, is rescored with its current age before eviction.
+            observe_step(self.book, info, t, self.step_index)
+            scorer = self.modules.retention if self.modules is not None else None
+            score_retention(self.book, self.memory, scorer, t)
 
     # ------------------------------------------------------------------ alerts (Jev-style classification)
     def _decide(self, encoded):
@@ -279,4 +275,15 @@ class StreamSession:
             "position": self.pos.state(),
             "transition_tracks": len(self.tracker.tracks),
         }
+
+
+def observe_step(book: RetentionBook, info, t: float, step_index: int):
+    """Register this step's KV groups: ("step", k) with the step's mean surprise, ("slot", id) with its mass."""
+    surprise = float(info.surprise.mean()) if info is not None else 0.0
+    book.observe(("step", step_index), t, surprise, is_slot=False)
+    if info is None:
+        return
+    slot_ids = list(dict.fromkeys(g for g in info.groups if g >= 0))
+    for g, mass in zip(slot_ids, info.aux.get("active_masses", [])):
+        book.observe(("slot", g), t, float(mass), is_slot=True)
 
