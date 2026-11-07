@@ -58,6 +58,9 @@ TRACE-VL 是一个**流式视频理解模型**：视频按时间顺序到达，�
 普通包和 CUDA 12.8 wheel 均走阿里云镜像，完整保留基准锁中的版本、条件标记和哈希，根锁文件保持原样。
 操作、验证和已有锁文件改动的处理见 [阿里云环境说明](docs/aliyun_environment.md)。
 
+两组 A100 pilot 训练完成后，可运行 `bash scripts/evaluate_a100_pilot.sh` 一次完成门控统计、预算审计、
+三组评测和配对区间，见 [A100 pilot 一键评测](docs/a100_pilot_evaluation.md)。
+
 Python 3.10，uv 锁定依赖，PyTorch 2.8.0 / CUDA 12.8；`vlm` 依赖组包含 transformers、peft 与 torchvision（cu128）。`evaluate` 在输出目录写入 `run.json` 指纹（模型、adapter 权重哈希、打包设置、问题与快照报告哈希），模型或数据不同时拒绝续写，需换新的 `--output`；`score` 的置信区间按摄像头整体重采样。
 
 ```bash
