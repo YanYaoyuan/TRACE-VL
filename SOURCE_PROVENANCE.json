@@ -1,0 +1,15 @@
+{
+  "upstream_commit": "d8b260133005cd1ecb629c5f182c2c11f545962b",
+  "training_test_commit": "a9ab454b27993d4383f1c3112feca5b8bbb7ba49",
+  "experiment_branch": "experiment/stage1-local-a100-20261107",
+  "helper_sha256": {
+    "stage1_data.py": "bcf50698347ca5b648bc98f70bc666600d9698b74d31ce36cabaaf40f519e7fc",
+    "configure_stage1.py": "3cc4d585b926ec9cf823ba2d06a7c659816d123d3f1b502d06d58cf2ba3793f0",
+    "train_with_checkpoints.py": "96e85c61ca510bc176bdf5fad85e35ddca2dad27bc65bed7d9a7d6d88b1c472c",
+    "cloud_train.sh": "33b9b56b137dd9ff933259eeb5898e0ea60eabae5c1893522584196fc00ed905",
+    "test_stage1_data.py": "bed288014bf0f7f96f6db82890cd9093bc6bdc09715854cc17fa34f3f17d05ce",
+    "validate_and_score.py": "116d61e160313be7ade14b6bac151ddaf76f2c3737ef10231410b53e88c3897d"
+  },
+  "hardware_tested": "2 x RTX 5090; A100 requires first-run calibration",
+  "model_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc"
+}
