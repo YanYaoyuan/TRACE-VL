@@ -1,0 +1,6 @@
+# B2a: DeltaS-style, keep older steps with the largest Gated DeltaNet state drift within the budget.
+extends: native_full.yaml
+memory:
+  policy: drift
+  window_seconds: 32.0
+  budget_tokens: 4096

@@ -1,0 +1,4 @@
+# B0 offline at a ~16K visual-token budget: steps uniformly subsampled (Video-MME, LVBench, MLVU).
+extends: native_full.yaml
+stream:
+  max_steps: 80

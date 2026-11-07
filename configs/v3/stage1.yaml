@@ -1,0 +1,19 @@
+# Stage 1 distillation on short clips (<= clip_seconds before each question). 1 x 5090 for M1;
+# torchrun --nproc_per_node=2 for 2 x 5090. Effective batch = world x grad_accum clips.
+extends: v3_tkm.yaml
+memory:
+  policy: full          # training sees the whole short clip; eviction is a Stage 2 concern
+train:
+  lr: 0.0001
+  lora_lr: 0.00005
+  warmup: 100
+  steps: 2000
+  grad_accum: 8
+  lora_rank: 32
+  lora_alpha: 64
+  kd_weight: 1.0
+  ce_weight: 0.5
+  pred_weight: 0.5
+  budget_weight: 0.01
+  target_tokens_per_step: 40
+  save_every: 250

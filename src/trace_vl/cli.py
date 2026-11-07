@@ -68,6 +68,7 @@ def main(argv=None):
     score.add_argument("--split", choices=["train", "val", "test"], default="test")
     score.add_argument("--output", default="outputs/rescore.json")
     _inspection_parser(commands)
+    _v3_parser(commands)
     commands.add_parser("doctor")
     profile = commands.add_parser("profile")
     profile.add_argument("--config", default="configs/tiny.yaml")
@@ -129,6 +130,8 @@ def main(argv=None):
         print(args.output)
     elif args.command == "inspection":
         _inspection(args)
+    elif args.command == "v3":
+        _v3(args)
     elif args.command == "profile":
         from .profiling import profile_stream
 
@@ -332,6 +335,136 @@ def _inspection(args):
             Path(args.output).write_text(json.dumps(report, indent=2) + "\n")
         return show({k: v for k, v in report.items() if k != "per_stream"})
     raise ValueError(f"unknown inspection action {args.action}")
+
+
+def _v3_parser(commands):
+    sub = commands.add_parser("v3", help="TRACE-VL v3 on Qwen3.5-2B").add_subparsers(dest="action", required=True)
+    for name in ("convert-ovo", "convert-videomme"):
+        c = sub.add_parser(name)
+        c.add_argument("input")
+        c.add_argument("--output", required=True)
+        c.add_argument("--video-root", help="keep only questions whose video exists here (partial download)")
+    c = sub.add_parser("convert-llava-mc", help="LLaVA-Video-178K multiple-choice files -> Stage 1 records")
+    c.add_argument("inputs", nargs="+")
+    c.add_argument("--output", required=True)
+    c.add_argument("--video-root", help="keep only questions whose video exists here")
+    c.add_argument("--val-fraction", type=float, default=0.05)
+    c = sub.add_parser("convert-meva")
+    c.add_argument("--bench", default="data/meva/bench")
+    c.add_argument("--split", default="test")
+    c.add_argument("--output", required=True)
+    c = sub.add_parser("params", help="parameter report of the new modules (no backbone download)")
+    c.add_argument("--config", default="configs/v3/v3_tkm.yaml")
+    c = sub.add_parser("check", help="M1 equality gate: streaming path vs HF forward, zero-gated v3 vs native")
+    c.add_argument("--config", default="configs/v3/native_full.yaml")
+    c.add_argument("--video")
+    c.add_argument("--steps", type=int, default=4)
+    c.add_argument("--device", default="cuda")
+    c.add_argument("--dtype", choices=["float32", "bfloat16"], default="float32", help="gate is float32")
+    c = sub.add_parser("gradcheck", help="unclipped gradient norms on a static clip (anchored-delta regression)")
+    c.add_argument("--config", default="configs/v3/stage1.yaml")
+    c.add_argument("--steps", type=int, default=6)
+    c.add_argument("--threshold", type=float, default=1e4)
+    c.add_argument("--device", default="cuda")
+    c = sub.add_parser("budget", help="matched visual-token budget audit (transition vs B4) on calibration videos")
+    c.add_argument("--config", default="configs/v3/v3_tkm.yaml")
+    c.add_argument("--checkpoint", help="transition-arm modules.pt")
+    c.add_argument("--config-b4", default="configs/v3/v3_pooled_b4.yaml")
+    c.add_argument("--checkpoint-b4", help="B4-arm modules.pt")
+    c.add_argument("--records", required=True, help="calibration records (train/val split, never test)")
+    c.add_argument("--video-root", required=True)
+    c.add_argument("--max-videos", type=int, default=8)
+    c.add_argument("--max-seconds", type=float, default=180.0)
+    c.add_argument("--tolerance", type=float, default=0.05)
+    c.add_argument("--device", default="cuda")
+    c = sub.add_parser("profile", help="latency / KV memory on synthetic frames")
+    c.add_argument("--config", default="configs/v3/native_full.yaml")
+    c.add_argument("--mode", choices=["native", "v3"], default="native")
+    c.add_argument("--checkpoint")
+    c.add_argument("--steps", type=int, default=600)
+    c.add_argument("--device", default="cuda")
+    c = sub.add_parser("eval")
+    c.add_argument("--config", required=True)
+    c.add_argument("--records", required=True)
+    c.add_argument("--video-root", required=True)
+    c.add_argument("--output", required=True)
+    c.add_argument("--mode", choices=["native", "v3"], default="native")
+    c.add_argument("--checkpoint")
+    c.add_argument("--shard", type=_shard, default=(0, 1))
+    c.add_argument("--device", default="cuda")
+    c.add_argument("--limit", type=int)
+    c.add_argument("--adapter", help="LoRA adapter directory saved by `v3 train`")
+    c = sub.add_parser("score")
+    c.add_argument("predictions")
+    c.add_argument("--output")
+    c = sub.add_parser("train", help="Stage 1 distillation; use torchrun for several GPUs")
+    c.add_argument("--config", default="configs/v3/stage1.yaml")
+    c.add_argument("--records", required=True)
+    c.add_argument("--video-root", required=True)
+    c.add_argument("--output", required=True)
+    c.add_argument("--clip-seconds", type=float, default=120.0)
+    c.add_argument("--max-steps", type=int)
+    c.add_argument("--init")
+    c.add_argument("--adapter")
+
+
+def _v3(args):
+    from .v3 import data as v3data
+
+    def show(value):
+        print(json.dumps(value, indent=2, default=str))
+
+    if args.action == "convert-ovo":
+        return show(v3data.convert_ovo(args.input, args.output, args.video_root))
+    if args.action == "convert-videomme":
+        return show(v3data.convert_videomme(args.input, args.output, args.video_root))
+    if args.action == "convert-llava-mc":
+        return show(v3data.convert_llava_mc(args.inputs, args.output, args.video_root, args.val_fraction))
+    if args.action == "convert-meva":
+        bench = Path(args.bench)
+        return show(v3data.convert_meva(bench / "questions.jsonl", bench / "streams.json", args.output, args.split))
+    if args.action == "score":
+        from .v3.harness import score
+
+        return show(score(args.predictions, args.output))
+    from .v3.config import load_v3_config
+
+    cfg, _ = load_v3_config(args.config)
+    if args.action == "params":
+        from .v3.model import TraceV3Modules
+
+        return show(TraceV3Modules(cfg).parameter_report())
+    if args.action == "check":
+        from .v3.harness import check_equality
+
+        return show(check_equality(cfg, args.video, args.steps, args.device, args.dtype))
+    if args.action == "gradcheck":
+        from .v3.train import gradient_check
+
+        return show(gradient_check(cfg, args.steps, args.threshold, args.device))
+    if args.action == "budget":
+        from .v3.config import load_v3_config as _load
+        from .v3.harness import budget_audit
+
+        cfg_b4, _ = _load(args.config_b4)
+        arms = [("transition", cfg, args.checkpoint), ("b4_pooled", cfg_b4, args.checkpoint_b4)]
+        return show(budget_audit(arms, args.records, args.video_root, args.device, args.max_videos,
+                                 args.max_seconds, args.tolerance))  # fmt: skip
+    if args.action == "profile":
+        from .v3.harness import profile
+
+        return show(profile(cfg, args.steps, args.mode, args.checkpoint, args.device))
+    if args.action == "eval":
+        from .v3.harness import evaluate
+
+        return show(evaluate(cfg, args.records, args.video_root, args.output, args.mode, args.checkpoint,
+                             args.shard, args.device, args.limit, args.adapter))  # fmt: skip
+    if args.action == "train":
+        from .v3.train import train
+
+        return print(train(cfg, args.records, args.video_root, args.output, args.clip_seconds, args.max_steps,
+                           args.init, args.adapter))  # fmt: skip
+    raise ValueError(f"unknown v3 action {args.action}")
 
 
 if __name__ == "__main__":
