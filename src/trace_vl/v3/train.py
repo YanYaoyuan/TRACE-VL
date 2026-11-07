@@ -60,6 +60,7 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
     parts, positions = [bb.embed_ids(prompt_ids)], [pos.text(len(prompt_ids), bb.device)]
     cst_cache, te_cache, tracker = CSTCache(), TECache(), TransitionTracker()
     step_ends, aux = [], {"pred": [], "budget": [], "tokens": [], "i_steps": 0, "clock": [], "spans": [], "xy": [],
+                          "active": [], "max_mass": [], "memory_depth": 0,
                           "kinds": [], "is_i": []}  # fmt: skip
     length = len(prompt_ids)
     for k, (frames, t) in enumerate(zip(clips, times)):
@@ -84,7 +85,9 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
             if "pred_loss" in info.aux:
                 aux["pred"].append(info.aux["pred_loss"])
             if not info.is_i_step:
-                aux["budget"].append(info.masses.sum())
+                aux["budget"].append(info.aux["expected_tokens"])
+                aux["active"].append(info.aux.get("active_slots", 0))
+                aux["max_mass"].append(info.aux.get("max_mass", 0.0))
             aux["i_steps"] += int(info.is_i_step)
             aux["is_i"].append(info.is_i_step)
             slot_memory = info.aux.get("slot_memory")
@@ -99,6 +102,7 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
         length += len(ts) + tokens.shape[0] + 1
         step_ends.append(length - 1)
         aux["tokens"].append(tokens.shape[0])
+    aux["memory_depth"] = 0 if cst_cache.memory is None else int(cst_cache.memory.shape[0])
     return torch.cat(parts, dim=1), torch.cat(positions, dim=1), pos, step_ends, aux
 
 
@@ -133,8 +137,11 @@ class StudentLoss(nn.Module):
         if aux["pred"]:
             losses["pred"] = torch.stack(aux["pred"]).mean()
         if aux["budget"]:
-            target = max(0.0, (tc.target_tokens_per_step - cfg.transition.gist) / 3) * cfg.transition.mass_threshold
-            losses["budget"] = F.relu(torch.stack(aux["budget"]) - target).mean()
+            # Two-sided: pulls activity up when transitions are absent and down when too many fire. The old
+            # relu(mass - target) only suppressed surprise and had zero gradient once all slots were off.
+            target = float(tc.target_tokens_per_step)
+            expected = torch.stack([e if torch.is_tensor(e) else torch.tensor(float(e)) for e in aux["budget"]])
+            losses["budget"] = (((expected.float() - target) / target) ** 2).mean()
         stats = {}
         if encoded is not None:
             loss, alert_stats = self._alert_loss(embeds, positions, hidden, tapped, step_ends, aux, times, encoded, specs)
@@ -145,6 +152,12 @@ class StudentLoss(nn.Module):
                    "alert": tc.alert_weight}  # fmt: skip
         total = sum(weights[k] * v for k, v in losses.items())
         p_tokens = [n for n, i in zip(aux["tokens"], aux["is_i"]) if not i]
+        if aux["active"]:
+            stats.update(active_slots_mean=sum(aux["active"]) / len(aux["active"]),
+                         p_steps_with_active=sum(a > 0 for a in aux["active"]) / len(aux["active"]),
+                         active_slots_max=max(aux["active"]), max_mass_mean=sum(aux["max_mass"]) / len(aux["max_mass"]),
+                         expected_p_tokens=float(torch.stack(aux["budget"]).float().mean()),
+                         cst_memory_depth=aux["memory_depth"])  # fmt: skip
         stats.update(tokens_per_step=sum(aux["tokens"]) / max(1, len(aux["tokens"])),
                      p_step_tokens_mean=sum(p_tokens) / len(p_tokens) if p_tokens else None,
                      total_visual_tokens=sum(aux["tokens"]), i_step_fraction=aux["i_steps"] / max(1, len(times)))  # fmt: skip

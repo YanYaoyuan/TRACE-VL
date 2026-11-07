@@ -351,7 +351,7 @@ def budget_audit(arms: list[tuple[str, V3Config, str | None]], records_path: str
     report = {"videos": [r.get("stream") or r.get("video") for r in videos], "arms": {}}
     for name, cfg, checkpoint in arms:
         modules = _modules(cfg, backbone, checkpoint, device)
-        p_tokens, i_tokens, steps = [], [], 0
+        p_tokens, i_tokens, steps, actives, depths = [], [], 0, [], []
         for record in videos:
             reader = StepReader(record, video_root)
             try:
@@ -363,7 +363,10 @@ def budget_audit(arms: list[tuple[str, V3Config, str | None]], records_path: str
                     h, w = backbone.merged_grid(grid)
                     _, _, info = stream_step(modules, x, (h, w), t, cst, te)  # same path as session/training
                     (i_tokens if info.is_i_step else p_tokens).append(info.tokens.shape[0])
+                    if not info.is_i_step:
+                        actives.append(info.aux.get("active_slots", 0))
                     steps += 1
+                depths.append(0 if cst.memory is None else int(cst.memory.shape[0]))
             finally:
                 reader.close()
         total = sum(p_tokens) + sum(i_tokens)
@@ -375,6 +378,10 @@ def budget_audit(arms: list[tuple[str, V3Config, str | None]], records_path: str
             "p_step_tokens_mean": float(np.mean(p_tokens)) if p_tokens else None,
             "i_step_tokens_mean": float(np.mean(i_tokens)) if i_tokens else None,
             "total_visual_tokens": total, "tokens_per_step": total / max(1, steps),
+            # Transition activity: if slots never fire, the comparison is gist vs spatial pooling only.
+            "p_steps_with_active_slots": (sum(a > 0 for a in actives) / len(actives)) if actives else None,
+            "active_slots_histogram": {str(v): actives.count(v) for v in sorted(set(actives))},
+            "cst_memory_depth_per_video": depths,
         }  # fmt: skip
     names = [a[0] for a in arms]
     if len(names) == 2:

@@ -298,8 +298,17 @@ class TransitionEncoder(nn.Module):
         t_rows, t_cols = [g_rows], [g_cols]
 
         # Active transition slots: mass above threshold, largest first, capped per step.
-        order = masses.argsort(descending=True)
-        active = [int(k) for k in order[: cfg.max_active] if float(masses[k]) >= cfg.mass_threshold]
+        # Soft activity per slot. The hard threshold alone gives the gate no gradient once all slots are
+        # below it (PR #3 A100 pilot); p_k keeps a learning signal for the budget and the task losses.
+        p_active = torch.sigmoid((masses - cfg.mass_threshold) / cfg.activity_temperature)
+        order = masses.argsort(descending=True)[: cfg.max_active]
+        if self.training and cfg.train_sampling:
+            chosen = torch.bernoulli(p_active.detach())  # exploration: inactive-looking slots still get emitted
+            active = [int(k) for k in order if chosen[k] > 0]
+        else:
+            active = [int(k) for k in order if float(p_active[k]) >= 0.5]  # == mass >= mass_threshold
+        aux["activity_prob"] = p_active
+        aux["expected_tokens"] = cfg.gist + 3 * p_active[order].sum()  # differentiable P-step budget
         before_src = cache.history[0] if len(cache.history) > 1 else x
         trans_tokens, centroids = [], []
         for k in active:
@@ -308,6 +317,8 @@ class TransitionEncoder(nn.Module):
             before = a @ before_src
             delta = after + self.delta(after - before)
             trio = match_norm(torch.stack([before, after, delta]) + self.type_embed, ref_norm)
+            if self.training:
+                trio = trio * (1 + p_active[k] - p_active[k].detach())  # straight-through: value unchanged
             trans_tokens.append(trio)
             r, c = (a @ rows.to(a.dtype)).round(), (a @ cols.to(a.dtype)).round()
             centroids.append((float(r), float(c)))
@@ -319,6 +330,7 @@ class TransitionEncoder(nn.Module):
         if trans_tokens:
             tokens.append(torch.cat(trans_tokens))
         aux["active_slots"] = len(active)
+        aux["max_mass"] = float(masses.max()) if masses.numel() else 0.0
         aux["active_masses"] = [float(masses[k]) for k in active]
         aux["active_centroids"] = centroids
         aux["slot_memory"] = (

@@ -60,6 +60,11 @@ class TransitionConfig:
     memory_slots: int = 64  # adapter-space memory read by the CST
     # Baseline B4 (experiments.md §2): "pooled" replaces gist + transition tokens on P-steps by a fixed
     # grid of average-pooled frame tokens; set pooled_tokens to the transition run's measured tokens/step.
+    # Learning signal for the emission gate (PR #3 A100 pilot: slots went inactive). Soft activity
+    # p_k = sigmoid((mass_k - mass_threshold) / activity_temperature); eval emits p_k >= 0.5 (= mass >= threshold);
+    # training samples Bernoulli(p_k) and passes task gradients to p_k straight-through.
+    activity_temperature: float = 0.25
+    train_sampling: bool = True
     p_step_mode: str = "transition"  # transition | pooled
     pooled_match: bool = True  # B4 emits, per P-step, exactly as many tokens as the transition branch would
     pooled_tokens: int = 36  # fixed K per P-step when pooled_match is false (must be 1 <= K <= grid cells)
@@ -141,6 +146,8 @@ class V3Config:
         config = cls(**{name: _build(kind, values.get(name)) for name, kind in parts.items()})
         if config.transition.p_step_mode not in {"transition", "pooled"}:
             raise ValueError("transition.p_step_mode must be transition or pooled")
+        if config.transition.activity_temperature <= 0:
+            raise ValueError("transition.activity_temperature must be positive")
         k = config.transition.pooled_tokens
         if isinstance(k, bool) or not isinstance(k, int) or k < 1:
             raise ValueError("transition.pooled_tokens must be a positive integer")

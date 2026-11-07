@@ -475,3 +475,43 @@ def test_budget_audit_fails_closed(tmp_path, rows, kwargs, message):
     path.write_text("".join(json.dumps(r) + "\n" for r in rows))
     with pytest.raises(ValueError, match=message):
         budget_audit([("transition", V3Config(), None)], str(path), str(tmp_path), "cpu", **kwargs)
+
+
+def _p_step_info(modules, train: bool):
+    modules.train(train)
+    cst, te = CSTCache(), TECache()
+    torch.manual_seed(3)
+    info = None
+    for k in range(2):  # step 0 is an I-step, step 1 a P-step
+        adapted, z = modules.cst(torch.rand(6, 16) + 0.5, (2, 3), float(k), cst)
+        info = modules.transition(adapted, z, (2, 3), te)
+    return info
+
+
+def test_budget_gives_gate_gradient_when_all_slots_inactive():
+    """PR #3 A100 pilot: with the one-sided mass budget and a hard gate, a closed gate had zero gradient.
+    The two-sided budget on soft expected tokens must push the gate open when activity is below target."""
+    cfg = small_config(i_step_every=100)
+    cfg.transition.mass_threshold = 1.0
+    torch.manual_seed(0)
+    modules = TraceV3Modules(cfg, model_dim=16)
+    with torch.no_grad():
+        modules.transition.surprise_gate[-1].bias.fill_(-8.0)  # surprise ~ 3e-4: every slot far below threshold
+    info = _p_step_info(modules, train=True)
+    assert not info.is_i_step
+    target = 40.0
+    loss = ((info.aux["expected_tokens"] - target) / target) ** 2
+    loss.backward()
+    grad = modules.transition.surprise_gate[-1].bias.grad
+    assert grad is not None and float(grad.sum()) < 0  # gradient descent raises the bias -> more activity
+
+
+def test_eval_emission_equals_hard_threshold():
+    cfg = small_config(i_step_every=100)
+    cfg.transition.mass_threshold = 0.3
+    torch.manual_seed(0)
+    modules = TraceV3Modules(cfg, model_dim=16)
+    info = _p_step_info(modules, train=False)
+    masses = info.masses
+    expected = min(cfg.transition.max_active, int((masses >= cfg.transition.mass_threshold).sum()))
+    assert info.aux["active_slots"] == expected
