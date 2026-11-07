@@ -337,3 +337,40 @@ def test_convert_llava_mc_parses_options_and_splits_by_video(tmp_path):
     assert rows[0]["options"] == ["running", "cooking", "sleeping"] and rows[0]["answer"] == 1
     assert rows[0]["question"].startswith("What is the man doing?") and rows[1]["answer"] == 0
     assert rows[0]["split"] == rows[1]["split"]  # same video -> same split
+
+
+def test_convert_llava_mc_ids_are_unique_per_question(tmp_path):
+    """Regression (PR #3 review): the official item id repeats across different questions of one video."""
+    from trace_vl.v3.data import convert_llava_mc
+
+    def item(question, options, answer):
+        lines = "\n".join(f"{'ABCD'[i]}. {o}" for i, o in enumerate(options))
+        return {"id": "1006", "video": "nextqa/v.mp4", "conversations": [
+            {"from": "human", "value": f"<video>\n{question}\n{lines}"}, {"from": "gpt", "value": answer}]}  # fmt: skip
+
+    items = [
+        item("What does the man do first?", ["sit", "run"], "A"),
+        item("Why is the girl smiling?", ["joke", "gift"], "B"),  # same official id + video, different question
+        item("What does the man do first?", ["sit", "run"], "A."),  # exact repeat -> deduplicated
+        item("Where are they?", ["park", "home"], "A"),
+        item("Where  are they?", ["Park", "home"], "B"),  # same question (normalized), conflicting answer -> dropped
+    ]
+    src = tmp_path / "nextqa_mc.json"
+    src.write_text(json.dumps(items))
+    report = convert_llava_mc([str(src)], str(tmp_path / "out.jsonl"))
+    rows = [json.loads(x) for x in (tmp_path / "out.jsonl").read_text().splitlines()]
+    assert report["records"] == 2 and report["unique_ids"] == 2
+    assert report["duplicates_removed"] == 1 and report["conflicting_questions_dropped"] == 1
+    assert {r["question"] for r in rows} == {"What does the man do first?", "Why is the girl smiling?"}
+    assert all(r["upstream_id"] == "1006" for r in rows)
+
+
+def test_evaluate_rejects_duplicate_record_ids(tmp_path):
+    from trace_vl.v3.harness import evaluate
+
+    rows = [{"id": "x", "video": "a.mp4", "query_time": None, "question": "q", "options": ["a", "b"], "answer": 0},
+            {"id": "x", "video": "a.mp4", "query_time": None, "question": "q2", "options": ["a", "b"], "answer": 1}]  # fmt: skip
+    path = tmp_path / "r.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    with pytest.raises(ValueError, match="duplicate record ids"):
+        evaluate(V3Config(), str(path), str(tmp_path), str(tmp_path / "out"))

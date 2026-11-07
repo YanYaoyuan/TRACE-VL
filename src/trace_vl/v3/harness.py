@@ -7,7 +7,7 @@ import json
 import math
 import random
 import time as clock
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -72,6 +72,11 @@ def evaluate(cfg: V3Config, records_path: str, video_root: str, output: str, mod
              adapter: str | None = None) -> dict:  # fmt: skip
     """Stream each video once; answer its questions at their times on forked caches. Resumable."""
     records = read_jsonl(records_path)
+    ids = [r["id"] for r in records]
+    if len(ids) != len(set(ids)):
+        # Resume skips by id: a duplicated id would silently skip unprocessed sibling questions.
+        dup = sorted(i for i, n in Counter(ids).items() if n > 1)[:5]
+        raise ValueError(f"{records_path} has duplicate record ids (e.g. {dup}); regenerate with unique ids")
     groups: dict[str, list] = defaultdict(list)
     for r in records:
         key = r.get("stream") or r.get("video")

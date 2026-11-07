@@ -104,10 +104,17 @@ def convert_llava_mc(annotations: list[str], output: str, video_root: str | None
 
     Each human turn holds the question followed by option lines ("A. ..."); the gpt turn starts with
     the letter. Unparseable turns are counted and skipped. Split by video (hash), never by question.
+
+    Question identity: the official `item.id` repeats across different questions of the same video
+    (PR #3 review: 5,496 questions -> 1,296 ids), so ids are derived from video + normalized question +
+    ordered options; the upstream id and turn are kept as provenance. Exact repeats are deduplicated and
+    the same question with conflicting answers is rejected (all copies dropped and counted).
     """
     import hashlib
 
-    rows, skipped, missing = [], 0, 0
+    by_key: dict[str, dict] = {}
+    conflicts: set[str] = set()
+    skipped, missing, duplicates = 0, 0, 0
     for path in annotations:
         subset = Path(path).stem
         for item in json.loads(Path(path).read_text()):
@@ -133,17 +140,30 @@ def convert_llava_mc(annotations: list[str], output: str, video_root: str | None
                 if len(options) < 2 or not question or not answer or "ABCDEFGH".index(answer.group(1)) >= len(options):
                     skipped += 1
                     continue
+                text = " ".join(question)
+                normalized = " ".join(text.lower().split())
+                identity = json.dumps([video, normalized, [" ".join(o.lower().split()) for o in options]])
+                key = hashlib.sha256(identity.encode()).hexdigest()[:20]
+                label = "ABCDEFGH".index(answer.group(1))
+                if key in by_key:
+                    if by_key[key]["answer"] != label:
+                        conflicts.add(key)
+                    else:
+                        duplicates += 1
+                    continue
                 digest = hashlib.sha256(f"{seed}:{video}".encode()).hexdigest()
                 split = "val" if int(digest[:8], 16) / 0xFFFFFFFF < val_fraction else "train"
-                rows.append({
-                    "id": f"llava-mc-{item.get('id', len(rows))}-{k // 2}", "source": "llava-video-178k-mc",
-                    "task": subset, "video": video, "query_time": None, "question": " ".join(question),
-                    "options": options, "answer": "ABCDEFGH".index(answer.group(1)), "region": None, "split": split,
-                })  # fmt: skip
+                by_key[key] = {
+                    "id": f"llava-mc-{key}", "source": "llava-video-178k-mc", "task": subset, "video": video,
+                    "query_time": None, "question": text, "options": options, "answer": label, "region": None,
+                    "split": split, "upstream_id": item.get("id"), "upstream_turn": k // 2,
+                }  # fmt: skip
+    rows = [r for key, r in by_key.items() if key not in conflicts]
     write_jsonl(output, rows)
     splits = {s: sum(r["split"] == s for r in rows) for s in ("train", "val")}
     return {"records": len(rows), "videos": len({r["video"] for r in rows}), "splits": splits,
-            "skipped_unparseable": skipped, "missing_videos_skipped": missing}  # fmt: skip
+            "skipped_unparseable": skipped, "missing_videos_skipped": missing, "duplicates_removed": duplicates,
+            "conflicting_questions_dropped": len(conflicts), "unique_ids": len({r["id"] for r in rows})}  # fmt: skip
 
 
 # ---------------------------------------------------------------------------- reading steps
