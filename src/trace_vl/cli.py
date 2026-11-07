@@ -405,13 +405,37 @@ def _v3_parser(commands):
     c.add_argument("--output")
     c = sub.add_parser("train", help="Stage 1 distillation; use torchrun for several GPUs")
     c.add_argument("--config", default="configs/v3/stage1.yaml")
-    c.add_argument("--records", required=True)
+    c.add_argument("--records", required=True, nargs="+", help="one or more record files (QA and/or alert-only)")
     c.add_argument("--video-root", required=True)
     c.add_argument("--output", required=True)
     c.add_argument("--clip-seconds", type=float, default=120.0)
     c.add_argument("--max-steps", type=int)
     c.add_argument("--init")
     c.add_argument("--adapter")
+    c = sub.add_parser("convert-anomaly", help="ShanghaiTech / Avenue frame labels -> alert-only records")
+    c.add_argument("dataset", choices=["shanghaitech", "avenue"])
+    c.add_argument("--root", required=True, help="extracted dataset root (also the --video-root later)")
+    c.add_argument("--output", required=True)
+    c.add_argument("--labels", help="folder of <video>.npy frame labels (overrides the official masks)")
+    c.add_argument("--train-list", help="video names used for training (e.g. the Zhong et al. weak split)")
+    c.add_argument("--train-fraction", type=float, default=0.5, help="hash split of labelled videos otherwise")
+    c.add_argument("--normal-train", type=int, default=100, help="normal-only training videos added as negatives")
+    c.add_argument("--fps", type=float)
+    c.add_argument("--prefix", default="", help="prepended to video paths (e.g. shanghaitech/) for a shared root")
+    c = sub.add_parser("eval-alerts", help="per-step abnormality AUC/AP of the alert head (or the LM Yes/No baseline)")
+    c.add_argument("--config", default="configs/v3/stage1_alert.yaml")
+    c.add_argument("--records", required=True)
+    c.add_argument("--video-root", required=True)
+    c.add_argument("--output", required=True)
+    c.add_argument("--checkpoint")
+    c.add_argument("--adapter")
+    c.add_argument("--method", choices=["head", "lm"], default="head")
+    c.add_argument("--split", default="test")
+    c.add_argument("--limit", type=int)
+    c.add_argument("--device", default="cuda")
+    c = sub.add_parser("score-alerts")
+    c.add_argument("predictions")
+    c.add_argument("--output")
     c = sub.add_parser("build-stage2", help="long streams with delayed time-referenced questions (Stage 2 data)")
     c.add_argument("records", help="Stage 1 records (e.g. convert-llava-mc output) or timed records")
     c.add_argument("--output", required=True)
@@ -449,6 +473,15 @@ def _v3(args):
     if args.action == "convert-meva":
         bench = Path(args.bench)
         return show(v3data.convert_meva(bench / "questions.jsonl", bench / "streams.json", args.output, args.split))
+    if args.action == "convert-anomaly":
+        from .v3.anomaly import convert_anomaly
+
+        return show(convert_anomaly(args.dataset, args.root, args.output, args.labels, args.train_list,
+                                    args.train_fraction, args.normal_train, args.fps, prefix=args.prefix))  # fmt: skip
+    if args.action == "score-alerts":
+        from .v3.anomaly import score_alerts
+
+        return show(score_alerts(args.predictions, args.output))
     if args.action == "build-stage2":
         return show(v3data.build_stage2_streams(args.records, args.output, args.video_root, args.split,
                                                 args.stream_seconds, delay_min=args.delay_min,
@@ -495,6 +528,11 @@ def _v3(args):
 
         return print(train(cfg, args.records, args.video_root, args.output, args.clip_seconds, args.max_steps,
                            args.init, args.adapter))  # fmt: skip
+    if args.action == "eval-alerts":
+        from .v3.anomaly import evaluate_alerts
+
+        return show(evaluate_alerts(cfg, args.records, args.video_root, args.output, args.checkpoint, args.adapter,
+                                    args.method, args.device, args.split, args.limit))  # fmt: skip
     if args.action == "train-stage2":
         from .v3.train_stage2 import train_stage2
 

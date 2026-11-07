@@ -123,17 +123,22 @@ class StudentLoss(nn.Module):
     def forward(self, clips, times, record, teacher_logp, encoded=None, specs=None):
         bb, cfg, tc = self.bb, self.cfg, self.cfg.train
         embeds, positions, pos, step_ends, aux = build_sequence(bb, self.v3, clips, times, record, tc.tbptt_steps)
-        q_ids = question_ids(bb, record)
-        embeds = torch.cat([embeds, bb.embed_ids(q_ids)], dim=1)
-        positions = torch.cat([positions, pos.text(len(q_ids), bb.device)], dim=1)
+        has_question = bool(record.get("question"))  # alert-only records (anomaly sets) have none
+        if has_question:
+            q_ids = question_ids(bb, record)
+            embeds = torch.cat([embeds, bb.embed_ids(q_ids)], dim=1)
+            positions = torch.cat([positions, pos.text(len(q_ids), bb.device)], dim=1)
         taps = cfg.alert.taps if encoded is not None else ()
         hidden, tapped = bb.lm_taps(embeds, positions, cache=None, use_cache=False, taps=taps)
-        logits = bb.logits(hidden[:, -1:])[0, -1].float()
-        letters = [bb.ids(letter)[0] for letter in LETTERS[: len(record["options"])]]
-        losses = {"ce": F.cross_entropy(logits[None], torch.tensor([letters[record["answer"]]], device=logits.device))}
-        temp = tc.kd_temperature
-        losses["kd"] = F.kl_div((logits / temp).log_softmax(-1), teacher_logp / temp, log_target=True,
-                                reduction="sum") * temp * temp  # fmt: skip
+        losses = {}
+        if has_question:
+            logits = bb.logits(hidden[:, -1:])[0, -1].float()
+            letters = [bb.ids(letter)[0] for letter in LETTERS[: len(record["options"])]]
+            target = torch.tensor([letters[record["answer"]]], device=logits.device)
+            losses["ce"] = F.cross_entropy(logits[None], target)
+            temp = tc.kd_temperature
+            losses["kd"] = F.kl_div((logits / temp).log_softmax(-1), teacher_logp / temp, log_target=True,
+                                    reduction="sum") * temp * temp  # fmt: skip
         if aux["pred"]:
             losses["pred"] = torch.stack(aux["pred"]).mean()
         if aux["budget"]:
@@ -225,7 +230,7 @@ def load_clip(record, video_root, cfg: V3Config, clip_seconds: float):
     return clips, times
 
 
-def train(cfg: V3Config, records_path: str, video_root: str, output: str, clip_seconds: float = 120.0,
+def train(cfg: V3Config, records_path: str | list[str], video_root: str, output: str, clip_seconds: float = 120.0,
           max_steps: int | None = None, init: str | None = None, adapter: str | None = None):  # fmt: skip
     tc = cfg.train
     world, rank = int(os.environ.get("WORLD_SIZE", "1")), int(os.environ.get("RANK", "0"))
@@ -237,9 +242,15 @@ def train(cfg: V3Config, records_path: str, video_root: str, output: str, clip_s
     random.seed(tc.seed + rank)
     torch.manual_seed(tc.seed)
     try:
-        records = [r for r in read_jsonl(records_path) if r.get("split", "train") == "train"]
+        paths = [records_path] if isinstance(records_path, str) else list(records_path)
+        records = [r for path in paths for r in read_jsonl(path) if r.get("split", "train") == "train"]
         if not records:
             raise ValueError("no training records (split == train)")
+        # Alert-only records (e.g. `v3 convert-anomaly`) are drawn with probability train.alert_fraction.
+        qa_records = [r for r in records if r.get("question")]
+        alert_records = [r for r in records if not r.get("question")]
+        if any(not r.get("alerts") and not r.get("rules") for r in alert_records):
+            raise ValueError("records without a question must carry alerts")
         bb = Backbone(cfg.backbone, cfg.stream, device)
         bb.add_lora(tc.lora_rank, tc.lora_alpha, adapter=adapter)
         bb.enable_checkpointing()
@@ -258,7 +269,8 @@ def train(cfg: V3Config, records_path: str, video_root: str, output: str, clip_s
         output = Path(output)
         if rank == 0:
             output.mkdir(parents=True, exist_ok=True)
-            (output / "run.json").write_text(json.dumps({"config": cfg.to_dict(), "records": records_path,
+            (output / "run.json").write_text(json.dumps({"config": cfg.to_dict(), "records": paths,
+                                                         "qa_records": len(qa_records), "alert_records": len(alert_records),
                                                          "modules": modules.parameter_report(),
                                                          "lora_params": sum(p.numel() for p in lora_params),
                                                          "world": world}, indent=2) + "\n")  # fmt: skip
@@ -272,11 +284,12 @@ def train(cfg: V3Config, records_path: str, video_root: str, output: str, clip_s
             optimizer.zero_grad(set_to_none=True)
             logs, stats = {}, {}
             for micro in range(tc.grad_accum):
-                record = random.choice(records)
+                use_alert = alert_records and (not qa_records or random.random() < tc.alert_fraction)
+                record = random.choice(alert_records if use_alert else qa_records)
                 clips, times = load_clip(record, video_root, cfg, clip_seconds)
                 if not times:
                     continue
-                teacher_logp = teacher_targets(bb, clips, times, record)
+                teacher_logp = teacher_targets(bb, clips, times, record) if record.get("question") else None
                 questions, specs = alert_questions(record)
                 encoded = encode_questions(bb, questions) if questions else None
                 sync = world == 1 or micro == tc.grad_accum - 1

@@ -286,7 +286,17 @@ class StepReader:
         clips = record.get("clips") or [{"video": record["video"], "offset": 0.0}]
         self.clips = []
         for clip in clips:
-            capture = cv2.VideoCapture(str(root / clip["video"]))
+            path = root / clip["video"]
+            if path.is_dir():  # a folder of frame images (e.g. ShanghaiTech test); its rate comes from the record
+                files = sorted((f for f in path.iterdir() if f.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}),
+                               key=lambda f: (0, int(f.stem), "") if f.stem.isdigit() else (1, 0, f.stem))  # fmt: skip
+                fps = float(clip.get("fps") or record.get("fps") or 0)
+                if not files or fps <= 0:
+                    raise ValueError(f"frame folder {path} needs images and an fps in the record")
+                self.clips.append({"cap": None, "files": files, "fps": fps, "count": len(files),
+                                   "offset": float(clip["offset"]), "next": 0, "last": None})  # fmt: skip
+                continue
+            capture = cv2.VideoCapture(str(path))
             if not capture.isOpened():
                 raise FileNotFoundError(root / clip["video"])
             fps = capture.get(cv2.CAP_PROP_FPS)
@@ -300,7 +310,8 @@ class StepReader:
 
     def close(self):
         for clip in self.clips:
-            clip["cap"].release()
+            if clip["cap"] is not None:
+                clip["cap"].release()
 
     def _frame(self, t: float) -> np.ndarray:
         clip = next((c for c in reversed(self.clips) if c["offset"] <= t), self.clips[0])
@@ -308,6 +319,15 @@ class StepReader:
         cap = clip["cap"]
         if clip["last"] is not None and clip["last"][0] == index:
             return clip["last"][1]
+        if cap is None:
+            frame = self.cv2.imread(str(clip["files"][index]))
+            if frame is None:
+                if clip["last"] is None:
+                    raise ValueError(f"cannot read {clip['files'][index]}")
+                return clip["last"][1]
+            rgb = self.cv2.cvtColor(frame, self.cv2.COLOR_BGR2RGB)
+            clip["last"] = (index, rgb)
+            return rgb
         if index < clip["next"] or index - clip["next"] > 3 * clip["fps"]:
             cap.set(self.cv2.CAP_PROP_POS_FRAMES, index)
             clip["next"] = index

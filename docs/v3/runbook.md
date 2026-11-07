@@ -118,8 +118,7 @@ Evaluate checkpoints (`modules.pt` + `lora/`) with `v3 eval --mode v3 --checkpoi
 the held-out `val` split, OVO-Bench and Video-MME, against B0/B1/B2 at equal visual tokens
 (experiments.md §2), and post every run to issue #4.
 
-Not implemented yet (tracked in issue #4): alert-head training data at scale (frame-labelled anomaly sets
-such as CUHK Avenue / ShanghaiTech Campus; licences to check). The Stage 2 trainer is below.
+Alert-head data and evaluation: section "Alert head (anomaly sets)" below; Stage 2: next section.
 
 ## Stage 2: long streams through the streaming cache (after an M2 Stage 1 checkpoint)
 
@@ -177,3 +176,40 @@ Evaluate each with `v3 eval` for native / transition / B4 exactly as for Video-M
 (`score` groups by `source/task`). TOC-Bench here is a local option-likelihood protocol (ordering items by
 generation), not the official TOC-Bench extractor; OVO forward follows the official prompts and scoring rules
 with first-token Yes/No likelihood for SSR/CRR.
+
+## Alert head (anomaly sets)
+
+ShanghaiTech Campus (13 fixed cameras, 130 abnormal events) and CUHK Avenue (16 train / 21 test videos) carry
+frame-level anomaly labels. **Licence:** neither project page states one (they ask for a citation), so use
+them for academic research only: download from the official pages
+(svip-lab.github.io/dataset/campus_dataset.html, cse.cuhk.edu.hk/leojia/projects/detectabnormal/dataset.html),
+never commit or redistribute frames or labels, and cite both. Both are small; please report the downloaded sizes.
+
+```bash
+# ShanghaiTech: testing/frames/<video>/*.jpg + testing/test_frame_mask/<video>.npy + training/videos/*.avi.
+# The standard protocol trains only on normal videos; the head needs positives, so labelled test videos are
+# split video-disjointly. Prefer the Zhong et al. (CVPR 2019) weak split list if you have it (--train-list,
+# one video name per line); otherwise a seeded 50/50 hash split.
+uv run --locked trace-vl v3 convert-anomaly shanghaitech --root /data/shanghaitech --output data/v3/sht.jsonl \
+    --prefix shanghaitech/ [--train-list /data/shanghaitech/SH_Train.txt] --normal-train 100
+# Avenue: official .mat masks need scipy (not a project dependency):
+uv run --locked --with scipy trace-vl v3 convert-anomaly avenue --root /data/avenue --prefix avenue/ \
+    --output data/v3/avenue.jsonl
+# Stage 1 with alert supervision: QA records + alert-only records, 25% alert samples (no CE/KD on those).
+uv run --locked torchrun --nproc_per_node=2 -m trace_vl.cli v3 train --config configs/v3/stage1_alert.yaml \
+    --records data/v3/llava_mc.jsonl data/v3/sht.jsonl --video-root /data --output outputs/v3/stage1-alert
+# Evaluate on the held-out videos: alert head (no decoding) vs the LM asked Yes/No every step.
+uv run --locked trace-vl v3 eval-alerts --config configs/v3/stage1_alert.yaml --records data/v3/sht.jsonl \
+    --video-root /data --checkpoint outputs/v3/stage1-alert/modules.pt \
+    --adapter outputs/v3/stage1-alert/lora --method head --output outputs/v3/alerts-sht-head
+uv run --locked trace-vl v3 eval-alerts --config configs/v3/stage1_alert.yaml --records data/v3/sht.jsonl \
+    --video-root /data --method lm --output outputs/v3/alerts-sht-lm-zeroshot
+```
+
+`--video-root` is the folder record paths are relative to. For the mixed training run, keep both datasets under
+one parent (e.g. /data/llava_video and /data/shanghaitech under /data), convert with `--prefix shanghaitech/`
+(and LLaVA records with their own prefix if needed), and train with `--video-root /data`.
+`eval-alerts` writes per-step rows (`label` = frame label at the step centre, `p`, `ms`) and `summary.json`:
+micro step-level AUROC and AP, whole-video bootstrap CI, and ms per decision. Step-level AUROC at 1 step/s is not
+directly comparable with published frame-level AUROC at 24-25 fps; compare methods within this protocol.
+

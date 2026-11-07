@@ -111,6 +111,7 @@ class TrainConfig:
     vis_margin: float = 0.2
     budget_weight: float = 0.01
     alert_weight: float = 1.0
+    alert_fraction: float = 0.0  # share of samples drawn from alert-only records (anomaly sets) when both exist
     # Expected tokens per P-step (gist + 3 x active slots), feasible range [gist, gist + 3 * max_active].
     # Predeclared pilot value 20 (PR #3 A100 report); the old I-inclusive name is rejected, not reinterpreted.
     target_p_step_tokens: float = 20.0
@@ -176,6 +177,8 @@ class V3Config:
                 f"train.target_p_step_tokens={config.train.target_p_step_tokens} is infeasible: a P-step emits "
                 f"between {low} (gist only) and {high} (gist + 3 x max_active) tokens"
             )
+        if not 0.0 <= config.train.alert_fraction <= 1.0:
+            raise ValueError("train.alert_fraction must be in [0, 1]")
         if config.transition.activity_temperature <= 0:
             raise ValueError("transition.activity_temperature must be positive")
         k = config.transition.pooled_tokens

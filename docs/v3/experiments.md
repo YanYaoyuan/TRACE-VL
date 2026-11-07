@@ -53,8 +53,11 @@ step (ms), peak training memory, and GPU-hours to train.
 | time to alarm | first step above threshold minus the labelled onset (or the due time for duration rules) |
 | throughput | steps/s with the alert head vs asking the LM a yes/no question every step (`ask`) |
 
-Small datasets (fit the 20–30 GB limit; check each licence): CUHK Avenue and ShanghaiTech Campus
-(frame-level anomaly labels, fixed cameras), plus MEVA activities turned into noul rules.
+Small datasets (fit the 20–30 GB limit): CUHK Avenue and ShanghaiTech Campus (frame-level anomaly labels,
+fixed cameras; no licence stated on either page, so research use only with citation, no redistribution), plus
+MEVA activities turned into noul rules. Implemented: `v3 convert-anomaly` (video-disjoint split of the labelled
+videos, normal training videos as negatives), Stage 1 `train.alert_fraction`, `v3 eval-alerts --method head|lm`
+(runbook "Alert head").
 Baselines: (a) the LM asked a yes/no question per step (autoregressive, slow); (b) v2's detector +
 rule replay; (c) the alert head without latent state reads (taps only), as an ablation of the GDN-state
 connection.
