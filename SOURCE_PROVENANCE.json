@@ -3,13 +3,45 @@
   "training_test_commit": "a9ab454b27993d4383f1c3112feca5b8bbb7ba49",
   "experiment_branch": "experiment/stage1-local-a100-20261107",
   "helper_sha256": {
-    "stage1_data.py": "bcf50698347ca5b648bc98f70bc666600d9698b74d31ce36cabaaf40f519e7fc",
+    "stage1_data.py": "7ceffb7bf2ac02f7f81defeac90924280bd19273a95026fe9bfee2f5a09203d8",
     "configure_stage1.py": "3cc4d585b926ec9cf823ba2d06a7c659816d123d3f1b502d06d58cf2ba3793f0",
     "train_with_checkpoints.py": "96e85c61ca510bc176bdf5fad85e35ddca2dad27bc65bed7d9a7d6d88b1c472c",
     "cloud_train.sh": "33b9b56b137dd9ff933259eeb5898e0ea60eabae5c1893522584196fc00ed905",
-    "test_stage1_data.py": "bed288014bf0f7f96f6db82890cd9093bc6bdc09715854cc17fa34f3f17d05ce",
+    "test_stage1_data.py": "466cc2a1d3dab1945a3fdf8c79b659a3fae69a6462d285d73a6c7181ece5eff3",
     "validate_and_score.py": "116d61e160313be7ade14b6bac151ddaf76f2c3737ef10231410b53e88c3897d"
   },
   "hardware_tested": "2 x RTX 5090; A100 requires first-run calibration",
-  "model_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc"
+  "model_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+  "mc_youtube_schema_audit": {
+    "training_ready": false,
+    "conversion": {
+      "records": 167927,
+      "videos": 9977,
+      "splits": {
+        "train": 151560,
+        "val": 16367
+      },
+      "skipped_unparseable": 0,
+      "missing_videos_skipped": 0,
+      "duplicates_removed": 21,
+      "conflicting_questions_dropped": 0,
+      "unique_ids": 167927
+    },
+    "annotations_sha256": {
+      "/home/user/work/bgyfw/VLM/TRACE-VL/outputs/stage1-local-20261107/official-annotations/0_30_s_youtube_mc_v0_1_qa_processed.json": "a573ae603153df06022d644387323c11431aa74fdd89ab4e8088f1b1582b03cc"
+    }
+  },
+  "cloud_pilot_subset_audit": {
+    "training_ready": false,
+    "train_questions": 4989,
+    "val_questions": 488,
+    "question_limits": {
+      "train": 5000,
+      "val": 500,
+      "seed": 7,
+      "unit": "whole video groups"
+    },
+    "train_videos": 296,
+    "val_videos": 29
+  }
 }
