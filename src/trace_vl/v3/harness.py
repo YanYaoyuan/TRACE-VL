@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import random
 import time as clock
 from collections import Counter, defaultdict
@@ -43,14 +44,67 @@ def _dir_identity(path: str | None) -> dict | None:
 
 
 def _video_identity(records: list[dict], video_root: str) -> str:
-    """Cheap identity of every referenced video: relative path, size and modification time."""
-    entries = []
+    """Identity of every referenced video. Video files: relative path, size, mtime in ns (cheap; large sets).
+    Frame folders (small images): the sorted file inventory with each file's content hash, so editing or
+    replacing a frame changes the run id (PR #3 review: the folder's own size/mtime did not)."""
+    entries, seen = [], set()
     for r in records:
         for clip in r.get("clips") or [{"video": r["video"]}]:
+            if clip["video"] in seen:
+                continue
+            seen.add(clip["video"])
             f = Path(video_root) / clip["video"]
-            stat = f.stat() if f.exists() else None
-            entries.append((clip["video"], stat.st_size if stat else None, int(stat.st_mtime) if stat else None))
-    return hashlib.sha256(json.dumps(sorted(set(entries))).encode()).hexdigest()
+            if f.is_dir():
+                inventory = [(x.name, _sha256(x)) for x in sorted(f.iterdir()) if x.is_file()]
+                entries.append((clip["video"], "dir", hashlib.sha256(json.dumps(inventory).encode()).hexdigest()))
+            else:
+                stat = f.stat() if f.exists() else None
+                entries.append((clip["video"], stat.st_size if stat else None, stat.st_mtime_ns if stat else None))
+    return hashlib.sha256(json.dumps(sorted(entries, key=str)).encode()).hexdigest()
+
+
+# ---------------------------------------------------------------------------- atomic per-unit results
+def unit_file(directory: Path, key: str) -> Path:
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in key)[:100]
+    return Path(directory) / f"{safe}-{hashlib.sha256(key.encode()).hexdigest()[:10]}.jsonl"
+
+
+def write_unit(directory: Path, key: str, rows: list[dict], run_id: str):
+    """All rows of one unit (video / stream) plus a completion record, published atomically (tmp + rename), so
+    an interrupted run never leaves a unit that looks complete (PR #3 review: per-row appends did)."""
+    target = unit_file(directory, key)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
+    with tmp.open("w") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+        handle.write(json.dumps({"_complete": True, "unit": key, "rows": len(rows), "run": run_id}) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, target)
+
+
+def read_unit(directory: Path, key: str, run_id: str) -> list[dict] | None:
+    """Rows of a completed unit of this run, or None (missing or incomplete: recompute). Another run's unit raises."""
+    target = unit_file(directory, key)
+    if not target.exists():
+        return None
+    lines = [json.loads(x) for x in target.read_text().splitlines() if x.strip()]
+    if not lines or not lines[-1].get("_complete") or lines[-1].get("unit") != key:
+        target.unlink()
+        return None
+    footer, rows = lines[-1], lines[:-1]
+    if footer.get("run") != run_id or any(r.get("run") != run_id for r in rows):
+        raise ValueError(f"{target} belongs to another run; use a new --output")
+    if footer["rows"] != len(rows):
+        target.unlink()
+        return None
+    return rows
+
+
+def clean_partial(directory: Path):
+    for tmp in Path(directory).glob("*.tmp"):
+        tmp.unlink()
 
 
 def run_fingerprint(cfg: V3Config, records_path: str, mode: str, checkpoint: str | None = None,

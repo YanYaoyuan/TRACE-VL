@@ -392,7 +392,8 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
     """Stream each held-out Stage 2 stream once with the inference session; ask its delayed questions at their
     times. `policy` overrides memory.policy at the same budget (tkm vs mass / fifo / window controls)."""
     from .backbone import Backbone
-    from .harness import _modules, run_fingerprint
+    from .data import write_jsonl
+    from .harness import _modules, clean_partial, read_unit, run_fingerprint, write_unit
     from .session import StreamSession
 
     if policy is not None:
@@ -412,47 +413,51 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
     if run_file.exists() and json.loads(run_file.read_text()).get("id") != fingerprint["id"]:
         raise ValueError(f"{output} holds a different run; use a new --output")
     run_file.write_text(json.dumps(fingerprint, indent=2) + "\n")
-    target = output / "predictions.jsonl"
-    done = set()
-    if target.exists():
-        for row in read_jsonl(target):
-            if row.get("run") != fingerprint["id"]:
-                raise ValueError(f"{target} has rows of another run; use a new --output")
-            done.add(row["stream"])
+    units = output / "streams"  # one atomically written file per completed stream (see harness.write_unit)
+    if units.exists():
+        clean_partial(units)
+    done = {r["id"] for r in records if read_unit(units, r["id"], fingerprint["id"]) is not None}
     bb = Backbone(cfg.backbone, cfg.stream, device)
     if adapter:
         bb.add_lora(0, 0, adapter=adapter)
         bb.model.eval()
     modules = _modules(cfg, bb, checkpoint, device) if mode == "v3" else None
     gap = cfg.stream.frame_gap
-    with target.open("a") as handle:
-        for record in records:
-            if record["id"] in done:
-                continue
-            times = stream_times(record, cfg.stream.step_seconds, gap, cfg.stage2.max_seconds)
-            if not times:
-                continue
-            due = {steps[-1]: qs for steps, qs in chunk_plan(times, record["questions"], len(times), gap) if qs}
-            session = StreamSession(bb, cfg, modules, mode=mode)
-            reader = StepReader(record, video_root)
-            rows, appended = [], []
-            try:
-                for k, t in enumerate(times):
-                    result = session.step(reader.step(t, gap), t)
-                    appended.append((t, result.tokens))
-                    for q in due.get(k, []):
-                        kept = evidence_kept(session.memory, appended, q.get("evidence"))
-                        choice, _ = session.ask(q["question"], q["options"])
-                        rows.append({"stream": record["id"], "id": q["id"], "t": q["time"], "delay": q.get("delay", 0.0),
-                                     "correct": int(choice == q["answer"]), "evidence_kept": kept,
-                                     "kv_tokens": len(session.memory), "run": fingerprint["id"]})  # fmt: skip
-            finally:
-                reader.close()
-            for row in rows:  # whole streams only, so a resumed run never holds a partial stream
-                handle.write(json.dumps(row) + "\n")
-            handle.flush()
-            del session
-            torch.cuda.empty_cache()
+    for record in records:
+        if record["id"] in done:
+            continue
+        times = stream_times(record, cfg.stream.step_seconds, gap, cfg.stage2.max_seconds)
+        if not times:
+            continue
+        due = {steps[-1]: qs for steps, qs in chunk_plan(times, record["questions"], len(times), gap) if qs}
+        session = StreamSession(bb, cfg, modules, mode=mode)
+        reader = StepReader(record, video_root)
+        rows, appended = [], []
+        try:
+            for k, t in enumerate(times):
+                result = session.step(reader.step(t, gap), t)
+                appended.append((t, result.tokens))
+                for q in due.get(k, []):
+                    kept = evidence_kept(session.memory, appended, q.get("evidence"))
+                    choice, _ = session.ask(q["question"], q["options"])
+                    rows.append({"stream": record["id"], "id": q["id"], "t": q["time"], "delay": q.get("delay", 0.0),
+                                 "correct": int(choice == q["answer"]), "evidence_kept": kept,
+                                 "kv_tokens": len(session.memory), "run": fingerprint["id"]})  # fmt: skip
+        finally:
+            reader.close()
+        write_unit(units, record["id"], rows, fingerprint["id"])
+        del session
+        torch.cuda.empty_cache()
+    rows = []
+    for record in records:
+        if not stream_times(record, cfg.stream.step_seconds, gap, cfg.stage2.max_seconds):
+            continue
+        unit = read_unit(units, record["id"], fingerprint["id"])
+        if unit is None:
+            raise RuntimeError(f"stream {record['id']} has no complete result")
+        rows += unit
+    target = output / "predictions.jsonl"  # assembled from complete streams only; rewritten each time
+    write_jsonl(target, rows)
     summary = summarize_streams(read_jsonl(target))
     summary["policy"] = cfg.memory.policy
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")

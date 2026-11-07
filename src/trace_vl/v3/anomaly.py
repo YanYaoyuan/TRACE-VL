@@ -247,7 +247,7 @@ def evaluate_alerts(cfg, records_path: str, video_root: str, output: str, checkp
 
     from .alert import Question
     from .backbone import Backbone
-    from .harness import _modules, run_fingerprint
+    from .harness import _modules, clean_partial, read_unit, run_fingerprint, write_unit
     from .session import StreamSession
 
     if method not in {"head", "lm"}:
@@ -266,13 +266,10 @@ def evaluate_alerts(cfg, records_path: str, video_root: str, output: str, checkp
     if run_file.exists() and json.loads(run_file.read_text()).get("id") != fingerprint["id"]:
         raise ValueError(f"{output} holds a different run; use a new --output")
     run_file.write_text(json.dumps(fingerprint, indent=2) + "\n")
-    target = output / "predictions.jsonl"
-    done = set()
-    if target.exists():
-        for row in read_jsonl(target):
-            if row.get("run") != fingerprint["id"]:
-                raise ValueError(f"{target} has rows of another run; use a new --output")
-            done.add(row["id"])
+    units = output / "videos"  # one atomically written file per completed video (resume = file present + complete)
+    if units.exists():
+        clean_partial(units)
+    done = {r["id"] for r in records if read_unit(units, r["id"], fingerprint["id"]) is not None}
     backbone = Backbone(cfg.backbone, cfg.stream, device)
     if adapter:
         backbone.add_lora(0, 0, adapter=adapter)
@@ -282,34 +279,39 @@ def evaluate_alerts(cfg, records_path: str, video_root: str, output: str, checkp
     question = Question("abnormal", "noul", CANONICAL)
     prompt = CANONICAL + " Answer Yes or No."
     gap = cfg.stream.frame_gap
-    with target.open("a") as handle:
-        for record in records:
-            if record["id"] in done:
-                continue
-            spans = record["alerts"][0]["spans"]
-            session = StreamSession(backbone, cfg, modules, mode=mode,
-                                    questions=[question] if method == "head" else None)  # fmt: skip
-            reader = StepReader(record, video_root)
-            rows = []
-            try:
-                end = min(float(record["query_time"]), reader.duration)
-                for t in [t for t in step_times(end, cfg.stream.step_seconds, gap) if t + gap / 2 <= end + 1e-6]:
-                    result = session.step(reader.step(t, gap), t)
-                    if method == "head":
-                        p, ms = result.alerts[0]["noul"], result.seconds_alert * 1000
-                    else:
-                        started = clock.perf_counter()
-                        _, scores = session.ask_yesno(prompt)
-                        ms = (clock.perf_counter() - started) * 1000
-                        p = 1.0 / (1.0 + math.exp(scores[1] - scores[0]))
-                    rows.append({"id": record["id"], "t": t, "label": step_label(spans, t), "p": round(float(p), 5),
-                                 "ms": round(ms, 3), "camera": record.get("camera"), "run": fingerprint["id"]})  # fmt: skip
-            finally:
-                reader.close()
-            for row in rows:  # whole videos only, so a resumed run never holds a partial video
-                handle.write(json.dumps(row) + "\n")
-            handle.flush()
-            del session
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+    for record in records:
+        if record["id"] in done:
+            continue
+        spans = record["alerts"][0]["spans"]
+        session = StreamSession(backbone, cfg, modules, mode=mode,
+                                questions=[question] if method == "head" else None)  # fmt: skip
+        reader = StepReader(record, video_root)
+        rows = []
+        try:
+            end = min(float(record["query_time"]), reader.duration)
+            for t in [t for t in step_times(end, cfg.stream.step_seconds, gap) if t + gap / 2 <= end + 1e-6]:
+                result = session.step(reader.step(t, gap), t)
+                if method == "head":
+                    p, ms = result.alerts[0]["noul"], result.seconds_alert * 1000
+                else:
+                    started = clock.perf_counter()
+                    _, scores = session.ask_yesno(prompt)
+                    ms = (clock.perf_counter() - started) * 1000
+                    p = 1.0 / (1.0 + math.exp(scores[1] - scores[0]))
+                rows.append({"id": record["id"], "t": t, "label": step_label(spans, t), "p": round(float(p), 5),
+                             "ms": round(ms, 3), "camera": record.get("camera"), "run": fingerprint["id"]})  # fmt: skip
+        finally:
+            reader.close()
+        write_unit(units, record["id"], rows, fingerprint["id"])
+        del session
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    rows = []
+    for record in records:  # every selected video must be complete before scoring
+        unit = read_unit(units, record["id"], fingerprint["id"])
+        if unit is None:
+            raise RuntimeError(f"video {record['id']} has no complete result")
+        rows += unit
+    target = output / "predictions.jsonl"  # assembled from complete videos only; rewritten each time
+    write_jsonl(target, rows)
     return score_alerts(str(target), str(output / "summary.json"))

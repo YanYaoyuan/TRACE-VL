@@ -232,7 +232,11 @@ uv run --locked trace-vl v3 eval-alerts --config configs/v3/stage1_alert.yaml --
 `--video-root` is the folder record paths are relative to. For the mixed training run, keep both datasets under
 one parent (e.g. /data/llava_video and /data/shanghaitech under /data), convert with `--prefix shanghaitech/`
 (and LLaVA records with their own prefix if needed), and train with `--video-root /data`.
-`eval-alerts` writes per-step rows (`label` = frame label at the step centre, `p`, `ms`) and `summary.json`:
+Alert-only training crops are sampled (half of them placed to contain the start of a random abnormal span,
+half uniform over the video) with absolute times, and `alert_positive_fraction` in the metrics reports the
+share of positive decisions actually presented. `eval-alerts` and `eval-stage2` write one atomically
+published file per completed video/stream (`videos/`, `streams/`; an interrupted unit is recomputed), and
+frame folders enter the run id by per-frame content hash. `eval-alerts` writes per-step rows (`label` = frame label at the step centre, `p`, `ms`) and `summary.json`:
 micro step-level AUROC and AP, whole-video bootstrap CI, and ms per decision. Step-level AUROC at 1 step/s is not
 directly comparable with published frame-level AUROC at 24-25 fps; compare methods within this protocol.
 

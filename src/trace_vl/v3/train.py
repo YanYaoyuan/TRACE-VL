@@ -187,12 +187,16 @@ class StudentLoss(nn.Module):
             torch.clear_autocast_cache()
         memory = DecisionMemory(cfg.alert.memory_tokens)
         losses, logs = [], {}
+        presented, positives = 0, 0.0
         for k in range(n):
             if k in chosen:
                 start, end = aux["spans"][k]
                 results = self.v3.alert(encoded, tapped[:, 0, start:end], aux["xy"][k].to(hidden.device), memory,
                                         times[k], aux["clock"][k], states if k == n - 1 else None)  # fmt: skip
                 targets = {spec["id"]: alert_target(spec, times[k]) for spec in specs}
+                noul = [v for spec, v in zip(specs, targets.values()) if spec["kind"] == "noul"]
+                presented += len(noul)
+                positives += sum(noul)
                 loss, logs = alert_loss(results, targets)
                 if loss is not None:
                     losses.append(loss)
@@ -201,6 +205,8 @@ class StudentLoss(nn.Module):
             latent = [hidden[0, step_ends[k] : step_ends[k] + 1]] + ([hidden[0, start:end][keep]] if keep else [])
             memory.add(torch.cat(latent), times[k])
         logs["alert_state_used"] = float(states is not None)
+        if presented:  # share of noul decisions with a positive label actually shown to the head
+            logs["alert_positive_fraction"] = positives / presented
         return (torch.stack(losses).mean() if losses else None), logs
 
 
@@ -217,11 +223,28 @@ def teacher_targets(bb: Backbone, clips, times, record):
         return bb.logits(hidden[:, -1:])[0, -1].float().log_softmax(-1)
 
 
-def load_clip(record, video_root, cfg: V3Config, clip_seconds: float):
+def alert_crop_end(spans: list, duration: float, clip_seconds: float, rng: random.Random,
+                   positive_bias: float = 0.5) -> float:  # fmt: skip
+    """End time of a training crop of an alert-only video (PR #3 review: always cropping the end can exclude every
+    abnormal span). With probability `positive_bias` (when spans exist) the crop is placed to contain the start of
+    a random span; otherwise its end is uniform over all crops. Times stay absolute, so labels stay aligned."""
+    shortest = min(clip_seconds, duration)
+    if spans and rng.random() < positive_bias:
+        a, b = rng.choice(spans)
+        low, high = max(shortest, min(a, duration)), min(duration, a + clip_seconds)
+        if high >= low:
+            return rng.uniform(low, high)
+    return rng.uniform(shortest, duration)
+
+
+def load_clip(record, video_root, cfg: V3Config, clip_seconds: float, rng: random.Random | None = None):
     gap = cfg.stream.frame_gap
     reader = StepReader(record, video_root)
     try:
         end = min(record["query_time"] if record.get("query_time") is not None else reader.duration, reader.duration)
+        if not record.get("question") and record.get("alerts") and rng is not None:
+            spans = [s for spec in record["alerts"] for s in spec.get("spans", [])]
+            end = alert_crop_end(spans, end, clip_seconds, rng)
         start = max(0.0, end - clip_seconds)
         times = [t + start for t in step_times(end - start, cfg.stream.step_seconds, gap) if t + start + gap / 2 <= end + 1e-6]
         clips = [reader.step(t, gap) for t in times]
@@ -286,7 +309,7 @@ def train(cfg: V3Config, records_path: str | list[str], video_root: str, output:
             for micro in range(tc.grad_accum):
                 use_alert = alert_records and (not qa_records or random.random() < tc.alert_fraction)
                 record = random.choice(alert_records if use_alert else qa_records)
-                clips, times = load_clip(record, video_root, cfg, clip_seconds)
+                clips, times = load_clip(record, video_root, cfg, clip_seconds, random)
                 if not times:
                     continue
                 teacher_logp = teacher_targets(bb, clips, times, record) if record.get("question") else None

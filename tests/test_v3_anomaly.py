@@ -162,3 +162,59 @@ def test_prefix_resolves_against_a_shared_root(tmp_path):
     convert_anomaly("shanghaitech", str(tmp_path / "sht"), str(tmp_path / "r.jsonl"), normal_train=1, prefix="sht/")
     for record in read_jsonl(tmp_path / "r.jsonl"):
         assert record["video"].startswith("sht/") and (tmp_path / record["video"]).exists()
+
+
+# ---------------------------------------------------------------------------- PR #3 review regressions (2dc1921)
+def test_alert_crops_reach_early_events_and_keep_absolute_times():
+    import random
+
+    from trace_vl.v3.train import alert_crop_end
+
+    rng = random.Random(0)
+    spans = [[0.0, 2.0]]
+    ends = [alert_crop_end(spans, 10.0, 3.0, rng) for _ in range(400)]
+    assert all(3.0 <= e <= 10.0 for e in ends)
+    covering = [e for e in ends if e - 3.0 <= 2.0]  # crop [end - 3, end] overlaps the only event
+    assert len(covering) / len(ends) > 0.4  # positive-biased half lands on the event (end-cropping gave none)
+    assert max(ends) > 9.0  # unbiased half still spans the whole video
+    assert alert_crop_end([], 2.0, 5.0, rng) == pytest.approx(2.0)  # shorter than a crop: the whole video
+    late = [alert_crop_end([[8.0, 9.0]], 10.0, 3.0, rng) for _ in range(200)]
+    assert all(3.0 <= e <= 10.0 for e in late) and sum(e >= 8.0 for e in late) / len(late) > 0.4
+
+
+def test_frame_folder_edit_changes_the_run_identity(tmp_path):
+    import cv2
+
+    from trace_vl.v3.harness import _video_identity
+
+    write_frames(tmp_path / "v", 4)
+    records = [{"id": "a", "video": "v"}]
+    before = _video_identity(records, str(tmp_path))
+    assert _video_identity(records, str(tmp_path)) == before
+    cv2.imwrite(str(tmp_path / "v" / "002.jpg"), np.full((32, 40, 3), 200, dtype=np.uint8))  # same name, new pixels
+    assert _video_identity(records, str(tmp_path)) != before
+
+
+def test_atomic_units_reject_interrupted_and_foreign_results(tmp_path):
+    from trace_vl.v3.harness import clean_partial, read_unit, unit_file, write_unit
+
+    rows = [{"id": "v1", "t": t, "run": "r1"} for t in range(4)]
+    write_unit(tmp_path, "v1", rows, "r1")
+    assert read_unit(tmp_path, "v1", "r1") == rows
+    assert read_unit(tmp_path, "missing", "r1") is None
+    # Interrupted output (the review's probe): first row only, no completion record -> recomputed, file removed.
+    path = unit_file(tmp_path, "v1")
+    path.write_text(json.dumps(rows[0]) + "\n")
+    assert read_unit(tmp_path, "v1", "r1") is None and not path.exists()
+    # Completion record that does not match the rows -> incomplete.
+    path.write_text(json.dumps(rows[0]) + "\n" + json.dumps({"_complete": True, "unit": "v1", "rows": 4, "run": "r1"}) + "\n")
+    assert read_unit(tmp_path, "v1", "r1") is None
+    write_unit(tmp_path, "v1", rows, "r1")
+    with pytest.raises(ValueError, match="another run"):
+        read_unit(tmp_path, "v1", "r2")
+    write_unit(tmp_path, "empty", [], "r1")  # a video with no steps is still a completed unit
+    assert read_unit(tmp_path, "empty", "r1") == []
+    (tmp_path / "x.tmp").write_text("partial")
+    clean_partial(tmp_path)
+    assert not (tmp_path / "x.tmp").exists()
+    assert unit_file(tmp_path, "a/b c") != unit_file(tmp_path, "a_b_c")  # sanitized names stay distinct
