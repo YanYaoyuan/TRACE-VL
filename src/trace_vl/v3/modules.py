@@ -257,6 +257,8 @@ class TransitionEncoder(nn.Module):
             cache.steps_since_i = 0
             return StepTokens(x, rows, cols, ["frame"] * n, [-1] * n, True, surprise, masses, aux)
         cache.steps_since_i += 1
+        if cfg.p_step_mode == "pooled":
+            return self._pooled_step(x, h, w, surprise, masses, aux)
 
         # Gist: G learned queries pool the step (convex combinations of real tokens).
         gist_attn = (self.gist_queries @ self.gist_key(z + pos).t() / math.sqrt(z.shape[-1])).softmax(-1)  # [G, N]
@@ -305,6 +307,23 @@ class TransitionEncoder(nn.Module):
             masses,
             aux,
         )
+
+
+    def _pooled_step(self, x, h, w, surprise, masses, aux):
+        """Baseline B4: same I-steps, but P-steps send a fixed grid of average-pooled frame tokens."""
+        count = self.cfg.pooled_tokens
+        rows_n = max(r for r in range(1, int(count**0.5) + 1) if count % r == 0)  # most square factorization
+        cols_n = count // rows_n
+        rows_n, cols_n = min(rows_n, h), min(cols_n, w)
+        grid = x.view(h, w, -1).permute(2, 0, 1)[None]  # [1, D, h, w]
+        pooled = F.adaptive_avg_pool2d(grid.float(), (rows_n, cols_n))[0].flatten(1).t().to(x.dtype)  # [n, D]
+        pooled = match_norm(pooled, x.detach().norm(dim=-1).mean())
+        r = ((torch.arange(rows_n, device=x.device) + 0.5) * h / rows_n - 0.5).round().clamp(0, h - 1)
+        c = ((torch.arange(cols_n, device=x.device) + 0.5) * w / cols_n - 0.5).round().clamp(0, w - 1)
+        rows, cols = r.repeat_interleave(cols_n).long(), c.repeat(rows_n).long()
+        n = pooled.shape[0]
+        aux.update(active_slots=0, active_masses=[], active_centroids=[], slot_memory=None)
+        return StepTokens(pooled, rows, cols, ["gist"] * n, [-1] * n, False, surprise, masses, aux)
 
 
 # ============================================================================ transition tracks

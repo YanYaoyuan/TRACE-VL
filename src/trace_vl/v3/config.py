@@ -58,6 +58,10 @@ class TransitionConfig:
     i_step_every: int = 8  # full 196-token I-step every N steps
     scene_cut_surprise: float = 0.6  # mean surprise that forces an I-step
     memory_slots: int = 64  # adapter-space memory read by the CST
+    # Baseline B4 (experiments.md §2): "pooled" replaces gist + transition tokens on P-steps by a fixed
+    # grid of average-pooled frame tokens; set pooled_tokens to the transition run's measured tokens/step.
+    p_step_mode: str = "transition"  # transition | pooled
+    pooled_tokens: int = 36
 
 
 @dataclass
@@ -134,6 +138,8 @@ class V3Config:
         if unknown:
             raise ValueError(f"unknown v3 config sections: {sorted(unknown)}")
         config = cls(**{name: _build(kind, values.get(name)) for name, kind in parts.items()})
+        if config.transition.p_step_mode not in {"transition", "pooled"}:
+            raise ValueError("transition.p_step_mode must be transition or pooled")
         if config.memory.policy not in {"full", "window", "drift", "tkm", "fifo"}:
             raise ValueError("memory.policy must be full, window, drift, tkm or fifo")
         if config.cst.dim % config.cst.heads:

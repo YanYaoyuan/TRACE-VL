@@ -190,7 +190,8 @@ def test_convert_ovo_keeps_mcq_tasks(tmp_path):
 
 
 def test_configs_load():
-    for name in ("native_full", "native_window", "native_drift", "native_fifo", "native_budget16k", "v3_tkm", "stage1"):
+    for name in ("native_full", "native_window", "native_drift", "native_fifo", "native_budget16k", "v3_tkm", "stage1",
+                 "v3_pooled_b4", "stage1_a100", "stage1_a100_b4"):
         cfg, _ = load_v3_config(f"configs/v3/{name}.yaml")
         assert cfg.backbone.name == "Qwen/Qwen3.5-2B"
     with pytest.raises(ValueError):
@@ -374,3 +375,20 @@ def test_evaluate_rejects_duplicate_record_ids(tmp_path):
     path.write_text("".join(json.dumps(r) + "\n" for r in rows))
     with pytest.raises(ValueError, match="duplicate record ids"):
         evaluate(V3Config(), str(path), str(tmp_path), str(tmp_path / "out"))
+
+
+def test_b4_pooled_p_steps_have_fixed_count_and_positions():
+    cfg = small_config(i_step_every=100)
+    cfg.transition.p_step_mode, cfg.transition.pooled_tokens = "pooled", 4
+    modules = TraceV3Modules(cfg, model_dim=16).eval()
+    cst, te = CSTCache(), TECache()
+    for k in range(3):
+        x = torch.rand(12, 16) + 0.5
+        adapted, z = modules.cst(x, (3, 4), float(k), cst)
+        info = modules.transition(adapted, z, (3, 4), te)
+    assert not info.is_i_step and info.tokens.shape[0] == 4 and set(info.kinds) == {"gist"}
+    assert info.rows.max() <= 2 and info.cols.max() <= 3 and len(set(zip(info.rows.tolist(), info.cols.tolist()))) == 4
+    ref = adapted.norm(dim=-1).mean()
+    assert torch.allclose(info.tokens.norm(dim=-1), torch.full((4,), float(ref)), rtol=1e-4)
+    with pytest.raises(ValueError):
+        V3Config.from_dict({"transition": {"p_step_mode": "random"}})

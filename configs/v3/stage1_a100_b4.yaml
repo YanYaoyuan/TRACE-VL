@@ -1,0 +1,5 @@
+# B4 control for M2 on 4 x A100-40GB: same schedule and data as stage1_a100.yaml, pooled P-steps.
+extends: stage1_a100.yaml
+transition:
+  p_step_mode: pooled
+  pooled_tokens: 32
