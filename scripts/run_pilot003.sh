@@ -86,6 +86,7 @@ from pathlib import Path
 from trace_vl.v3.harness import score
 
 runs, data = Path(os.environ["TRACE_RUNS"]), Path(os.environ["TRACE_DATA_DIR"])
+updates = json.loads((runs / "identity.json").read_text())["configs"]["transition"]["train"]["steps"]
 gold = {r["id"]: r for r in (json.loads(s) for s in (data / "val.jsonl").read_text().splitlines() if s.strip())}
 arms = ["native", "transition", "after", "b4"]
 preds, scores = {}, {}
@@ -147,7 +148,8 @@ decision = {
 summary = {"accuracy": acc, "ci95": {a: scores[a]["ci95"] for a in arms}, "lm_tokens_per_step": tokens,
            "budget_spread": spread, "kv_mb_mean": {a: scores[a]["kv_mb_mean"] for a in arms},
            "paired": pairs, "training_gate_logs": gate, "decision": decision,
-           "note": "Predeclared rule: docs/v3/experiments.md section 10. 100-update pilot; one seed; 0-30 s MC only."}
+           "note": f"Predeclared rule: docs/v3/experiments.md section 10. {updates}-update run; one seed; "
+                   f"{len(gold)} validation questions; 0-30 s MC only. Smoke-sized runs are not accuracy evidence."}
 tmp = runs / ".summary.tmp"
 tmp.write_text(json.dumps(summary, indent=2) + "\n")
 tmp.replace(runs / "summary.json")
