@@ -22,78 +22,30 @@ flock -n 9 || { echo "Another pilot-003 process is using $TRACE_RUNS" >&2; exit 
 trap 'status=$?; ((status)) && echo "Stopped (exit $status). Fix the error and rerun the same command; finished work is kept." >&2' EXIT
 log() { echo "[$(date -Is)] $*"; }
 
-log "[0/4] Preflight: data, configs, source identity"
+log "[0/4] Preflight: data, resolved configs, media and source identity"
 "${py[@]}" - <<'PY'
-import hashlib, json, os, subprocess
+import json, os
 from pathlib import Path
-from trace_vl.v3.config import load_v3_config
+from trace_vl.v3.pilot import preflight
 
-data, videos, runs = (Path(os.environ[k]).resolve() for k in ("TRACE_DATA_DIR", "TRACE_VIDEO_ROOT", "TRACE_RUNS"))
-read = lambda p: [json.loads(s) for s in p.read_text().splitlines() if s.strip()]
-train, val = read(data / "train.jsonl"), read(data / "val.jsonl")
-for split, rows in (("train", train), ("val", val)):
-    if not rows or any(r.get("split") != split for r in rows):
-        raise SystemExit(f"invalid {split} records")
-    if len({r["id"] for r in rows}) != len(rows):
-        raise SystemExit(f"duplicate {split} ids")
-    missing = [r["video"] for r in rows if not (videos / r["video"]).is_file()]
-    if missing:
-        raise SystemExit(f"{len(missing)} {split} videos missing under TRACE_VIDEO_ROOT, e.g. {missing[0]}")
-if {r["video"] for r in train} & {r["video"] for r in val}:
-    raise SystemExit("train/val video overlap")
-# Per-arm configs: repo arm config + local model path (written once, then compared on every restart).
-cfg_dir = runs / "configs"
-cfg_dir.mkdir(parents=True, exist_ok=True)
-dicts = {}
-for arm in ("transition", "after", "b4"):
-    text = f"extends: {Path('configs/v3').resolve() / f'pilot003_{arm}.yaml'}\n"
-    if os.environ["TRACE_MODEL"]:
-        text += f"backbone:\n  name: {os.environ['TRACE_MODEL']}\n  local_files_only: true\n"
-    target = cfg_dir / f"{arm}.yaml"
-    if target.exists() and target.read_text() != text:
-        raise SystemExit(f"{target} differs from this invocation (model path?); use a new TRACE_RUNS")
-    target.write_text(text)
-    cfg, _ = load_v3_config(target)
-    t = cfg.transition
-    if t.fixed_active <= 0 or t.scene_cut_surprise <= 1.0:
-        raise SystemExit(f"{arm}: pilot-003 needs fixed_active > 0 and scene cuts disabled")
-    if cfg.train.target_p_step_tokens != t.gist + 3 * t.fixed_active:
-        raise SystemExit(f"{arm}: target_p_step_tokens must equal gist + 3 x fixed_active")
-    d = cfg.to_dict()
-    d["transition"]["p_step_mode"] = "x"
-    dicts[arm] = d
-if not (dicts["transition"] == dicts["after"] == dicts["b4"]):
-    raise SystemExit("arm configs differ beyond p_step_mode")
-source = hashlib.sha256()
-for p in sorted(Path("src/trace_vl/v3").glob("*.py")):
-    source.update(p.name.encode() + p.read_bytes())
-try:
-    commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
-except Exception:
-    commit = None
-manifest = {"train_sha256": hashlib.sha256((data / "train.jsonl").read_bytes()).hexdigest(),
-            "val_sha256": hashlib.sha256((data / "val.jsonl").read_bytes()).hexdigest(),
-            "source_sha256": source.hexdigest(), "clip_seconds": float(os.environ["TRACE_CLIP_SECONDS"]),
-            "gpus": int(os.environ["TRACE_GPUS"])}
-target = runs / "manifest.json"
-if target.exists():
-    old = json.loads(target.read_text())
-    changed = sorted(k for k in manifest if old.get(k) != manifest[k])
-    if changed:
-        raise SystemExit(f"inputs changed since this pilot started ({changed}); use a new TRACE_RUNS")
-target.write_text(json.dumps({**manifest, "git_commit": commit, "train_questions": len(train),
-                              "val_questions": len(val)}, indent=2) + "\n")
-print(json.dumps({"train_questions": len(train), "val_questions": len(val), "git_commit": commit}, indent=2))
+print(json.dumps(preflight(os.environ["TRACE_DATA_DIR"], os.environ["TRACE_VIDEO_ROOT"], os.environ["TRACE_RUNS"],
+                           Path("configs/v3"), os.environ["TRACE_MODEL"] or None, float(os.environ["TRACE_CLIP_SECONDS"]),
+                           int(os.environ["TRACE_GPUS"]), Path("src/trace_vl/v3")), indent=2))
 PY
 
 log "[1/4] Train arms (identical seed and schedule; ${TRACE_GPUS} GPUs each)"
 for arm in "${arms[@]}"; do
   out="$TRACE_RUNS/train/$arm"
-  if [[ -f "$out/modules.pt" && -f "$out/lora/adapter_config.json" ]] && "${py[@]}" - "$out" <<'PY'
+  if "${py[@]}" - "$out" "$arm" "$TRACE_RUNS/identity.json" <<'PY'
 import json, sys
 from pathlib import Path
-rows = [json.loads(s) for s in (Path(sys.argv[1]) / "metrics.jsonl").read_text().splitlines() if s.strip()]
-sys.exit(0 if rows and rows[-1]["step"] == 100 and len(rows) == 100 else 1)
+from trace_vl.v3.pilot import training_complete
+
+out, arm, identity = Path(sys.argv[1]), sys.argv[2], json.loads(Path(sys.argv[3]).read_text())
+ok, reason = training_complete(out, identity["configs"][arm], identity["configs"][arm]["train"]["steps"])
+if not ok and out.exists():
+    print(f"  {arm}: not complete ({reason})", flush=True)
+sys.exit(0 if ok else 1)
 PY
   then log "  $arm: complete, skipped"; continue; fi
   if [[ -e "$out" ]]; then

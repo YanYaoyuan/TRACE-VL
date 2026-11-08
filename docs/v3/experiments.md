@@ -142,6 +142,8 @@ The owner-completed short-video validation run is recorded in [a100-pilot-001](r
 
 **Why.** In pilot-002 (gate-fix objective, 100 updates), transition scored 85.04%, B4 87.91% and native 88.32%. Transition − B4 = −2.87 pp [−4.55, −1.03]. The learned gate saturated at 8/8 slots (32 tokens per P-step), because the straight-through factor feeds task gradient into activity and the sigmoid is saturated at mass ≈ 4. B4, which has no straight-through path, settled at 20 tokens, so the budgets diverged by 17.8%. Pilot-003 removes budget learning entirely and asks only whether the representation helps.
 
+**Fixed-budget control already run** (owner, separate fixed-20 driver on `7825147`, without the `after` arm; 100 updates, 488 questions / 29 videos). Native 88.32%, transition 85.45%, B4 88.11%; both arms at 46.91 tokens/step. The budget audit matched (gap 0), and all logged P-steps were 20. Transition − B4 = **−2.66 pp [−4.31, −1.02]**. The pilot-002 deficit is therefore not explained by the budget mismatch: at equal budget the trio representation is still worse than grid pools. Pilot-003 keeps the transition/B4 pair as a replication and adds the `after` arm. That arm is now the main open question: are real-token slot pools at least as good as grid pools?
+
 **Design** (`configs/v3/pilot003_*.yaml`, `scripts/run_pilot003.sh`). Same data, splits, seed, schedule and hardware as pilots 001/002: 100 updates, 4×A100, batch 1 per rank, clips ≤ 30 s.
 - `fixed_active: 4`: exactly the top-4 slots by mass on every P-step, in training and inference, with no sampling and no straight-through. Every P-step therefore has gist 8 + 12 = 20 tokens.
 - Scene-cut I-steps are disabled (`scene_cut_surprise: 1.01`), so I-steps follow only the fixed every-8 schedule. This makes tokens per step identical across independently trained arms; the script verifies it (spread ≤ 0.5%).
@@ -169,5 +171,9 @@ The owner-completed short-video validation run is recorded in [a100-pilot-001](r
    | `after` ≈ `b4` | Surprise selection gives no benefit at this budget on 0–30 s multiple choice. Test on transition-sensitive benchmarks (OVO-Bench forward, TOC-Bench) before continuing. |
    | `transition` ≥ `after` ≥ `b4` | Proceed to longer training (3,000 updates) with the fixed budget. |
 4. **Out of scope:** the CST gate (`gate_abs_mean` ≈ 4.5e-4 after 100 updates) is reported, not changed, in this pilot.
+
+**Runner safeguards** (PR #3 review of `cf92794`):
+- An arm counts as trained only through the trainer's atomic `complete.json`. It is written after the final module/LoRA save and pins the step, the resolved config and the artifact hashes; the metric log must hold exactly steps 1..N. Incomplete attempts are moved aside and retrained.
+- The run identity (`identity.json`) holds the fully resolved per-arm configs, the record hashes, the media identity and the source hash. Any change on restart is rejected.
 
 **Limits:** one seed, 100 updates, 0–30 s YouTube multiple choice only. A null result here does not rule out benefits on long or transition-sensitive video.

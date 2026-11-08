@@ -342,6 +342,10 @@ def train(cfg: V3Config, records_path: str | list[str], video_root: str, output:
                 if (step + 1) % tc.save_every == 0 or step + 1 == total_steps:
                     modules.save(output / "modules.pt", {"step": step + 1})
                     bb.peft.save_pretrained(output / "lora")
+                    if step + 1 == total_steps:  # only after both saves returned (pilot completion check)
+                        from .pilot import write_completion
+
+                        write_completion(output, total_steps, cfg.to_dict())
         return output
     finally:
         if world > 1 and dist.is_initialized():
