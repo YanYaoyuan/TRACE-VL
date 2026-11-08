@@ -65,7 +65,10 @@ class TransitionConfig:
     # training samples Bernoulli(p_k) and passes task gradients to p_k straight-through.
     activity_temperature: float = 0.25
     train_sampling: bool = True
-    p_step_mode: str = "transition"  # transition | pooled
+    p_step_mode: str = "transition"  # transition | pooled (B4) | after (slot-pooled real tokens, no before/delta)
+    # >0: exactly the top-`fixed_active` slots by mass on every P-step (no learned gate, no sampling, no
+    # straight-through), so every arm emits gist + 3 x fixed_active tokens per P-step (pilot-003).
+    fixed_active: int = 0
     pooled_match: bool = True  # B4 emits, per P-step, exactly as many tokens as the transition branch would
     pooled_tokens: int = 36  # fixed K per P-step when pooled_match is false (must be 1 <= K <= grid cells)
 
@@ -163,8 +166,13 @@ class V3Config:
         if unknown:
             raise ValueError(f"unknown v3 config sections: {sorted(unknown)}")
         config = cls(**{name: _build(kind, values.get(name)) for name, kind in parts.items()})
-        if config.transition.p_step_mode not in {"transition", "pooled"}:
-            raise ValueError("transition.p_step_mode must be transition or pooled")
+        if config.transition.p_step_mode not in {"transition", "pooled", "after"}:
+            raise ValueError("transition.p_step_mode must be transition, pooled or after")
+        fixed = config.transition.fixed_active
+        if isinstance(fixed, bool) or not isinstance(fixed, int) or not 0 <= fixed <= min(
+            config.transition.max_active, config.transition.slots
+        ):
+            raise ValueError("transition.fixed_active must be an integer in [0, min(max_active, slots)]")
         if config.train.target_tokens_per_step is not None:
             raise ValueError(
                 "train.target_tokens_per_step was replaced by train.target_p_step_tokens (expected tokens per "

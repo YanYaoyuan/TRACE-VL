@@ -183,6 +183,19 @@ Retention features (both paths): age, surprise mass, hits, slot-vs-step; the dri
 forwards have no per-step drift). Labels come from clip-level evidence windows (coarse). No KD
 teacher in Stage 2 (a full-token teacher over 5-10 min streams is too costly); the alert loss is not used yet.
 
+## Pilot-003 on 4 × A100 (identical-budget representation test)
+
+One command: trains the transition, after-only and B4 arms (100 updates each, `torchrun` on all GPUs), evaluates
+native and the three arms with one shard per GPU, verifies coverage, run identity and the fixed budget, and
+writes `summary.json` with paired intervals and the predeclared decision (experiments.md §10). It is resumable.
+
+```bash
+cd /data/yyy/TRACE-VL && git pull --ff-only
+TRACE_DATA_DIR=/nas-data/vlm/yyy/tracevl-data/stage1-30s-001 TRACE_VIDEO_ROOT=/nas-data/vlm/llava/media \
+TRACE_MODEL=/nas-data/vlm/models/qwen3.5_2b TRACE_RUNS=/nas-data/vlm/yyy/tracevl-runs/pilot-003 \
+nohup bash scripts/run_pilot003.sh > pilot-003.log 2>&1 &
+```
+
 ## Transition-sensitive evaluation (added for M2)
 
 ```bash

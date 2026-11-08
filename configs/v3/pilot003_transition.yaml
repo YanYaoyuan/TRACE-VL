@@ -1,0 +1,4 @@
+# Pilot-003 arm: p_step_mode=transition (everything else from pilot003_base.yaml).
+extends: pilot003_base.yaml
+transition:
+  p_step_mode: transition

@@ -137,3 +137,37 @@ non-thinking, option likelihoods), and surveillance false-alarm/miss rates.
 ## 9. Paired 4×A100 pilot: 100 updates per arm
 
 The owner-completed short-video validation run is recorded in [a100-pilot-001](results/a100-pilot-001.md), with the [supplied numerical summary](results/a100-pilot-001-summary.json). It covers 488 questions from 29 videos on the pre-gate-fix `f37d2d3` implementation. Budget matching passes, but transition accuracy is 85.25% versus native 88.32% and B4 85.66%; the paired transition-minus-B4 interval crosses zero. Rank-0 training logs are predominantly gist-only. **M2 remains open.** The report documents the procedure, provenance, memory/timing definitions, and the infeasible inherited P-step target (40 versus a maximum of 32) to address before the new-objective rerun.
+
+## 10. Pilot-003: representation at an identical budget (predeclared before the run)
+
+**Why.** In pilot-002 (gate-fix objective, 100 updates), transition scored 85.04%, B4 87.91% and native 88.32%. Transition − B4 = −2.87 pp [−4.55, −1.03]. The learned gate saturated at 8/8 slots (32 tokens per P-step), because the straight-through factor feeds task gradient into activity and the sigmoid is saturated at mass ≈ 4. B4, which has no straight-through path, settled at 20 tokens, so the budgets diverged by 17.8%. Pilot-003 removes budget learning entirely and asks only whether the representation helps.
+
+**Design** (`configs/v3/pilot003_*.yaml`, `scripts/run_pilot003.sh`). Same data, splits, seed, schedule and hardware as pilots 001/002: 100 updates, 4×A100, batch 1 per rank, clips ≤ 30 s.
+- `fixed_active: 4`: exactly the top-4 slots by mass on every P-step, in training and inference, with no sampling and no straight-through. Every P-step therefore has gist 8 + 12 = 20 tokens.
+- Scene-cut I-steps are disabled (`scene_cut_surprise: 1.01`), so I-steps follow only the fixed every-8 schedule. This makes tokens per step identical across independently trained arms; the script verifies it (spread ≤ 0.5%).
+- Arms differ only in `p_step_mode`:
+
+  | Arm | LM-facing P-step tokens (after the gist) |
+  |---|---|
+  | `transition` | before / after / delta per slot |
+  | `after` | per slot, 3 real-token pools over equal-weight parts of the slot's region |
+  | `b4` | 12 average-pooled grid regions |
+
+  All three share the same slot machinery, CST memory and centroids.
+- Evaluation: native plus the three arms on the same 488 validation questions; paired whole-video bootstrap (4,000 replicates, seed 7).
+
+**Decision rule** (fixed now; no post-hoc arm selection):
+1. **M2 (primary, transition arm only):** transition ≥ B4 + 2 pp and transition ≥ 95% of native. If transition misses this, M2 fails, even if `after` passes.
+2. **Diagnostics.** A difference is called only when the 95% CI excludes 0.
+   - `after` − `b4` tests whether surprise-based slot selection helps over a fixed grid.
+   - `transition` − `after` tests whether the before/delta tokens help over real-token pools.
+3. **Consequences:**
+
+   | Outcome | Next step |
+   |---|---|
+   | `after` > `b4` and `transition` < `after` | Redesign the transition tokens around real-token pools (e.g. after-pools plus a learned difference channel kept inside the LM's visual distribution). |
+   | `after` ≈ `b4` | Surprise selection gives no benefit at this budget on 0–30 s multiple choice. Test on transition-sensitive benchmarks (OVO-Bench forward, TOC-Bench) before continuing. |
+   | `transition` ≥ `after` ≥ `b4` | Proceed to longer training (3,000 updates) with the fixed budget. |
+4. **Out of scope:** the CST gate (`gate_abs_mean` ≈ 4.5e-4 after 100 updates) is reported, not changed, in this pilot.
+
+**Limits:** one seed, 100 updates, 0–30 s YouTube multiple choice only. A null result here does not rule out benefits on long or transition-sensitive video.

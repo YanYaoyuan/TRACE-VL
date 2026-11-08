@@ -55,6 +55,27 @@ def exact_pool(x: Tensor, h: int, w: int, k: int) -> tuple[Tensor, Tensor, Tenso
     return pooled, torch.tensor(rows, device=x.device), torch.tensor(cols, device=x.device)
 
 
+def slot_part_pools(a: Tensor, x: Tensor, rows: Tensor, cols: Tensor, parts: int = 3):
+    """Split one slot's token weights `a` [N] into `parts` groups of about equal weight (heaviest tokens first)
+    and pool the real tokens of each group: `parts` convex combinations of real ViT tokens (in-distribution for
+    the LM) instead of synthetic before/delta tokens. A group left empty by a dominant token falls back to the
+    next-ranked single token. Returns (tokens [parts, D], rows [parts], cols [parts])."""
+    order = a.argsort(descending=True)
+    w = a[order]
+    before = (w.cumsum(0) - w) / w.sum().clamp_min(1e-6)  # weight ranked above each token
+    part = (before * parts).floor().clamp(max=parts - 1).long()
+    toks, rs, cs = [], [], []
+    for j in range(parts):
+        idx = order[part == j]
+        if idx.numel() == 0:
+            idx = order[min(j, order.numel() - 1)].reshape(1)
+        ww = a[idx] / a[idx].sum().clamp_min(1e-6)
+        toks.append(ww @ x[idx])
+        rs.append((ww @ rows[idx].to(ww.dtype)).round())
+        cs.append((ww @ cols[idx].to(ww.dtype)).round())
+    return torch.stack(toks), torch.stack(rs), torch.stack(cs)
+
+
 def match_norm(tokens: Tensor, ref_norm: Tensor, floor: float = 1e-3) -> Tensor:
     """Rescale tokens to the reference norm (scale detached), so synthesized tokens stay in the LM's range."""
     norms = tokens.norm(dim=-1, keepdim=True)
@@ -280,7 +301,7 @@ class TransitionEncoder(nn.Module):
         share = weighted / weighted.sum(0, keepdim=True).clamp_min(1e-6)  # per-slot token weights [N, S]
         aux["surprise_mean"] = surprise.mean()
         aux["masses"] = masses
-        is_i = force_i or cache.steps_since_i + 1 >= cfg.i_step_every or float(surprise.mean()) > cfg.scene_cut_surprise
+        is_i = force_i or cache.steps_since_i + 1 >= cfg.i_step_every or float(surprise.detach().mean()) > cfg.scene_cut_surprise
         cache.history = (cache.history + [x])[-(cfg.before_lag + 1) :]
         cache.prev_z = z
         if is_i:
@@ -302,23 +323,32 @@ class TransitionEncoder(nn.Module):
         # below it (PR #3 A100 pilot); p_k keeps a learning signal for the budget and the task losses.
         p_active = torch.sigmoid((masses - cfg.mass_threshold) / cfg.activity_temperature)
         order = masses.argsort(descending=True)[: cfg.max_active]
-        if self.training and cfg.train_sampling:
+        fixed = cfg.fixed_active > 0
+        if fixed:  # fixed budget: top-k by mass, identical in training and inference, no gate to learn
+            active = [int(k) for k in order[: cfg.fixed_active]]
+        elif self.training and cfg.train_sampling:
             chosen = torch.bernoulli(p_active.detach())  # exploration: inactive-looking slots still get emitted
             active = [int(k) for k in order if chosen[k] > 0]
         else:
             active = [int(k) for k in order if float(p_active[k]) >= 0.5]  # == mass >= mass_threshold
         aux["activity_prob"] = p_active
-        aux["expected_tokens"] = cfg.gist + 3 * p_active[order].sum()  # differentiable P-step budget
+        if fixed:  # constant: the budget loss is zero at target gist + 3 x fixed_active and has no gradient
+            aux["expected_tokens"] = torch.tensor(float(cfg.gist + 3 * len(active)), device=x.device)
+        else:
+            aux["expected_tokens"] = cfg.gist + 3 * p_active[order].sum()  # differentiable P-step budget
         before_src = cache.history[0] if len(cache.history) > 1 else x
-        trans_tokens, centroids = [], []
+        trans_tokens, centroids, part_tokens = [], [], []
         for k in active:
             a = share[:, k]
             after = a @ x
             before = a @ before_src
             delta = after + self.delta(after - before)
             trio = match_norm(torch.stack([before, after, delta]) + self.type_embed, ref_norm)
-            if self.training:
+            if self.training and not fixed:
                 trio = trio * (1 + p_active[k] - p_active[k].detach())  # straight-through: value unchanged
+            if cfg.p_step_mode == "after":
+                pools, pr, pc = slot_part_pools(a, x, rows, cols)
+                part_tokens.append((match_norm(pools + self.type_embed[1], ref_norm), pr, pc))
             trans_tokens.append(trio)
             r, c = (a @ rows.to(a.dtype)).round(), (a @ cols.to(a.dtype)).round()
             centroids.append((float(r), float(c)))
@@ -338,6 +368,17 @@ class TransitionEncoder(nn.Module):
         )
         n_transition = sum(t.shape[0] for t in tokens)
         aux["transition_tokens"] = n_transition
+        if cfg.p_step_mode == "after":
+            # After-only arm: same slots, same CST memory (from the trios above), same count (3 per slot), but
+            # the LM sees real-token pools of each slot's region instead of before/after/delta.
+            toks = [gist] + [t for t, _, _ in part_tokens]
+            a_rows = [g_rows] + [r for _, r, _ in part_tokens]
+            a_cols = [g_cols] + [c for _, _, c in part_tokens]
+            a_kinds = ["gist"] * gist.shape[0] + ["after"] * (3 * len(part_tokens))
+            a_groups = [-1] * gist.shape[0] + [g for g in groups[gist.shape[0] :]]
+            return StepTokens(torch.cat(toks), torch.cat([r.reshape(-1) for r in a_rows]).long(),
+                              torch.cat([c.reshape(-1) for c in a_cols]).long(), a_kinds, a_groups, False,
+                              surprise, masses, aux)  # fmt: skip
         if cfg.p_step_mode == "pooled":
             # B4: identical slot machinery (CST memory and clock inputs above are unchanged); only the
             # LM-facing P-step representation is replaced, by exactly K average-pooled frame regions.
