@@ -436,6 +436,14 @@ def _v3_parser(commands):
     c = sub.add_parser("score-alerts")
     c.add_argument("predictions")
     c.add_argument("--output")
+    c = sub.add_parser("audit-data", help="read-only inventory/audit of manifests, LLaVA subsets and datasets")
+    c.add_argument("--data-dir", required=True, help="current Stage 1 manifest directory (train/val.jsonl)")
+    c.add_argument("--llava-root", required=True)
+    c.add_argument("--media-root", required=True, help="extracted LLaVA media root used by the manifests")
+    c.add_argument("--data-root", required=True, help="directory holding the other datasets")
+    c.add_argument("--report-dir", required=True)
+    c.add_argument("--probe-limit", type=int, default=2000, help="videos probed for duration per group")
+    c.add_argument("--max-files", type=int, default=500000, help="file-walk bound per directory")
     c = sub.add_parser("diagnose-pilot", help="pilot run diagnostics: provenance, agreement, curves, weights, probe")
     c.add_argument("--runs", required=True, help="run directory of scripts/run_pilot003.sh")
     c.add_argument("--data-dir", required=True)
@@ -504,6 +512,14 @@ def _v3(args):
         from .v3.anomaly import score_alerts
 
         return show(score_alerts(args.predictions, args.output))
+    if args.action == "audit-data":
+        from .v3.audit import digest, run_audit
+
+        report = run_audit(Path(args.data_dir), Path(args.llava_root), Path(args.media_root), Path(args.data_root),
+                           Path(args.report_dir), args.probe_limit, args.max_files)  # fmt: skip
+        text = digest(report)
+        (Path(args.report_dir) / "audit-digest.txt").write_text(text)
+        return print(text)
     if args.action == "diagnose-pilot":
         from .v3 import diagnose
 
