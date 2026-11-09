@@ -456,6 +456,7 @@ def _v3_parser(commands):
     c.add_argument("--device", default="cuda")
     c.add_argument("--extra-file", action="append", default=[],
                    help="file outside the run directory to include (e.g. the operator log); repeatable")
+    c.add_argument("--output", help="write the upload report (JSON) to this file")
     c = sub.add_parser("wandb-sync", help="sync offline wandb runs collected under a directory")
     c.add_argument("--runs", required=True)
     c.add_argument("--dry-run", action="store_true")
@@ -539,7 +540,10 @@ def _v3(args):
     if args.action == "wandb-upload":
         from .v3.wandb_upload import upload_run
 
-        return show(upload_run(args.runs, args.demos, args.data_dir, args.video_root, args.device, args.extra_file))
+        report = upload_run(args.runs, args.demos, args.data_dir, args.video_root, args.device, args.extra_file)
+        if args.output:
+            Path(args.output).write_text(json.dumps(report, indent=2) + "\n")
+        return show(report)
     if args.action == "wandb-sync":
         from .v3.tracking import sync_offline
 
