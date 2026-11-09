@@ -356,12 +356,13 @@ def train_stage2(cfg: V3Config, streams_path: str, video_root: str, output: str,
                 if (step + 1) % tc.save_every == 0 or step + 1 == total_steps:
                     modules.save(output / "modules.pt", {"step": step + 1, "stage": 2})
                     bb.peft.save_pretrained(output / "lora")
-        tracker.upload(f"{output.parent.name}-{output.name}-logs", "training-logs", [output / "metrics.jsonl", output / "run.json"])
+        tracker.upload(f"{output.parent.name}-{output.name}-logs", "training-logs",
+                       [output / "metrics.jsonl", output / "run.json"], base=output)  # fmt: skip
         return output
     finally:
-        tracker.finish()
         if world > 1 and dist.is_initialized():
             dist.destroy_process_group()
+        tracker.finish()  # after the process group: a slow network at shutdown cannot stall other ranks
 
 
 # ---------------------------------------------------------------------------- held-out long-stream evaluation

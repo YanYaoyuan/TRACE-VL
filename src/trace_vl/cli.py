@@ -454,6 +454,11 @@ def _v3_parser(commands):
     c.add_argument("--data-dir")
     c.add_argument("--video-root")
     c.add_argument("--device", default="cuda")
+    c.add_argument("--extra-file", action="append", default=[],
+                   help="file outside the run directory to include (e.g. the operator log); repeatable")
+    c = sub.add_parser("wandb-sync", help="sync offline wandb runs collected under a directory")
+    c.add_argument("--runs", required=True)
+    c.add_argument("--dry-run", action="store_true")
     c = sub.add_parser("audit-data", help="read-only inventory/audit of manifests, LLaVA subsets and datasets")
     c.add_argument("--data-dir", required=True, help="current Stage 1 manifest directory (train/val.jsonl)")
     c.add_argument("--llava-root", required=True)
@@ -534,7 +539,11 @@ def _v3(args):
     if args.action == "wandb-upload":
         from .v3.wandb_upload import upload_run
 
-        return show(upload_run(args.runs, args.demos, args.data_dir, args.video_root, args.device))
+        return show(upload_run(args.runs, args.demos, args.data_dir, args.video_root, args.device, args.extra_file))
+    if args.action == "wandb-sync":
+        from .v3.tracking import sync_offline
+
+        return show(sync_offline(args.runs, args.dry_run))
     if args.action == "demo":
         from .v3.config import load_v3_config as _load_demo
         from .v3.demo import log_demos, make_demos

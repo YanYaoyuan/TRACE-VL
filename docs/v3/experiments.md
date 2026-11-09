@@ -294,7 +294,7 @@ Selector diagnostics (rank-0 training samples; a fixed held-out probe is pending
   - after: entropy 0.91, minimum 0.82, part-pool entropy 0.68, rank 2.47.
 - **Measurement fix:** the training-time B4 rank (12.9) was measured before norm matching. This is fixed in `bfd5490`, and `scripts/launch_probe_pilot004_a100.sh` re-measures every arm on identical held-out clips.
 
-### 12. Pilot-005 (PROPOSED, not approved): replace the non-functional learned gist with grid pools
+### 12. Pilot-005 (APPROVED 2026-11-09, all three arms; launch after the held-out probe and local verification): replace the non-functional learned gist with grid pools
 
 **Rule applied (data_plan §4, row C).** The slot arms lose, and a selector issue is demonstrated (the gist above). One change addresses it.
 

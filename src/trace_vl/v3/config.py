@@ -69,6 +69,7 @@ class TransitionConfig:
     # >0: exactly the top-`fixed_active` slots by mass on every P-step (no learned gate, no sampling, no
     # straight-through), so every arm emits gist + 3 x fixed_active tokens per P-step (pilot-003).
     fixed_active: int = 0
+    gist_mode: str = "learned"  # learned (query attention) | grid (G exact grid-region pools; pilot-005)
     emit_slots: bool = True  # False: P-steps send the gist only (eval-time ablation of the slot tokens)
     pooled_match: bool = True  # B4 emits, per P-step, exactly as many tokens as the transition branch would
     pooled_tokens: int = 36  # fixed K per P-step when pooled_match is false (must be 1 <= K <= grid cells)
@@ -173,6 +174,8 @@ class V3Config:
         config = cls(**{name: _build(kind, values.get(name)) for name, kind in parts.items()})
         if config.transition.p_step_mode not in {"transition", "pooled", "after"}:
             raise ValueError("transition.p_step_mode must be transition, pooled or after")
+        if config.transition.gist_mode not in {"learned", "grid"}:
+            raise ValueError("transition.gist_mode must be learned or grid")
         fixed = config.transition.fixed_active
         if isinstance(fixed, bool) or not isinstance(fixed, int) or not 0 <= fixed <= min(
             config.transition.max_active, config.transition.slots

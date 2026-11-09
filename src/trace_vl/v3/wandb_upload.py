@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .tracking import Tracker
+from .tracking import Tracker, offline_runs
 
 
 def _rows(path: Path) -> list[dict]:
@@ -48,33 +48,43 @@ def accuracy_and_pairs(summary: dict) -> tuple[list[list], list[list]]:
     return acc_rows, pair_rows
 
 
+def _start(name: str, group: str, job_type: str, config: dict, runs: Path) -> Tracker:
+    tracker = Tracker.start(True, name=name, group=group, job_type=job_type, config=config, directory=runs / "wandb")
+    if not tracker.active:
+        raise RuntimeError("could not start a wandb run (see the warning above: wandb missing, or init failed); "
+                           "nothing was uploaded and the run directory is unchanged")
+    return tracker
+
+
 def upload_run(runs: str | Path, demos: int = 0, data_dir: str | None = None, video_root: str | None = None,
-               device: str = "cuda") -> dict:  # fmt: skip
+               device: str = "cuda", extra_files: list[str] | None = None) -> dict:  # fmt: skip
+    """`extra_files` (e.g. the operator log outside the run directory) are stored as operator/<file name>."""
     runs = Path(runs)
     group = runs.name
     identity = json.loads((runs / "identity.json").read_text()) if (runs / "identity.json").is_file() else {}
-    report = {"group": group, "train_runs": [], "eval_run": None}
+    report = {"group": group, "train_runs": [], "eval_run": None, "artifacts": {}, "errors": []}
     for arm_dir in sorted(d for d in (runs / "train").glob("*") if d.is_dir() and ".incomplete-" not in d.name):
         rows = _rows(arm_dir / "metrics.jsonl")
         if not rows:
             continue
-        tracker = Tracker.start(True, name=f"{group}-train-{arm_dir.name}", group=group, job_type="train",
-                                config={"config": identity.get("configs", {}).get(arm_dir.name), "arm": arm_dir.name,
-                                        "source": "replayed from metrics.jsonl"}, directory=runs / "wandb")  # fmt: skip
-        if not tracker.active:
-            raise RuntimeError("wandb is not installed in this environment (uv sync --extra track)")
+        tracker = _start(f"{group}-train-{arm_dir.name}", group, "train",
+                         {"config": identity.get("configs", {}).get(arm_dir.name), "arm": arm_dir.name,
+                          "source": "replayed from metrics.jsonl"}, runs)  # fmt: skip
+        report["mode"] = tracker.mode
         for row in rows:
             tracker.log(row, step=int(row["step"]))
         tracker.summary({"updates": len(rows), **{f"final/{k}": v for k, v in rows[-1].items()
                                                   if isinstance(v, (int, float)) and not isinstance(v, bool)}})
-        tracker.upload(f"{group}-{arm_dir.name}-training-logs", "training-logs",
-                       [arm_dir / "metrics.jsonl", arm_dir / "run.json", arm_dir / "complete.json"])  # fmt: skip
+        artifact = tracker.upload(f"{group}-{arm_dir.name}-training-logs", "training-logs",
+                                  [arm_dir / "metrics.jsonl", arm_dir / "run.json", arm_dir / "complete.json"], base=runs)
+        report["artifacts"][f"train-{arm_dir.name}"] = sorted(artifact.manifest.entries) if artifact else None
+        if tracker.error:
+            report["errors"].append(tracker.error)
         tracker.finish()
         report["train_runs"].append(arm_dir.name)
 
-    tracker = Tracker.start(True, name=f"{group}-eval", group=group, job_type="eval",
-                            config={"identity": {k: v for k, v in identity.items() if k != "configs"}},
-                            directory=runs / "wandb")  # fmt: skip
+    tracker = _start(f"{group}-eval", group, "eval", {"identity": {k: v for k, v in identity.items() if k != "configs"}},
+                     runs)  # fmt: skip
     summary = json.loads((runs / "summary.json").read_text()) if (runs / "summary.json").is_file() else {}
     flat: dict = {}
     _flatten("", {k: v for k, v in summary.items() if k != "note"}, flat)
@@ -106,9 +116,22 @@ def upload_run(runs: str | Path, demos: int = 0, data_dir: str | None = None, vi
             log_demos(tracker, rows, arm)
     files = [runs / name for name in ("identity.json", "summary.json", "selector-diagnostics.json", "diagnostics.json",
                                       "manifest.json")]  # fmt: skip
-    files += sorted(runs.glob("*-digest.txt")) + sorted(runs.glob("*.log")) + sorted(runs.glob("eval/**/score.json"))
+    files += sorted(runs.glob("*-digest.txt")) + sorted(runs.glob("*.log")) + sorted(runs.glob("probe-*.json"))
+    files += sorted(runs.glob("eval/**/score.json")) + sorted(runs.glob("eval/**/run.json"))
+    files += sorted(runs.glob("eval/**/errors.*.json")) + sorted(runs.glob("configs/*.yaml"))
     files += [runs / "demos"] if (runs / "demos").is_dir() else []
-    tracker.upload(f"{group}-reports", "eval-reports", files)
-    report["eval_run"] = tracker.run.url if tracker.active and getattr(tracker.run, "url", None) else None
+    names = {}
+    for extra in extra_files or []:  # outside the run directory: stored under operator/
+        if not Path(extra).is_file():
+            report["errors"].append(f"extra file not found: {extra}")
+            continue
+        files.append(Path(extra))
+        names[str(Path(extra))] = f"operator/{Path(extra).name}"
+    artifact = tracker.upload(f"{group}-reports", "eval-reports", files, base=runs, names=names)
+    report["artifacts"]["reports"] = sorted(artifact.manifest.entries) if artifact else None
+    report["eval_run"] = getattr(tracker.run, "url", None) if tracker.active else None
+    if tracker.error:
+        report["errors"].append(tracker.error)
     tracker.finish()
+    report["offline_runs"] = [str(p) for p in offline_runs(runs / "wandb")]
     return report

@@ -377,12 +377,12 @@ def train(cfg: V3Config, records_path: str | list[str], video_root: str, output:
                         write_completion(output, total_steps, cfg.to_dict())
         tracker.summary({"completed_updates": total_steps})
         tracker.upload(f"{output.parent.name}-{output.name}-logs", "training-logs",
-                       [output / "metrics.jsonl", output / "run.json", output / "complete.json"])  # fmt: skip
+                       [output / "metrics.jsonl", output / "run.json", output / "complete.json"], base=output)  # fmt: skip
         return output
     finally:
-        tracker.finish()
         if world > 1 and dist.is_initialized():
             dist.destroy_process_group()
+        tracker.finish()  # after the process group: a slow network at shutdown cannot stall other ranks
 
 
 def selector_params(modules: TraceV3Modules) -> dict:

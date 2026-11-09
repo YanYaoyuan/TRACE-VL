@@ -8,7 +8,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.9.21"
-      - run: uv sync --locked --extra dev --extra hf  # transformers: Stage 2 cache/gradient tests (tiny random Qwen3.5)
-      - run: uv run --locked --extra dev --extra hf pytest -q
+      - run: uv sync --locked --extra dev --extra hf --extra track  # transformers: Stage 2 cache tests; wandb: offline SDK tests
+      - run: uv run --locked --extra dev --extra hf --extra track pytest -q
       - run: uv run --locked ruff check src tests scripts
       - run: bash scripts/smoke.sh

@@ -283,4 +283,12 @@ Checkpoints are not uploaded; their hashes are in the uploaded `complete.json`.
 ```bash
 TRACE_RUNS=/nas-data/vlm/yyy/tracevl-runs/pilot004-a3f8c29-001 bash scripts/launch_wandb_upload_a100.sh
 ```
+**Failure handling.** Tracking is optional and can never stop training:
+- Every wandb call is guarded. The first failure prints one warning and switches tracking off for that run; local `metrics.jsonl` and reports are written as always.
+- If an online init fails or exceeds `TRACE_WANDB_INIT_TIMEOUT` (default 60 s), the run collects **offline** in its directory instead.
+- Only rank 0 tracks, and it finishes the wandb run after the DDP process group is destroyed, so a slow network cannot hold other ranks.
+- Sync offline data later from a machine with access: `trace-vl v3 wandb-sync --runs <dir>` (wraps `wandb sync` for every `offline-run-*`).
+
+Artifacts keep paths relative to the run directory (e.g. `eval/b4/step-01000/score.json`). Files outside it (the operator log) are stored as `operator/<name>` via `--extra-file`.
+
 Demos for a single checkpoint: `trace-vl v3 demo --config ... --checkpoint ... --adapter ... --records val.jsonl --video-root ... --output demos/x --wandb`.

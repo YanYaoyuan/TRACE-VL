@@ -116,3 +116,38 @@ def test_emitted_statistics_are_measured_on_the_tokens_actually_sent(mode):
     stats = token_stats(info.tokens)
     assert info.aux["diag_emitted_rank"] == pytest.approx(stats["effective_rank"], rel=1e-5)
     assert info.aux["diag_emitted_cos"] == pytest.approx(stats["cos_mean"], abs=1e-6)
+
+
+def test_grid_gist_is_spatial_and_leaves_b4_unchanged():
+    def run_gist(mode, gist_mode):
+        cfg = small(mode)
+        cfg.transition.gist_mode = gist_mode
+        torch.manual_seed(5)
+        modules = TraceV3Modules(cfg, model_dim=16).eval()
+        modules.transition.diagnostics = True
+        cst, te = CSTCache(), TECache()
+        torch.manual_seed(6)
+        for step in range(3):
+            adapted, z = modules.cst(torch.rand(12, 16) + 0.5, (3, 4), float(step), cst)
+            info = modules.transition(adapted, z, (3, 4), te)
+        return info
+
+    for mode in ("transition", "after"):
+        grid = run_gist(mode, "grid")
+        assert grid.aux["diag_gist_entropy_min"] < 0.8  # each gist token pools one grid region, not the frame
+        assert "diag_gist_logit_std" not in grid.aux and grid.tokens.shape[0] == 2 + 3 * 2
+        assert grid.kinds[:2] == ["gist", "gist"]
+        assert len(set(zip(grid.rows[:2].tolist(), grid.cols[:2].tolist()))) == 2  # two distinct region centres
+    learned, gridded = run_gist("pooled", "learned"), run_gist("pooled", "grid")
+    assert torch.equal(learned.tokens, gridded.tokens)  # B4 emits no gist: the flag cannot change its tokens
+
+
+def test_pilot005_changes_only_the_gist_relative_to_pilot004():
+    for arm in ("transition", "after", "b4"):
+        old, _ = load_v3_config(f"configs/v3/pilot004_{arm}.yaml")
+        new, _ = load_v3_config(f"configs/v3/pilot005_{arm}.yaml")
+        a, b = old.to_dict(), new.to_dict()
+        assert a["transition"].pop("gist_mode") == "learned" and b["transition"].pop("gist_mode") == "grid"
+        assert a == b, arm
+    with pytest.raises(ValueError, match="gist_mode"):
+        V3Config.from_dict({"transition": {"gist_mode": "random"}})

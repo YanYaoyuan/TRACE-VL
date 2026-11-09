@@ -21,19 +21,22 @@ class FakeRun:
     def log_artifact(self, artifact):
         self.artifacts.append(artifact)
 
-    def finish(self):
+    def finish(self, **kwargs):
         self.finished = True
 
 
 class FakeArtifact:
     def __init__(self, name, type, metadata=None):
         self.name, self.type, self.files = name, type, []
+        self.manifest = types.SimpleNamespace(entries={})
 
     def add_file(self, path, name=None):
         self.files.append(name)
+        self.manifest.entries[name] = path
 
     def add_dir(self, path, name=None):
         self.files.append(name + "/")
+        self.manifest.entries[name + "/"] = path
 
 
 class FakeTable:
@@ -49,7 +52,7 @@ def fake_wandb(monkeypatch):
     runs = []
     module = types.SimpleNamespace(
         init=lambda **kw: runs.append(FakeRun(**kw)) or runs[-1], Artifact=FakeArtifact, Table=FakeTable,
-        Video=lambda path: ("video", path), Image=lambda path: ("image", path))  # fmt: skip
+        Video=lambda path: ("video", path), Image=lambda path: ("image", path), Settings=lambda **kw: kw)  # fmt: skip
     monkeypatch.setitem(sys.modules, "wandb", module)
     return runs
 

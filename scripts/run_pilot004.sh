@@ -5,12 +5,14 @@
 # One command, resumable (completed arms and evaluations are skipped; inputs are checked on every start):
 #   TRACE_DATA_DIR=... TRACE_VIDEO_ROOT=... TRACE_MODEL=... TRACE_RUNS=<NEW dir> bash scripts/run_pilot004.sh
 # Optional: TRACE_GPUS=4 TRACE_CLIP_SECONDS=30 TRACE_UV_BIN=uv. Decision rule: docs/v3/experiments.md section 11.
+# TRACE_PILOT_PREFIX=pilot005 runs pilot-005 (configs/v3/pilot005_*.yaml; same schedule and evaluation).
 set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 : "${TRACE_DATA_DIR:?Set TRACE_DATA_DIR (train.jsonl and val.jsonl)}"
 : "${TRACE_VIDEO_ROOT:?Set TRACE_VIDEO_ROOT (base of the manifest video paths)}"
 : "${TRACE_RUNS:?Set TRACE_RUNS (a NEW directory for this pilot)}"
+export TRACE_PILOT_PREFIX="${TRACE_PILOT_PREFIX:-pilot004}"
 export TRACE_GPUS="${TRACE_GPUS:-4}" TRACE_CLIP_SECONDS="${TRACE_CLIP_SECONDS:-30}" TRACE_MODEL="${TRACE_MODEL:-}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}" MKL_NUM_THREADS="${MKL_NUM_THREADS:-4}"
 uv_bin="${TRACE_UV_BIN:-uv}"
@@ -31,7 +33,7 @@ from trace_vl.v3.pilot import preflight
 
 report = preflight(os.environ["TRACE_DATA_DIR"], os.environ["TRACE_VIDEO_ROOT"], os.environ["TRACE_RUNS"], Path("configs/v3"),
                    os.environ["TRACE_MODEL"] or None, float(os.environ["TRACE_CLIP_SECONDS"]), int(os.environ["TRACE_GPUS"]),
-                   Path("src/trace_vl/v3"), prefix="pilot004")
+                   Path("src/trace_vl/v3"), prefix=os.environ["TRACE_PILOT_PREFIX"])
 identity = json.loads(Path(report["identity"]).read_text())
 for arm, cfg in identity["configs"].items():
     t = cfg["train"]

@@ -366,11 +366,20 @@ class TransitionEncoder(nn.Module):
         cache.steps_since_i += 1
 
         # Gist: G learned queries pool the step (convex combinations of real tokens).
-        gist_attn = (self.gist_queries @ self.gist_key(z + pos).t() / math.sqrt(z.shape[-1])).softmax(-1)  # [G, N]
         ref_norm = x.detach().norm(dim=-1).mean()
-        gist = match_norm(gist_attn @ x, ref_norm)
-        g_rows = (gist_attn @ rows.to(gist.dtype)).round()
-        g_cols = (gist_attn @ cols.to(gist.dtype)).round()
+        if cfg.gist_mode == "grid":
+            # Pilot-005: the learned gist stayed uniform (pilot-004); G exact grid-region pools replace it, built
+            # like B4's tokens. The learned gist parameters are unused (no gradient) in this mode.
+            pw, pr, pc = pool_weights(h, w, cfg.gist, x.device)
+            gist_attn = pw.to(x.dtype)
+            gist = match_norm(gist_attn @ x, ref_norm)
+            g_rows = torch.tensor(pr, device=x.device, dtype=gist.dtype)
+            g_cols = torch.tensor(pc, device=x.device, dtype=gist.dtype)
+        else:
+            gist_attn = (self.gist_queries @ self.gist_key(z + pos).t() / math.sqrt(z.shape[-1])).softmax(-1)  # [G, N]
+            gist = match_norm(gist_attn @ x, ref_norm)
+            g_rows = (gist_attn @ rows.to(gist.dtype)).round()
+            g_cols = (gist_attn @ cols.to(gist.dtype)).round()
         tokens, kinds, groups = [gist], ["gist"] * gist.shape[0], [-1] * gist.shape[0]
         t_rows, t_cols = [g_rows], [g_cols]
 
@@ -431,17 +440,18 @@ class TransitionEncoder(nn.Module):
         # the learned gist pools are (normalized entropy, 1 = uniform over the grid).
         if self.diagnostics:
             with torch.no_grad():
-                logits = self.gist_queries @ self.gist_key(z + pos).t() / math.sqrt(z.shape[-1])
                 ge = row_entropy(gist_attn)
                 aux["diag_gist_entropy_min"] = float(ge.min())
-                aux["diag_gist_logit_std"] = float(logits.float().std(-1).mean())  # spread across positions
+                if cfg.gist_mode != "grid":
+                    logits = self.gist_queries @ self.gist_key(z + pos).t() / math.sqrt(z.shape[-1])
+                    aux["diag_gist_logit_std"] = float(logits.float().std(-1).mean())  # spread across positions
                 aux["diag_gist_token_cos"] = token_stats(gist)["cos_mean"]
                 if active:
                     se = row_entropy(share[:, active].t())
                     aux["diag_slot_entropy_mean"], aux["diag_slot_entropy_min"] = float(se.mean()), float(se.min())
                     aux["diag_slot_attn_spread"] = float(attn[:, active].float().std(0).mean())
                 if part_tokens:
-                    pe = row_entropy(torch.cat(slot_weights))
+                    pe = row_entropy(torch.cat([sw.float() for sw in slot_weights]))
                     aux["diag_part_entropy_mean"], aux["diag_part_entropy_min"] = float(pe.mean()), float(pe.min())
                 if trans_tokens:
                     aux["diag_slot_token_cos"] = token_stats(torch.cat([t for t, _, _ in part_tokens] if part_tokens
@@ -449,7 +459,7 @@ class TransitionEncoder(nn.Module):
         with torch.no_grad():
             g = gist_attn.detach().float()
             aux["gist_entropy"] = float((-(g * g.clamp_min(1e-12).log()).sum(-1) / math.log(n)).mean()) if n > 1 else 1.0
-            aux["slot_coverage"] = effective_coverage(torch.cat(slot_weights)) if slot_weights else None
+            aux["slot_coverage"] = effective_coverage(torch.cat([sw.float() for sw in slot_weights])) if slot_weights else None
         if not cfg.emit_slots and cfg.p_step_mode in {"transition", "after"}:
             # Eval-time ablation: the trained LM sees the gist only (does it use the 12 slot tokens at all?).
             aux["coverage"] = effective_coverage(gist_attn)
@@ -457,7 +467,7 @@ class TransitionEncoder(nn.Module):
             return StepTokens(gist, g_rows.long(), g_cols.long(), ["gist"] * gist.shape[0], [-1] * gist.shape[0],
                               False, surprise, masses, aux)  # fmt: skip
         if cfg.p_step_mode == "after":
-            aux["coverage"] = effective_coverage(torch.cat([gist_attn] + slot_weights))
+            aux["coverage"] = effective_coverage(torch.cat([gist_attn.float()] + [sw.float() for sw in slot_weights]))
             # After-only arm: same slots, same CST memory (from the trios above), same count (3 per slot), but
             # the LM sees real-token pools of each slot's region instead of before/after/delta.
             toks = [gist] + [t for t, _, _ in part_tokens]
@@ -465,7 +475,7 @@ class TransitionEncoder(nn.Module):
             a_cols = [g_cols] + [c for _, _, c in part_tokens]
             a_kinds = ["gist"] * gist.shape[0] + ["after"] * (3 * len(part_tokens))
             a_groups = [-1] * gist.shape[0] + [g for g in groups[gist.shape[0] :]]
-            self._emitted_stats(aux, torch.cat(toks), torch.cat([gist_attn] + slot_weights))
+            self._emitted_stats(aux, torch.cat(toks), torch.cat([gist_attn.float()] + [sw.float() for sw in slot_weights]))
             return StepTokens(torch.cat(toks), torch.cat([r.reshape(-1) for r in a_rows]).long(),
                               torch.cat([c.reshape(-1) for c in a_cols]).long(), a_kinds, a_groups, False,
                               surprise, masses, aux)  # fmt: skip
@@ -480,8 +490,8 @@ class TransitionEncoder(nn.Module):
             # per-token rescaling, so B4's rank had been measured on different-scale tokens).
             self._emitted_stats(aux, pooled, pool_weights(h, w, k, x.device)[0])
             return StepTokens(pooled, p_rows, p_cols, ["gist"] * k, [-1] * k, False, surprise, masses, aux)
-        aux["coverage"] = effective_coverage(torch.cat([gist_attn] + slot_weights))
-        self._emitted_stats(aux, torch.cat(tokens), torch.cat([gist_attn] + slot_weights))
+        aux["coverage"] = effective_coverage(torch.cat([gist_attn.float()] + [sw.float() for sw in slot_weights]))
+        self._emitted_stats(aux, torch.cat(tokens), torch.cat([gist_attn.float()] + [sw.float() for sw in slot_weights]))
         return StepTokens(
             torch.cat(tokens),
             torch.cat([r.reshape(-1) for r in t_rows]).long(),
