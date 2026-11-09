@@ -106,3 +106,13 @@ def test_completion_requires_and_pins_intermediate_checkpoints(tmp_path):
     assert "checkpoints/step-00001/modules.pt" in record["artifacts"]
     (out / "checkpoints" / "step-00001" / "modules.pt").write_bytes(b"changed")
     assert not training_complete(out, config, 3)[0]
+
+
+@pytest.mark.parametrize("mode", ["transition", "after", "pooled"])
+def test_emitted_statistics_are_measured_on_the_tokens_actually_sent(mode):
+    """Pilot-004 review: B4's effective rank was computed before norm matching; every arm must be measured on
+    the emitted (norm-matched) tokens."""
+    info = run(mode, True)
+    stats = token_stats(info.tokens)
+    assert info.aux["diag_emitted_rank"] == pytest.approx(stats["effective_rank"], rel=1e-5)
+    assert info.aux["diag_emitted_cos"] == pytest.approx(stats["cos_mean"], abs=1e-6)

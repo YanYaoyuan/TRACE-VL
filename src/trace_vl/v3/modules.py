@@ -475,8 +475,10 @@ class TransitionEncoder(nn.Module):
             k = n_transition if cfg.pooled_match else cfg.pooled_tokens
             pooled, p_rows, p_cols = exact_pool(x, h, w, k)
             aux["coverage"] = effective_coverage(pool_weights(h, w, k, x.device)[0])
-            self._emitted_stats(aux, pooled, pool_weights(h, w, k, x.device)[0])
             pooled = match_norm(pooled, ref_norm)
+            # After norm matching, as for the slot arms (pilot-004 review: effective rank is not invariant to
+            # per-token rescaling, so B4's rank had been measured on different-scale tokens).
+            self._emitted_stats(aux, pooled, pool_weights(h, w, k, x.device)[0])
             return StepTokens(pooled, p_rows, p_cols, ["gist"] * k, [-1] * k, False, surprise, masses, aux)
         aux["coverage"] = effective_coverage(torch.cat([gist_attn] + slot_weights))
         self._emitted_stats(aux, torch.cat(tokens), torch.cat([gist_attn] + slot_weights))

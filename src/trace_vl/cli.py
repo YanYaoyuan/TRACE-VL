@@ -469,6 +469,7 @@ def _v3_parser(commands):
     c.add_argument("--probe-videos", type=int, default=8)
     c.add_argument("--device", default="cuda")
     c.add_argument("--cpu-only", action="store_true", help="skip weight replication and the activation probe")
+    c.add_argument("--probe-only", action="store_true", help="only the activation probe on fixed validation clips")
     c.add_argument("--output")
     c = sub.add_parser("build-stage2", help="long streams with delayed time-referenced questions (Stage 2 data)")
     c.add_argument("records", help="Stage 1 records (e.g. convert-llava-mc output) or timed records")
@@ -558,6 +559,12 @@ def _v3(args):
     if args.action == "diagnose-pilot":
         from .v3 import diagnose
 
+        if args.probe_only:  # any run layout with identity.json, configs/<arm>.yaml, train/<arm>/modules.pt
+            report = {"probe": diagnose.activation_probe(Path(args.runs), Path(args.data_dir), Path(args.video_root),
+                                                         args.probe_videos, args.device)}  # fmt: skip
+            if args.output:
+                Path(args.output).write_text(json.dumps(report, indent=2, default=str) + "\n")
+            return show(report)
         report = diagnose.cpu_report(Path(args.runs))
         report["ablation"] = diagnose.ablation_report(Path(args.runs))
         if not args.cpu_only:
