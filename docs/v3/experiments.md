@@ -262,3 +262,57 @@ The output is `selector-diagnostics.json`.
 1. **M2 gate (unchanged):** transition ≥ b4 + 2 pp and ≥ 95% of native, at the final checkpoint.
 2. **Exploratory continuation criterion** (not an architecture gate): a slot arm ≥ b4 with the video-bootstrap CI lower bound > −1 pp at the final checkpoint.
 3. If the slot arms still lose, report the outcome under this recipe and use the selector diagnostics (per-token entropies, emitted-token redundancy, selector update norms) to choose **one** subsequent change. No outcome is precommitted.
+
+### 11.1 Pilot-004 result (operator, `a3f8c29`; report in `docs/v3/results/pilot004-a3f8c29/`): negative against the gate
+
+| Checkpoint | Native | Transition | After | B4 |
+|---|---:|---:|---:|---:|
+| 100 | 88.32% | 85.66% | 85.45% | 88.32% |
+| 300 | 88.32% | 87.09% | 88.93% | 88.52% |
+| **1,000 (primary)** | 88.32% | 87.91% | 89.14% | **89.96%** |
+
+Paired differences at the final checkpoint (pp):
+
+| Comparison | Δ | 95% CI |
+|---|---:|---:|
+| transition − b4 | −2.05 | [−4.32, 0.00] |
+| after − b4 | −0.82 | [−3.05, +1.43] |
+| transition − after | −1.23 | [−3.28, +0.62] |
+
+- **M2 fails**, and both exploratory continuation checks fail.
+- All arms improved with longer training; this is not evidence of an architectural benefit.
+
+Selector diagnostics (rank-0 training samples; a fixed held-out probe is pending):
+- **Learned gist: demonstrated non-functional.**
+  - Entropy is 1.0000 from update 1 to update 1,000 in both slot arms.
+  - Gist-logit std across positions is 0.002–0.006.
+  - The 8 gist tokens are near-identical (cosine 0.9994).
+  - Gist gradients fall to about 1e-5.
+  - Cause: logits start near zero (queries ~ N(0, 0.02²)), so the softmax over 196 positions is uniform and receives almost no gradient.
+- **Slots:**
+  - transition: entropy 0.996, emitted effective rank 1.86;
+  - after: entropy 0.91, minimum 0.82, part-pool entropy 0.68, rank 2.47.
+- **Measurement fix:** the training-time B4 rank (12.9) was measured before norm matching. This is fixed in `bfd5490`, and `scripts/launch_probe_pilot004_a100.sh` re-measures every arm on identical held-out clips.
+
+### 12. Pilot-005 (PROPOSED, not approved): replace the non-functional learned gist with grid pools
+
+**Rule applied (data_plan §4, row C).** The slot arms lose, and a selector issue is demonstrated (the gist above). One change addresses it.
+
+**Change.** `transition.gist_mode: grid`: the 8 gist tokens become 8 exact grid-region average pools (the same construction as B4's), and nothing else changes.
+- The 12 slot or part tokens stay, so the budget is still 20 per P-step.
+- Same data, seed, 1,000 updates, checkpoints, diagnostics and evaluation as pilot-004.
+- The flag has no effect on B4, which does not emit a gist. B4 is **retrained** at the same revision as the matched control, which also measures run-to-run reproducibility against pilot-004's B4 (89.96%).
+
+**Question.** With identical grid coverage for 8 of 20 tokens, does replacing B4's other 12 grid pools with 12 surprise-selected slot tokens help, hurt or make no detectable difference?
+
+**Acceptance (predeclared):**
+- **M2 (unchanged):** transition ≥ b4 + 2 pp and ≥ 95% of native, at the final checkpoint.
+- **Exploratory continuation:** after ≥ b4 with CI lower bound > −1 pp.
+- **Superiority:** claimed only if the CI lower bound is > 0.
+- Also reported:
+  - the held-out-probe emitted-token rank of the slot arms (expected ≥ 8 from the grid gist alone);
+  - |B4(005) − B4(004)| as a reproducibility estimate.
+
+**Cost.** About 4 h of training (3 arms × ≈ 76 min) plus about 1 h of evaluation on 4×A100.
+
+**If it fails.** Report the result, and stop slot-token work on 0–30 s multiple choice. The next step becomes evaluating the existing checkpoints on a predeclared temporal subset (data_plan §4, row D / L1).
