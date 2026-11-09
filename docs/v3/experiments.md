@@ -316,3 +316,50 @@ Selector diagnostics (rank-0 training samples; a fixed held-out probe is pending
 **Cost.** About 4 h of training (3 arms × ≈ 76 min) plus about 1 h of evaluation on 4×A100.
 
 **If it fails.** Report the result, and stop slot-token work on 0–30 s multiple choice. The next step becomes evaluating the existing checkpoints on a predeclared temporal subset (data_plan §4, row D / L1).
+
+### 12.1 Pilot-005 result (operator, `6a46fb5`; tester review on issue #4): negative, failure branch taken
+
+Final checkpoint (primary):
+
+| Arm | Accuracy |
+|---|---:|
+| native | 88.32% |
+| transition-grid | 88.12% |
+| after-grid | 88.73% |
+| b4 | **90.37%** |
+
+| Comparison | Δ (pp) | 95% CI |
+|---|---:|---:|
+| transition − b4 | −2.25 | [−4.29, −0.21] |
+| after − b4 | −1.64 | [−3.31, 0.00] |
+
+- M2 and the exploratory continuation criterion both fail.
+- The grid gist raised emitted effective rank (transition 5.3, after 6.0; b4 13.3) but did not close the gap. Transition slots stay near-uniform (entropy 0.996).
+- Held-out probe of pilot-004 (16 fixed videos): emitted cosine and rank were transition 0.976 / 1.85, after 0.919 / 2.33, b4 0.743 / 12.98. CST residual / input was about 5%.
+
+**Per §12, iterative slot-token tuning on 0–30 s multiple choice stops here. B4 is the working compression baseline.**
+
+## 13. Temporal diagnostic (evaluation only, predeclared before any model is run)
+
+Do transition tokens help where temporal change matters? This uses existing pilot-005 checkpoints only (`scripts/run_temporal_diagnostic.sh`, `trace_vl.v3.temporal`).
+
+**Data:**
+- OVO-Bench, an independent benchmark never used for training or for earlier decisions.
+- Videos are hashed (seed 7) into a **diagnostic half**, used once here, and a **frozen final half** that is not evaluated before the paper. The repeatedly inspected pilot validation set is not used.
+
+**Categories, by task definition** (never by model errors):
+
+| Category | Tasks |
+|---|---|
+| temporal | ASI, ACR, FPD, REC, SSR |
+| static | OJR, ATR, OCR, STU |
+| not evaluated | EPM, HLD, CRR |
+
+- Questions are limited to query time ≤ 180 s, at most 100 per task (fixed seed).
+- Arms: native plus the transition / after / b4 final checkpoints of pilot-005, with identical budgets.
+
+**Decision:**
+- **Continue the transition-token track** only if transition − b4 on temporal is ≥ +2 pp with CI lower bound > 0, **and** the interaction (Δtemporal − Δstatic) has CI lower bound > 0. Both use a video-cluster bootstrap.
+- **Otherwise stop transition-token work.** The paper follows outcome C (B4 compression, learned memory retention, alert head; transition tokens reported as a negative ablation).
+- after − b4 is reported with the same statistics; it is secondary and does not gate.
+- One evaluation; no re-selection and no retraining.

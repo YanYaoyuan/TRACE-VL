@@ -460,6 +460,15 @@ def _v3_parser(commands):
     c = sub.add_parser("wandb-sync", help="sync offline wandb runs collected under a directory")
     c.add_argument("--runs", required=True)
     c.add_argument("--dry-run", action="store_true")
+    c = sub.add_parser("temporal-split", help="OVO-Bench temporal/static diagnostic half + frozen final half")
+    c.add_argument("records", help="convert-ovo --forward output")
+    c.add_argument("--output", required=True)
+    c.add_argument("--per-task", type=int, default=100)
+    c.add_argument("--max-query-seconds", type=float, default=180.0)
+    c = sub.add_parser("temporal-report", help="per-category paired comparison and the predeclared decision")
+    c.add_argument("--eval-root", required=True, help="directory with native/ transition/ after/ b4/ predictions")
+    c.add_argument("--records", required=True, help="diagnostic.jsonl")
+    c.add_argument("--output")
     c = sub.add_parser("audit-data", help="read-only inventory/audit of manifests, LLaVA subsets and datasets")
     c.add_argument("--data-dir", required=True, help="current Stage 1 manifest directory (train/val.jsonl)")
     c.add_argument("--llava-root", required=True)
@@ -561,6 +570,17 @@ def _v3(args):
         tracker.upload(f"{args.name}-demo-files", "demos", [Path(args.output)])
         tracker.finish()
         return show({"demos": len(rows), "correct": sum(r["correct"] for r in rows), "output": args.output})
+    if args.action == "temporal-split":
+        from .v3.temporal import build_diagnostic
+
+        return show(build_diagnostic(args.records, args.output, args.per_task, args.max_query_seconds))
+    if args.action == "temporal-report":
+        from .v3.temporal import temporal_report
+
+        report = temporal_report(args.eval_root, args.records)
+        if args.output:
+            Path(args.output).write_text(json.dumps(report, indent=2) + "\n")
+        return show(report)
     if args.action == "audit-data":
         from .v3.audit import digest, run_audit
 
