@@ -436,6 +436,24 @@ def _v3_parser(commands):
     c = sub.add_parser("score-alerts")
     c.add_argument("predictions")
     c.add_argument("--output")
+    c = sub.add_parser("demo", help="qualitative demos (GIF + keyframes + answers) for fixed validation questions")
+    c.add_argument("--config", required=True)
+    c.add_argument("--records", required=True)
+    c.add_argument("--video-root", required=True)
+    c.add_argument("--output", required=True)
+    c.add_argument("--mode", choices=["native", "v3"], default="v3")
+    c.add_argument("--checkpoint")
+    c.add_argument("--adapter")
+    c.add_argument("--n", type=int, default=12)
+    c.add_argument("--device", default="cuda")
+    c.add_argument("--wandb", action="store_true", help="also log the demo table to wandb (needs the track extra)")
+    c.add_argument("--name", default="demos")
+    c = sub.add_parser("wandb-upload", help="upload a completed pilot run directory (curves, reports, demos)")
+    c.add_argument("--runs", required=True)
+    c.add_argument("--demos", type=int, default=0, help="demo questions per arm (0 = none; needs a GPU)")
+    c.add_argument("--data-dir")
+    c.add_argument("--video-root")
+    c.add_argument("--device", default="cuda")
     c = sub.add_parser("audit-data", help="read-only inventory/audit of manifests, LLaVA subsets and datasets")
     c.add_argument("--data-dir", required=True, help="current Stage 1 manifest directory (train/val.jsonl)")
     c.add_argument("--llava-root", required=True)
@@ -512,6 +530,23 @@ def _v3(args):
         from .v3.anomaly import score_alerts
 
         return show(score_alerts(args.predictions, args.output))
+    if args.action == "wandb-upload":
+        from .v3.wandb_upload import upload_run
+
+        return show(upload_run(args.runs, args.demos, args.data_dir, args.video_root, args.device))
+    if args.action == "demo":
+        from .v3.config import load_v3_config as _load_demo
+        from .v3.demo import log_demos, make_demos
+        from .v3.tracking import Tracker
+
+        demo_cfg, _ = _load_demo(args.config)
+        rows = make_demos(demo_cfg, args.records, args.video_root, args.output, args.mode, args.checkpoint, args.adapter,
+                          args.n, args.device)  # fmt: skip
+        tracker = Tracker.start(args.wandb, name=args.name, group=None, job_type="demo", config={"config": args.config})
+        log_demos(tracker, rows, args.name)
+        tracker.upload(f"{args.name}-demo-files", "demos", [Path(args.output)])
+        tracker.finish()
+        return show({"demos": len(rows), "correct": sum(r["correct"] for r in rows), "output": args.output})
     if args.action == "audit-data":
         from .v3.audit import digest, run_audit
 

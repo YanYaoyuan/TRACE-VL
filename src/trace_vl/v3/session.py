@@ -67,6 +67,7 @@ class StreamSession:
         self.decision_memory = DecisionMemory(cfg.alert.memory_tokens)
         self.watching = encode_questions(backbone, questions) if questions else None
         self.last_context = None  # (taps, xy, t, clock) of the latest step, for decide()
+        self.last_info = None
         self.trace_ids = [] if trace else None  # token ids as the processor would write them (checks)
         self.trace_query = None
         self._prefill_prompt()
@@ -101,6 +102,7 @@ class StreamSession:
         info = None
         if self.mode == "v3":
             _, _, info = stream_step(self.modules, x, (h, w), t, self.cst_cache, self.te_cache)
+            self.last_info = info  # latest StepTokens (demos read its weight map)
             tokens, rows, cols = info.tokens.to(bb.dtype), info.rows, info.cols
             kinds = info.kinds
             groups = [("step", self.step_index) if g < 0 else ("slot", g) for g in info.groups]

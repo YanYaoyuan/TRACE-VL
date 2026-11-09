@@ -16,6 +16,7 @@ data = ["datasets>=3.0", "huggingface-hub>=0.26"]
 lora = ["peft>=0.13"]
 vlm = ["transformers>=4.57,<6", "accelerate>=1.0", "peft>=0.13", "torchvision==0.23.0"]
 dev = ["pytest>=8", "ruff>=0.9"]
+track = ["wandb>=0.19"]  # experiment tracking (training curves, eval summaries, demos)
 
 [project.scripts]
 trace-vl = "trace_vl.cli:main"

@@ -32,6 +32,7 @@ from .model import TraceV3Modules, stream_step
 from .modules import CSTCache, TECache, TransitionTracker
 from .positions import PositionCounter
 from .session import LETTERS
+from .tracking import Tracker, enabled_from_env
 
 
 def alert_questions(record) -> tuple[list[Question], list[dict]]:
@@ -271,6 +272,7 @@ def train(cfg: V3Config, records_path: str | list[str], video_root: str, output:
         dist.init_process_group("nccl")
     random.seed(tc.seed + rank)
     torch.manual_seed(tc.seed)
+    tracker = Tracker()
     try:
         paths = [records_path] if isinstance(records_path, str) else list(records_path)
         records = [r for path in paths for r in read_jsonl(path) if r.get("split", "train") == "train"]
@@ -304,6 +306,11 @@ def train(cfg: V3Config, records_path: str | list[str], video_root: str, output:
                                                          "modules": modules.parameter_report(),
                                                          "lora_params": sum(p.numel() for p in lora_params),
                                                          "world": world}, indent=2) + "\n")  # fmt: skip
+        tracker = Tracker.start(rank == 0 and enabled_from_env(),
+                                name=os.environ.get("TRACE_WANDB_NAME") or f"{output.parent.name}-{output.name}",
+                                group=os.environ.get("TRACE_WANDB_GROUP") or output.parent.parent.name,
+                                job_type="train-stage1", config={"config": cfg.to_dict(), "records": paths, "world": world},
+                                directory=output / "wandb")  # fmt: skip
         total_steps = max_steps or tc.steps
         started = clock.perf_counter()
         for step in range(total_steps):
@@ -356,6 +363,7 @@ def train(cfg: V3Config, records_path: str | list[str], video_root: str, output:
                 with (output / "metrics.jsonl").open("a") as handle:
                     handle.write(json.dumps(line) + "\n")
                 print(json.dumps(line), flush=True)
+                tracker.log(line, step=step + 1)
                 if step + 1 in tc.checkpoint_steps:  # immutable snapshot for trajectory evaluation
                     snap = output / "checkpoints" / f"step-{step + 1:05d}"
                     modules.save(snap / "modules.pt", {"step": step + 1})
@@ -367,8 +375,12 @@ def train(cfg: V3Config, records_path: str | list[str], video_root: str, output:
                         from .pilot import write_completion
 
                         write_completion(output, total_steps, cfg.to_dict())
+        tracker.summary({"completed_updates": total_steps})
+        tracker.upload(f"{output.parent.name}-{output.name}-logs", "training-logs",
+                       [output / "metrics.jsonl", output / "run.json", output / "complete.json"])  # fmt: skip
         return output
     finally:
+        tracker.finish()
         if world > 1 and dist.is_initialized():
             dist.destroy_process_group()
 

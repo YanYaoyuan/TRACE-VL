@@ -108,7 +108,8 @@ def main():
             # The CUDA mirror is a flat wheel directory; frozen sync uses the exact wheel URLs, not a
             # PEP 503 /torch/ endpoint. No re-resolution or package upgrades are needed.
             command = [uv, "sync", "--project", str(project), "--frozen", "--python", "3.10",
-                       "--extra", "dev", "--extra", "vlm", "--extra", "data", "--no-install-project"]
+                       "--extra", "dev", "--extra", "vlm", "--extra", "data", "--extra", "track",
+                       "--no-install-project"]
             if args.dry_run:
                 command.append("--dry-run")
             subprocess.run(command, env=env, check=True)

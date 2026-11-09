@@ -315,10 +315,14 @@ class TransitionEncoder(nn.Module):
         self.diagnostics = False  # extra per-token selector statistics in aux (no effect on outputs)
         self.to_memory = nn.Linear(model_dim, adapter_dim)
 
-    def _emitted_stats(self, aux: dict, tokens: Tensor):
+    def _emitted_stats(self, aux: dict, tokens: Tensor, weights: Tensor):
         if self.diagnostics:
             stats = token_stats(tokens)
             aux["diag_emitted_cos"], aux["diag_emitted_rank"] = stats["cos_mean"], stats["effective_rank"]
+            with torch.no_grad():  # where the LM-facing P-step tokens pool from (demo overlays), [N] sums to 1
+                w = weights.detach().float().clamp_min(0)
+                w = w / w.sum(-1, keepdim=True).clamp_min(1e-12)
+                aux["weight_map"] = w.mean(0).cpu()
 
     def forward(self, x: Tensor, z: Tensor, grid: tuple[int, int], cache: TECache, force_i: bool = False):
         """x: adapted LM-space tokens [N, D]; z: adapter state [N, d]. Returns StepTokens."""
@@ -449,7 +453,7 @@ class TransitionEncoder(nn.Module):
         if not cfg.emit_slots and cfg.p_step_mode in {"transition", "after"}:
             # Eval-time ablation: the trained LM sees the gist only (does it use the 12 slot tokens at all?).
             aux["coverage"] = effective_coverage(gist_attn)
-            self._emitted_stats(aux, gist)
+            self._emitted_stats(aux, gist, gist_attn)
             return StepTokens(gist, g_rows.long(), g_cols.long(), ["gist"] * gist.shape[0], [-1] * gist.shape[0],
                               False, surprise, masses, aux)  # fmt: skip
         if cfg.p_step_mode == "after":
@@ -461,7 +465,7 @@ class TransitionEncoder(nn.Module):
             a_cols = [g_cols] + [c for _, _, c in part_tokens]
             a_kinds = ["gist"] * gist.shape[0] + ["after"] * (3 * len(part_tokens))
             a_groups = [-1] * gist.shape[0] + [g for g in groups[gist.shape[0] :]]
-            self._emitted_stats(aux, torch.cat(toks))
+            self._emitted_stats(aux, torch.cat(toks), torch.cat([gist_attn] + slot_weights))
             return StepTokens(torch.cat(toks), torch.cat([r.reshape(-1) for r in a_rows]).long(),
                               torch.cat([c.reshape(-1) for c in a_cols]).long(), a_kinds, a_groups, False,
                               surprise, masses, aux)  # fmt: skip
@@ -471,11 +475,11 @@ class TransitionEncoder(nn.Module):
             k = n_transition if cfg.pooled_match else cfg.pooled_tokens
             pooled, p_rows, p_cols = exact_pool(x, h, w, k)
             aux["coverage"] = effective_coverage(pool_weights(h, w, k, x.device)[0])
-            self._emitted_stats(aux, pooled)
+            self._emitted_stats(aux, pooled, pool_weights(h, w, k, x.device)[0])
             pooled = match_norm(pooled, ref_norm)
             return StepTokens(pooled, p_rows, p_cols, ["gist"] * k, [-1] * k, False, surprise, masses, aux)
         aux["coverage"] = effective_coverage(torch.cat([gist_attn] + slot_weights))
-        self._emitted_stats(aux, torch.cat(tokens))
+        self._emitted_stats(aux, torch.cat(tokens), torch.cat([gist_attn] + slot_weights))
         return StepTokens(
             torch.cat(tokens),
             torch.cat([r.reshape(-1) for r in t_rows]).long(),

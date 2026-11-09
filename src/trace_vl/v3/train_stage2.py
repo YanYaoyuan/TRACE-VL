@@ -47,6 +47,7 @@ from .model import TraceV3Modules, stream_step
 from .modules import CSTCache, TECache
 from .positions import PositionCounter
 from .session import LETTERS, observe_step
+from .tracking import Tracker, enabled_from_env
 from .train import question_ids
 
 VISUAL_KINDS = {KINDS[k] for k in ("frame", "gist", "before", "after", "delta")}
@@ -288,6 +289,7 @@ def train_stage2(cfg: V3Config, streams_path: str, video_root: str, output: str,
         dist.init_process_group("nccl")
     random.seed(tc.seed + rank)
     torch.manual_seed(tc.seed)
+    tracker = Tracker()
     try:
         records = [r for r in read_jsonl(streams_path) if r.get("split", "train") == "train" and r.get("questions")]
         if not records:
@@ -319,6 +321,11 @@ def train_stage2(cfg: V3Config, streams_path: str, video_root: str, output: str,
                                                          "modules": modules.parameter_report(),
                                                          "lora_params": sum(p.numel() for p in lora_params)},
                                                         indent=2) + "\n")  # fmt: skip
+        tracker = Tracker.start(rank == 0 and enabled_from_env(),
+                                name=os.environ.get("TRACE_WANDB_NAME") or f"{output.parent.name}-{output.name}",
+                                group=os.environ.get("TRACE_WANDB_GROUP") or output.parent.parent.name,
+                                job_type="train-stage2", config={"config": cfg.to_dict(), "streams": streams_path, "init": init, "world": world},
+                                directory=output / "wandb")  # fmt: skip
         total_steps = max_steps or s2.steps
         warmup = min(tc.warmup, max(1, total_steps // 10))
         started = clock.perf_counter()
@@ -345,11 +352,14 @@ def train_stage2(cfg: V3Config, streams_path: str, video_root: str, output: str,
                 with (output / "metrics.jsonl").open("a") as handle:
                     handle.write(json.dumps(line) + "\n")
                 print(json.dumps(line), flush=True)
+                tracker.log(line, step=step + 1)
                 if (step + 1) % tc.save_every == 0 or step + 1 == total_steps:
                     modules.save(output / "modules.pt", {"step": step + 1, "stage": 2})
                     bb.peft.save_pretrained(output / "lora")
+        tracker.upload(f"{output.parent.name}-{output.name}-logs", "training-logs", [output / "metrics.jsonl", output / "run.json"])
         return output
     finally:
+        tracker.finish()
         if world > 1 and dist.is_initialized():
             dist.destroy_process_group()
 
