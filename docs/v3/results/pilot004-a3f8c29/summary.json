@@ -1,0 +1,256 @@
+{
+  "per_checkpoint": {
+    "100": {
+      "accuracy": {
+        "native": 0.8831967213114754,
+        "transition": 0.8565573770491803,
+        "after": 0.8545081967213115,
+        "b4": 0.8831967213114754
+      },
+      "ci95": {
+        "native": [
+          0.8551020408163266,
+          0.9094650205761317
+        ],
+        "transition": [
+          0.8224489795918367,
+          0.8895705521472392
+        ],
+        "after": [
+          0.8241308793456033,
+          0.8827160493827161
+        ],
+        "b4": [
+          0.8545081967213115,
+          0.9090909090909091
+        ]
+      },
+      "paired": {
+        "transition_minus_b4": {
+          "delta_pp": -2.664,
+          "ci95_pp": [
+            -4.499,
+            -0.818
+          ],
+          "videos": 29
+        },
+        "after_minus_b4": {
+          "delta_pp": -2.869,
+          "ci95_pp": [
+            -4.277,
+            -1.636
+          ],
+          "videos": 29
+        },
+        "transition_minus_after": {
+          "delta_pp": 0.205,
+          "ci95_pp": [
+            -1.222,
+            1.646
+          ],
+          "videos": 29
+        },
+        "transition_minus_native": {
+          "delta_pp": -2.664,
+          "ci95_pp": [
+            -5.123,
+            0.0
+          ],
+          "videos": 29
+        },
+        "after_minus_native": {
+          "delta_pp": -2.869,
+          "ci95_pp": [
+            -5.133,
+            -0.206
+          ],
+          "videos": 29
+        },
+        "b4_minus_native": {
+          "delta_pp": 0.0,
+          "ci95_pp": [
+            -2.037,
+            2.254
+          ],
+          "videos": 29
+        }
+      },
+      "lm_tokens_per_step": {
+        "transition": 46.91274306493385,
+        "after": 46.91274306493385,
+        "b4": 46.91274306493385
+      }
+    },
+    "300": {
+      "accuracy": {
+        "native": 0.8831967213114754,
+        "transition": 0.8709016393442623,
+        "after": 0.889344262295082,
+        "b4": 0.8852459016393442
+      },
+      "ci95": {
+        "native": [
+          0.8551020408163266,
+          0.9094650205761317
+        ],
+        "transition": [
+          0.8306122448979592,
+          0.9075975359342916
+        ],
+        "after": [
+          0.8548057259713702,
+          0.9188640973630832
+        ],
+        "b4": [
+          0.8518518518518519,
+          0.9164969450101833
+        ]
+      },
+      "paired": {
+        "transition_minus_b4": {
+          "delta_pp": -1.434,
+          "ci95_pp": [
+            -3.696,
+            0.82
+          ],
+          "videos": 29
+        },
+        "after_minus_b4": {
+          "delta_pp": 0.41,
+          "ci95_pp": [
+            -1.643,
+            2.454
+          ],
+          "videos": 29
+        },
+        "transition_minus_after": {
+          "delta_pp": -1.844,
+          "ci95_pp": [
+            -3.901,
+            0.0
+          ],
+          "videos": 29
+        },
+        "transition_minus_native": {
+          "delta_pp": -1.23,
+          "ci95_pp": [
+            -4.527,
+            2.045
+          ],
+          "videos": 29
+        },
+        "after_minus_native": {
+          "delta_pp": 0.615,
+          "ci95_pp": [
+            -2.066,
+            3.285
+          ],
+          "videos": 29
+        },
+        "b4_minus_native": {
+          "delta_pp": 0.205,
+          "ci95_pp": [
+            -2.24,
+            2.474
+          ],
+          "videos": 29
+        }
+      },
+      "lm_tokens_per_step": {
+        "transition": 46.91274306493385,
+        "after": 46.91274306493385,
+        "b4": 46.91274306493385
+      }
+    },
+    "1000": {
+      "accuracy": {
+        "native": 0.8831967213114754,
+        "transition": 0.8790983606557377,
+        "after": 0.8913934426229508,
+        "b4": 0.8995901639344263
+      },
+      "ci95": {
+        "native": [
+          0.8551020408163266,
+          0.9094650205761317
+        ],
+        "transition": [
+          0.8391038696537678,
+          0.9134020618556701
+        ],
+        "after": [
+          0.8562628336755647,
+          0.9224489795918367
+        ],
+        "b4": [
+          0.8683127572016461,
+          0.927536231884058
+        ]
+      },
+      "paired": {
+        "transition_minus_b4": {
+          "delta_pp": -2.049,
+          "ci95_pp": [
+            -4.321,
+            0.0
+          ],
+          "videos": 29
+        },
+        "after_minus_b4": {
+          "delta_pp": -0.82,
+          "ci95_pp": [
+            -3.049,
+            1.434
+          ],
+          "videos": 29
+        },
+        "transition_minus_after": {
+          "delta_pp": -1.23,
+          "ci95_pp": [
+            -3.279,
+            0.617
+          ],
+          "videos": 29
+        },
+        "transition_minus_native": {
+          "delta_pp": -0.41,
+          "ci95_pp": [
+            -3.067,
+            2.259
+          ],
+          "videos": 29
+        },
+        "after_minus_native": {
+          "delta_pp": 0.82,
+          "ci95_pp": [
+            -1.856,
+            3.512
+          ],
+          "videos": 29
+        },
+        "b4_minus_native": {
+          "delta_pp": 1.639,
+          "ci95_pp": [
+            -0.611,
+            3.901
+          ],
+          "videos": 29
+        }
+      },
+      "lm_tokens_per_step": {
+        "transition": 46.91274306493385,
+        "after": 46.91274306493385,
+        "b4": 46.91274306493385
+      }
+    }
+  },
+  "decision": {
+    "primary_checkpoint": 1000,
+    "M2_gate (original; transition >= b4 + 2 pp and >= 95% native, final checkpoint)": false,
+    "exploratory continuation (slot arm >= b4, CI lower bound > -1 pp, final checkpoint)": {
+      "transition": false,
+      "after": false
+    }
+  },
+  "note": "Fresh 1,000-update training (cosine schedule over 1,000 updates; the first 100 updates are not pilot-003's schedule). Final checkpoint is primary; 100/300 are trajectory points, not selected. One seed; 0-30 s multiple choice only. Video-cluster bootstrap is the primary uncertainty."
+}
