@@ -213,6 +213,7 @@ def activation_probe(runs: Path, data_dir: Path, video_root: Path, videos: int =
         cfg, _ = load_v3_config(runs / "configs" / f"{arm}.yaml")
         bb = Backbone(cfg.backbone, cfg.stream, device)
         modules = TraceV3Modules.load(str(runs / "train" / arm / "modules.pt"), cfg, bb.hidden).to(device).eval()
+        modules.transition.diagnostics = True  # per-gist / per-slot entropies, token redundancy (outputs unchanged)
         stats = defaultdict(list)
         gap = cfg.stream.frame_gap
         with torch.no_grad():
@@ -227,9 +228,10 @@ def activation_probe(runs: Path, data_dir: Path, video_root: Path, videos: int =
                         xf = x.float()
                         stats["cst_residual_ratio"].append(float((adapted.float() - xf).norm() / xf.norm().clamp_min(1e-6)))
                         if not info.is_i_step:
-                            for key in ("coverage", "gist_entropy", "slot_coverage"):
-                                if info.aux.get(key) is not None:
-                                    stats[key].append(info.aux[key])
+                            for key, value in info.aux.items():
+                                if (key in ("coverage", "gist_entropy", "slot_coverage") or key.startswith("diag_")) \
+                                        and value is not None:
+                                    stats[key].append(float(value))
                 finally:
                     reader.close()
         report[arm] = {k: {"mean": sum(v) / len(v), "min": min(v), "max": max(v), "n": len(v)} for k, v in stats.items()}

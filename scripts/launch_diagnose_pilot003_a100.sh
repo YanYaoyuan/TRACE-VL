@@ -98,9 +98,12 @@ for arm, t in d['training'].items():
                  f"grad_modules {f.get('grad_norm_modules'):.3f}->{l.get('grad_norm_modules'):.3f}, "
                  f"grad_lora {f.get('grad_norm_lora'):.3f}->{l.get('grad_norm_lora'):.3f}, gate {l.get('gate_abs_mean'):.2e}")
 for arm, w in d.get('weights', {}).items():
-    top = sorted(((g['rel_change'] or 0.0, name) for name, g in w['groups'].items()), reverse=True)
+    # Zero-initialized groups (e.g. cst.gate, type_embed) have no relative change: print N/A and the absolute change.
+    rel = sorted(((g['rel_change'], name) for name, g in w['groups'].items() if g['rel_change'] is not None), reverse=True)
+    zero = [(name, g['abs_change']) for name, g in w['groups'].items() if g['rel_change'] is None]
     lines.append(f"weights {arm}: init_replication_valid={w['init_replication_valid']}, lora_B_norm={w['lora_B_norm']:.4f}, "
-                 f"cst_gate={w['cst_gate']}, rel_change " + ", ".join(f"{n}={v:.3e}" for v, n in top))
+                 f"cst_gate={w['cst_gate']}, rel_change " + ", ".join(f"{n}={v:.3e}" for v, n in rel)
+                 + "; zero-init groups (rel N/A, abs change) " + ", ".join(f"{n}={a:.3e}" for n, a in zero))
 for arm, p in d.get('probe', {}).items():
     if arm == 'videos':
         continue

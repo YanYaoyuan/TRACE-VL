@@ -224,3 +224,41 @@ One observation to check: transition, after, and the earlier fixed-20 transition
 | Healthy, and slot tokens used (gist-only clearly worse than full) | Same 3 arms on a transition-sensitive set (OVO-Bench forward / TOC-Bench), no retraining | Slot arm ≥ b4 + 2 pp on that set |
 
 The CST gate stays as it is in pilot-004. If the probe shows a negligible residual ratio (< 1e-2), opening it (a separate learning rate for the gate) is a later, separate experiment.
+
+### 10.4 Diagnostics outcome (operator run, code `7dc2ce9`; qualified after review)
+
+| Finding | Evidence |
+|---|---|
+| Provenance holds | Completion records verify, arm checkpoints are distinct, and the evaluated checkpoints are the trained ones; the initialization replica is exact |
+| **Gist pooling is near-uniform** (strong evidence) | Normalized gist-attention entropy is 1.0000 (min 0.99999958) on 109 probed P-steps, on 8 videos |
+| Slot pooling: **not established** | Union coverage (0.995–0.999) cannot distinguish uniform individual slots from complementary pools. The `after` part-pools can differ even when the parent slot is uniform, and before/delta tokens carry temporal, projection and type information. "The slot arms sent copies of one global average" is a **hypothesis** to measure with per-slot entropies and emitted-token redundancy (§11), not a finding. |
+| Slot-token ablation | Removing the slot tokens changed few answers: transition full − gist-only = +0.41 pp [−0.41, +1.23], 99.2% agreement; after = −0.82 pp [−1.64, −0.20], 98.4% agreement. The ablation also changes token count and sequence structure, so this is sensitivity to that intervention, not an equal-budget test or proof that the slots are unused. |
+| CST residual / input norm ≈ 0.63% | Small, but **not** shown to have no effect: CST's latent z also feeds the gist, slots and surprise independently of the gated residual |
+| Optimization signals | CE falls, LoRA changes and gradients are finite. These do not establish healthy optimization in every selector sub-module. About 2% relative parameter movement is not by itself evidence of undertraining (there is no universal threshold). Zero-initialized groups (`cst.gate`, `type_embed`) have an undefined relative change and did train (abs change 0.028 / 0.054 for transition); the earlier digest printed them as 0, which was a formatting bug, now fixed. |
+
+The video-cluster bootstrap is the primary uncertainty estimate; question-level McNemar treats questions within a video as independent. **Pilot-003 stands as a valid negative test of the implemented architecture and training recipe.**
+
+## 11. Pilot-004: training duration only (predeclared)
+
+**Question.** Does extending *this* recipe from 100 to 1,000 updates change the matched-budget comparison? A negative result shows that extending this recipe did not close the gap. It does not rule out undertraining in general.
+
+**Design** (`configs/v3/pilot004_*.yaml`, `scripts/run_pilot004.sh`):
+- The three pilot-003 arms (transition / after / b4) with the same data, seed, initialization, optimizer settings, warmup 10, fixed 20-token P-steps, I-step schedule and hardware.
+- **Fresh training** for 1,000 updates, not a continuation. The cosine schedule spans 1,000 updates, so the first 100 updates do **not** follow pilot-003's learning-rate trajectory.
+- Predeclared evaluation points: checkpoints at **100 / 300 / 1,000**, all on the same 488 validation questions. **The final checkpoint is the primary comparison**; 100 and 300 are trajectory points and are never selected as "best".
+- Per-question budget identity across arms is checked at every checkpoint.
+
+**Instrumentation (logging only; outputs are bit-identical with it on or off, which is tested).** Every 10 updates:
+- per-gist minimum entropy, gist-logit spread across positions, gist-token cosine;
+- per-slot entropy (mean and minimum over active slots) and slot-attention spread;
+- `after` part-pool entropies;
+- cosine similarity of the slot-token embeddings;
+- cosine similarity and effective rank of the **emitted** P-step tokens;
+- post-clipping gradient norms and actual update norms for the gist, slots, surprise gate, CST gate and CST layers.
+
+The output is `selector-diagnostics.json`.
+
+**Decision:**
+1. **M2 gate (unchanged):** transition ≥ b4 + 2 pp and ≥ 95% of native, at the final checkpoint.
+2. **Exploratory continuation criterion** (not an architecture gate): a slot arm ≥ b4 with the video-bootstrap CI lower bound > −1 pp at the final checkpoint.
+3. If the slot arms still lose, report the outcome under this recipe and use the selector diagnostics (per-token entropies, emitted-token redundancy, selector update norms) to choose **one** subsequent change. No outcome is precommitted.

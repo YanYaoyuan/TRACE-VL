@@ -60,7 +60,7 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
     parts, positions = [bb.embed_ids(prompt_ids)], [pos.text(len(prompt_ids), bb.device)]
     cst_cache, te_cache, tracker = CSTCache(), TECache(), TransitionTracker()
     step_ends, aux = [], {"pred": [], "budget": [], "tokens": [], "i_steps": 0, "clock": [], "spans": [], "xy": [],
-                          "active": [], "max_mass": [], "memory_depth": 0,
+                          "active": [], "max_mass": [], "memory_depth": 0, "diag": {},
                           "kinds": [], "is_i": []}  # fmt: skip
     length = len(prompt_ids)
     for k, (frames, t) in enumerate(zip(clips, times)):
@@ -88,6 +88,9 @@ def build_sequence(bb: Backbone, modules: TraceV3Modules | None, clips, times, r
                 aux["budget"].append(info.aux["expected_tokens"])
                 aux["active"].append(info.aux.get("active_slots", 0))
                 aux["max_mass"].append(info.aux.get("max_mass", 0.0))
+                for key, value in info.aux.items():
+                    if key.startswith("diag_") and value is not None:
+                        aux["diag"].setdefault(key, []).append(float(value))
             aux["i_steps"] += int(info.is_i_step)
             aux["is_i"].append(info.is_i_step)
             slot_memory = info.aux.get("slot_memory")
@@ -163,6 +166,10 @@ class StudentLoss(nn.Module):
                          active_slots_max=max(aux["active"]), max_mass_mean=sum(aux["max_mass"]) / len(aux["max_mass"]),
                          expected_p_tokens=float(torch.stack(aux["budget"]).float().mean()),
                          cst_memory_depth=aux["memory_depth"])  # fmt: skip
+        for key, values in aux["diag"].items():  # selector diagnostics (only on diag_every steps)
+            stats[key] = sum(values) / len(values)
+            if key.endswith("_min"):
+                stats[key] = min(values)
         stats.update(tokens_per_step=sum(aux["tokens"]) / max(1, len(aux["tokens"])),
                      p_step_tokens_mean=sum(p_tokens) / len(p_tokens) if p_tokens else None,
                      total_visual_tokens=sum(aux["tokens"]), i_step_fraction=aux["i_steps"] / max(1, len(times)))  # fmt: skip
@@ -306,6 +313,8 @@ def train(cfg: V3Config, records_path: str | list[str], video_root: str, output:
                 group["lr"] = base * factor * (0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * progress)))
             optimizer.zero_grad(set_to_none=True)
             logs, stats = {}, {}
+            diag_step = tc.diag_every > 0 and (step == 0 or (step + 1) % tc.diag_every == 0)
+            modules.transition.diagnostics = diag_step
             for micro in range(tc.grad_accum):
                 use_alert = alert_records and (not qa_records or random.random() < tc.alert_fraction)
                 record = random.choice(alert_records if use_alert else qa_records)
@@ -329,7 +338,15 @@ def train(cfg: V3Config, records_path: str | list[str], video_root: str, output:
                 norms[name] = float(torch.nn.utils.clip_grad_norm_(params, 1.0)) if params else 0.0
             if not all(math.isfinite(v) for v in norms.values()):
                 raise FloatingPointError(f"nonfinite gradient norm: {norms}")
+            selector = selector_params(modules) if diag_step else {}
+            before = {name: [p.detach().clone() for p in ps] for name, ps in selector.items()}
             optimizer.step()
+            if diag_step:  # post-clipping gradient and actual update norms per selector group
+                for name, ps in selector.items():
+                    grads = [p.grad.float().norm() for p in ps if p.grad is not None]
+                    stats[f"diag_grad_{name}"] = float(torch.stack(grads).norm()) if grads else 0.0
+                    stats[f"diag_update_{name}"] = math.sqrt(sum(float((p.detach() - b).float().pow(2).sum())
+                                                                 for p, b in zip(ps, before[name])))  # fmt: skip
             if rank == 0:
                 line = {"step": step + 1, **{k: round(v, 5) for k, v in logs.items()}, **stats,
                         "grad_norm_modules": norms["modules"], "grad_norm_lora": norms["lora"],
@@ -339,6 +356,10 @@ def train(cfg: V3Config, records_path: str | list[str], video_root: str, output:
                 with (output / "metrics.jsonl").open("a") as handle:
                     handle.write(json.dumps(line) + "\n")
                 print(json.dumps(line), flush=True)
+                if step + 1 in tc.checkpoint_steps:  # immutable snapshot for trajectory evaluation
+                    snap = output / "checkpoints" / f"step-{step + 1:05d}"
+                    modules.save(snap / "modules.pt", {"step": step + 1})
+                    bb.peft.save_pretrained(snap / "lora")
                 if (step + 1) % tc.save_every == 0 or step + 1 == total_steps:
                     modules.save(output / "modules.pt", {"step": step + 1})
                     bb.peft.save_pretrained(output / "lora")
@@ -350,6 +371,14 @@ def train(cfg: V3Config, records_path: str | list[str], video_root: str, output:
     finally:
         if world > 1 and dist.is_initialized():
             dist.destroy_process_group()
+
+
+def selector_params(modules: TraceV3Modules) -> dict:
+    """Parameter groups that decide where tokens pool from (pilot-004 instrumentation)."""
+    t, c = modules.transition, modules.cst
+    groups = {"gist": [t.gist_queries, *t.gist_key.parameters()], "slots": list(t.slots.parameters()),
+              "surprise": list(t.surprise_gate.parameters()), "cst_gate": [c.gate], "cst_layers": list(c.layers.parameters())}
+    return {name: [p for p in ps if p.requires_grad] for name, ps in groups.items()}
 
 
 def gradient_check(cfg: V3Config, steps: int = 6, threshold: float = 1e4, device: str = "cuda") -> dict:

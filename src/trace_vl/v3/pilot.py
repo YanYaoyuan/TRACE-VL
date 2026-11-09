@@ -26,23 +26,35 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def artifact_hashes(output: Path) -> dict:
-    """Content hashes of the module checkpoint and every LoRA file (weights must exist)."""
-    output = Path(output)
-    lora = output / "lora"
+def _pair_hashes(root: Path, prefix: str = "") -> dict:
+    """Hashes of one module checkpoint + LoRA adapter pair (adapter weights and config must exist)."""
+    lora = root / "lora"
     files = sorted(f for f in lora.rglob("*") if f.is_file()) if lora.is_dir() else []
     if not any(f.suffix in {".safetensors", ".bin"} for f in files):
         raise FileNotFoundError(f"{lora}: no adapter weight file")
     if not (lora / "adapter_config.json").is_file():
         raise FileNotFoundError(f"{lora}: no adapter_config.json")
-    return {"modules.pt": _sha256(output / "modules.pt"),
-            **{f"lora/{f.relative_to(lora)}": _sha256(f) for f in files}}  # fmt: skip
+    if not (root / "modules.pt").is_file():
+        raise FileNotFoundError(f"{root}: no modules.pt")
+    return {f"{prefix}modules.pt": _sha256(root / "modules.pt"),
+            **{f"{prefix}lora/{f.relative_to(lora)}": _sha256(f) for f in files}}  # fmt: skip
+
+
+def artifact_hashes(output: Path, checkpoint_steps=()) -> dict:
+    """Content hashes of the final module/LoRA pair and of every required intermediate checkpoint pair."""
+    output = Path(output)
+    hashes = _pair_hashes(output)
+    for step in sorted(checkpoint_steps):
+        name = f"checkpoints/step-{step:05d}/"
+        hashes.update(_pair_hashes(output / name, name))
+    return hashes
 
 
 def write_completion(output: Path, step: int, config: dict):
     """Called by the trainer (rank 0) only after the final module and LoRA saves returned."""
     output = Path(output)
-    record = {"step": step, "config": config, "artifacts": artifact_hashes(output)}
+    steps = (config.get("train") or {}).get("checkpoint_steps") or ()
+    record = {"step": step, "config": config, "artifacts": artifact_hashes(output, steps)}
     tmp = output / (COMPLETE + ".tmp")
     with tmp.open("w") as handle:
         handle.write(json.dumps(record, indent=2) + "\n")
@@ -67,7 +79,7 @@ def training_complete(output: Path, config: dict, steps: int) -> tuple[bool, str
     if record.get("config") != config:
         return False, "trained with a different resolved config"
     try:
-        if artifact_hashes(output) != record.get("artifacts"):
+        if artifact_hashes(output, (config.get("train") or {}).get("checkpoint_steps") or ()) != record.get("artifacts"):
             return False, "checkpoint/adapter files differ from the completion record"
     except FileNotFoundError as error:
         return False, str(error)
@@ -84,7 +96,7 @@ def media_identity(records: list[dict], video_root: Path) -> str:
     return _video_identity(records, str(video_root))
 
 
-def resolved_configs(config_dir: Path, model: str | None, runs: Path) -> dict:
+def resolved_configs(config_dir: Path, model: str | None, runs: Path, prefix: str = "pilot003") -> dict:
     """Write per-arm wrapper configs (repo arm config + local model path) and return the resolved dicts."""
     from .config import load_v3_config
 
@@ -92,7 +104,7 @@ def resolved_configs(config_dir: Path, model: str | None, runs: Path) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     resolved = {}
     for arm, mode in ARMS.items():
-        text = f"extends: {Path(config_dir).resolve() / f'pilot003_{arm}.yaml'}\n"
+        text = f"extends: {Path(config_dir).resolve() / f'{prefix}_{arm}.yaml'}\n"
         if model:
             text += f"backbone:\n  name: {model}\n  local_files_only: true\n"
         (out_dir / f"{arm}.yaml").write_text(text)
@@ -116,7 +128,7 @@ def resolved_configs(config_dir: Path, model: str | None, runs: Path) -> dict:
 
 
 def preflight(data_dir: Path, video_root: Path, runs: Path, config_dir: Path, model: str | None,
-              clip_seconds: float, gpus: int, source_dir: Path) -> dict:  # fmt: skip
+              clip_seconds: float, gpus: int, source_dir: Path, prefix: str = "pilot003") -> dict:  # fmt: skip
     """Validate inputs and pin the run identity; a restart with any changed input raises."""
     data_dir, video_root, runs = Path(data_dir).resolve(), Path(video_root).resolve(), Path(runs).resolve()
 
@@ -138,7 +150,8 @@ def preflight(data_dir: Path, video_root: Path, runs: Path, config_dir: Path, mo
     for p in sorted(Path(source_dir).glob("*.py")):
         source.update(p.name.encode() + p.read_bytes())
     identity = {
-        "configs": resolved_configs(config_dir, model, runs),
+        "pilot": prefix,
+        "configs": resolved_configs(config_dir, model, runs, prefix),
         "train_sha256": _sha256(data_dir / "train.jsonl"),
         "val_sha256": _sha256(data_dir / "val.jsonl"),
         "media": media_identity(train + val, video_root),

@@ -124,6 +124,10 @@ class TrainConfig:
     tbptt_steps: int = 0  # detach recurrent adapter state every N steps (0 = never)
     save_every: int = 500
     seed: int = 7
+    # Extra immutable checkpoints (checkpoints/step-XXXXX/{modules.pt,lora}) at these updates (pilot-004).
+    checkpoint_steps: list[int] = field(default_factory=list)
+    # Every N updates: per-token selector statistics and selector gradient/update norms in metrics (0 = off).
+    diag_every: int = 0
 
 
 @dataclass
@@ -186,6 +190,12 @@ class V3Config:
                 f"train.target_p_step_tokens={config.train.target_p_step_tokens} is infeasible: a P-step emits "
                 f"between {low} (gist only) and {high} (gist + 3 x max_active) tokens"
             )
+        steps = config.train.checkpoint_steps
+        if any(isinstance(k, bool) or not isinstance(k, int) or not 1 <= k <= config.train.steps for k in steps) \
+                or len(set(steps)) != len(steps):
+            raise ValueError("train.checkpoint_steps must be distinct integers in [1, train.steps]")
+        if config.train.diag_every < 0:
+            raise ValueError("train.diag_every must be >= 0")
         if not 0.0 <= config.train.alert_fraction <= 1.0:
             raise ValueError("train.alert_fraction must be in [0, 1]")
         if config.transition.activity_temperature <= 0:
