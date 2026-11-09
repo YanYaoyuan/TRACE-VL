@@ -253,3 +253,34 @@ frame folders enter the run id by per-frame content hash. `eval-alerts` writes p
 micro step-level AUROC and AP, whole-video bootstrap CI, and ms per decision. Step-level AUROC at 1 step/s is not
 directly comparable with published frame-level AUROC at 24-25 fps; compare methods within this protocol.
 
+
+## Experiment tracking with Weights & Biases
+
+Install once (the `track` extra; `scripts/setup_aliyun.sh` now installs it, or add it to an existing environment):
+```bash
+uv pip install --python /data/yyy/TRACE-VL/.venv/bin/python --index-url https://mirrors.aliyun.com/pypi/simple "wandb==0.31.0"
+/data/yyy/TRACE-VL/.venv/bin/wandb login        # API key once; never in scripts or configs
+```
+
+**Live monitoring of new training runs** (revision `e728712` or later). Set these before any launcher; `torchrun` passes them to every rank, and only rank 0 logs:
+```bash
+export TRACE_WANDB=1 WANDB_PROJECT=trace-vl TRACE_WANDB_GROUP=<experiment name>   # e.g. pilot005-<rev>-001
+# hosts without wandb.ai access: export WANDB_MODE=offline, later `wandb sync <run>/train/<arm>/wandb/wandb/offline-run-*`
+```
+
+- **What is logged:** every update's losses, gradient norms, learning rate, token budget, memory, and the selector diagnostics (`diag_*`).
+- **Artifacts:** `metrics.jsonl`, `run.json` and `complete.json`.
+- **Run naming:** runs are named `<run dir>-<arm>` and grouped per experiment.
+
+**Completed runs, including pilot-004** (launched from a pinned snapshot without live logging): `scripts/launch_wandb_upload_a100.sh` uploads them after the fact.
+- Per-arm training curves, replayed.
+- The evaluation summary.
+- Accuracy, paired-difference and selector-diagnostic tables.
+- Every report and log as one artifact.
+- **Demos:** for the same 12 validation questions in every arm, an animated clip with a red overlay of where the P-step tokens pool from, a keyframe strip, the gold answer, the prediction and the option probabilities.
+
+Checkpoints are not uploaded; their hashes are in the uploaded `complete.json`.
+```bash
+TRACE_RUNS=/nas-data/vlm/yyy/tracevl-runs/pilot004-a3f8c29-001 bash scripts/launch_wandb_upload_a100.sh
+```
+Demos for a single checkpoint: `trace-vl v3 demo --config ... --checkpoint ... --adapter ... --records val.jsonl --video-root ... --output demos/x --wandb`.
