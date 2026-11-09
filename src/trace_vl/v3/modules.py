@@ -41,21 +41,38 @@ def pool_regions(h: int, w: int, k: int) -> list[tuple[int, int, int, int]]:
     return regions
 
 
-def exact_pool(x: Tensor, h: int, w: int, k: int) -> tuple[Tensor, Tensor, Tensor]:
-    """Average-pool [h*w, D] grid tokens into exactly k region tokens with their (row, col) centres."""
+def pool_weights(h: int, w: int, k: int, device=None) -> tuple[Tensor, list[int], list[int]]:
+    """Averaging weights [k, h*w] of the exact k-region partition, with region (row, col) centres."""
     regions = pool_regions(h, w, k)
-    weights = torch.zeros(k, h * w, device=x.device, dtype=torch.float32)
+    weights = torch.zeros(k, h * w, device=device, dtype=torch.float32)
     rows, cols = [], []
     for index, (y0, y1, x0, x1) in enumerate(regions):
         cells = [y * w + xx for y in range(y0, y1) for xx in range(x0, x1)]
         weights[index, cells] = 1.0 / len(cells)
         rows.append((y0 + y1 - 1) // 2)
         cols.append((x0 + x1 - 1) // 2)
+    return weights, rows, cols
+
+
+def exact_pool(x: Tensor, h: int, w: int, k: int) -> tuple[Tensor, Tensor, Tensor]:
+    """Average-pool [h*w, D] grid tokens into exactly k region tokens with their (row, col) centres."""
+    weights, rows, cols = pool_weights(h, w, k, x.device)
     pooled = (weights @ x.float()).to(x.dtype)
     return pooled, torch.tensor(rows, device=x.device), torch.tensor(cols, device=x.device)
 
 
-def slot_part_pools(a: Tensor, x: Tensor, rows: Tensor, cols: Tensor, parts: int = 3):
+@torch.no_grad()
+def effective_coverage(weights: Tensor) -> float:
+    """exp(entropy) / N of the mean normalized spatial weight map of a set of emitted tokens [T, N]:
+    1.0 = the tokens jointly cover the grid uniformly; 1/N = everything comes from one cell (diagnostic)."""
+    w = weights.detach().float().clamp_min(0)
+    w = w / w.sum(-1, keepdim=True).clamp_min(1e-12)
+    m = w.mean(0)
+    entropy = -(m * m.clamp_min(1e-12).log()).sum()
+    return float(entropy.exp() / m.numel())
+
+
+def slot_part_pools(a: Tensor, x: Tensor, rows: Tensor, cols: Tensor, parts: int = 3, return_weights: bool = False):
     """Split one slot's token weights `a` [N] into `parts` groups of about equal weight (heaviest tokens first)
     and pool the real tokens of each group: `parts` convex combinations of real ViT tokens (in-distribution for
     the LM) instead of synthetic before/delta tokens. A group left empty by a dominant token falls back to the
@@ -64,7 +81,7 @@ def slot_part_pools(a: Tensor, x: Tensor, rows: Tensor, cols: Tensor, parts: int
     w = a[order]
     before = (w.cumsum(0) - w) / w.sum().clamp_min(1e-6)  # weight ranked above each token
     part = (before * parts).floor().clamp(max=parts - 1).long()
-    toks, rs, cs = [], [], []
+    toks, rs, cs, full = [], [], [], []
     for j in range(parts):
         idx = order[part == j]
         if idx.numel() == 0:
@@ -73,7 +90,12 @@ def slot_part_pools(a: Tensor, x: Tensor, rows: Tensor, cols: Tensor, parts: int
         toks.append(ww @ x[idx])
         rs.append((ww @ rows[idx].to(ww.dtype)).round())
         cs.append((ww @ cols[idx].to(ww.dtype)).round())
-    return torch.stack(toks), torch.stack(rs), torch.stack(cs)
+        if return_weights:
+            dense = torch.zeros_like(a)
+            dense[idx] = ww
+            full.append(dense)
+    out = (torch.stack(toks), torch.stack(rs), torch.stack(cs))
+    return (*out, torch.stack(full)) if return_weights else out
 
 
 def match_norm(tokens: Tensor, ref_norm: Tensor, floor: float = 1e-3) -> Tensor:
@@ -337,7 +359,7 @@ class TransitionEncoder(nn.Module):
         else:
             aux["expected_tokens"] = cfg.gist + 3 * p_active[order].sum()  # differentiable P-step budget
         before_src = cache.history[0] if len(cache.history) > 1 else x
-        trans_tokens, centroids, part_tokens = [], [], []
+        trans_tokens, centroids, part_tokens, slot_weights = [], [], [], []
         for k in active:
             a = share[:, k]
             after = a @ x
@@ -347,8 +369,11 @@ class TransitionEncoder(nn.Module):
             if self.training and not fixed:
                 trio = trio * (1 + p_active[k] - p_active[k].detach())  # straight-through: value unchanged
             if cfg.p_step_mode == "after":
-                pools, pr, pc = slot_part_pools(a, x, rows, cols)
+                pools, pr, pc, pw = slot_part_pools(a, x, rows, cols, return_weights=True)
                 part_tokens.append((match_norm(pools + self.type_embed[1], ref_norm), pr, pc))
+                slot_weights.append(pw)
+            else:
+                slot_weights.append(a[None].expand(3, -1))  # before/after/delta all pool the slot's region
             trans_tokens.append(trio)
             r, c = (a @ rows.to(a.dtype)).round(), (a @ cols.to(a.dtype)).round()
             centroids.append((float(r), float(c)))
@@ -368,7 +393,19 @@ class TransitionEncoder(nn.Module):
         )
         n_transition = sum(t.shape[0] for t in tokens)
         aux["transition_tokens"] = n_transition
+        # Diagnostics (pilot-003 review): spatial coverage of what the LM sees on this P-step, and how peaked
+        # the learned gist pools are (normalized entropy, 1 = uniform over the grid).
+        with torch.no_grad():
+            g = gist_attn.detach().float()
+            aux["gist_entropy"] = float((-(g * g.clamp_min(1e-12).log()).sum(-1) / math.log(n)).mean()) if n > 1 else 1.0
+            aux["slot_coverage"] = effective_coverage(torch.cat(slot_weights)) if slot_weights else None
+        if not cfg.emit_slots and cfg.p_step_mode in {"transition", "after"}:
+            # Eval-time ablation: the trained LM sees the gist only (does it use the 12 slot tokens at all?).
+            aux["coverage"] = effective_coverage(gist_attn)
+            return StepTokens(gist, g_rows.long(), g_cols.long(), ["gist"] * gist.shape[0], [-1] * gist.shape[0],
+                              False, surprise, masses, aux)  # fmt: skip
         if cfg.p_step_mode == "after":
+            aux["coverage"] = effective_coverage(torch.cat([gist_attn] + slot_weights))
             # After-only arm: same slots, same CST memory (from the trios above), same count (3 per slot), but
             # the LM sees real-token pools of each slot's region instead of before/after/delta.
             toks = [gist] + [t for t, _, _ in part_tokens]
@@ -384,8 +421,10 @@ class TransitionEncoder(nn.Module):
             # LM-facing P-step representation is replaced, by exactly K average-pooled frame regions.
             k = n_transition if cfg.pooled_match else cfg.pooled_tokens
             pooled, p_rows, p_cols = exact_pool(x, h, w, k)
+            aux["coverage"] = effective_coverage(pool_weights(h, w, k, x.device)[0])
             pooled = match_norm(pooled, ref_norm)
             return StepTokens(pooled, p_rows, p_cols, ["gist"] * k, [-1] * k, False, surprise, masses, aux)
+        aux["coverage"] = effective_coverage(torch.cat([gist_attn] + slot_weights))
         return StepTokens(
             torch.cat(tokens),
             torch.cat([r.reshape(-1) for r in t_rows]).long(),

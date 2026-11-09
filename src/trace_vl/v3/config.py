@@ -69,6 +69,7 @@ class TransitionConfig:
     # >0: exactly the top-`fixed_active` slots by mass on every P-step (no learned gate, no sampling, no
     # straight-through), so every arm emits gist + 3 x fixed_active tokens per P-step (pilot-003).
     fixed_active: int = 0
+    emit_slots: bool = True  # False: P-steps send the gist only (eval-time ablation of the slot tokens)
     pooled_match: bool = True  # B4 emits, per P-step, exactly as many tokens as the transition branch would
     pooled_tokens: int = 36  # fixed K per P-step when pooled_match is false (must be 1 <= K <= grid cells)
 

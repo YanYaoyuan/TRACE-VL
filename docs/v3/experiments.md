@@ -177,3 +177,50 @@ The owner-completed short-video validation run is recorded in [a100-pilot-001](r
 - The run identity (`identity.json`) holds the fully resolved per-arm configs, the record hashes, the media identity and the source hash. Any change on restart is rejected.
 
 **Limits:** one seed, 100 updates, 0–30 s YouTube multiple choice only. A null result here does not rule out benefits on long or transition-sensitive video.
+
+### 10.1 Pilot-003 result (operator run at `cc00d60`, 100 updates, 488 questions / 29 videos) — negative
+
+| Arm | Accuracy | Tokens/step | KV MiB |
+|---|---:|---:|---:|
+| native | 88.32% | 196.3 | 41.2 |
+| transition | 85.45% | 46.91 | 11.1 |
+| after | 85.45% | 46.91 | 11.1 |
+| b4 | 88.11% | 46.91 | 11.1 |
+
+The budget spread is 0, and every logged P-step had 20 tokens. Paired differences, in pp:
+
+| Comparison | Δ | 95% CI |
+|---|---:|---:|
+| transition − b4 | −2.66 | [−4.48, −1.02] |
+| after − b4 | −2.66 | [−4.47, −1.03] |
+| transition − after | 0.00 | [−1.23, 1.22] |
+
+**M2 fails** (the +2 pp condition). Both slot arms lose to grid pools at the same budget, and before/delta show no detectable effect over real-token pools.
+
+One observation to check: transition, after, and the earlier fixed-20 transition run all score exactly 85.45%. The slot arms share 8 learned gist tokens plus 12 slot tokens, while B4 sends 20 grid pools and no gist. If the LM barely uses the 12 slot tokens, the gap would be gist versus grid coverage, not slot representation. The final CST gate is |g| ≈ 4.5e-4 in all arms.
+
+### 10.2 Diagnostics (`scripts/diagnose_pilot003.sh`, before any larger run)
+
+1. **Provenance.** Completion records verify; the arms' checkpoints are distinct; the evaluated checkpoint and adapter are the trained ones.
+2. **Per-question agreement** between all arm pairs: discordant counts, identical-answer rate, exact McNemar test.
+3. **Slot-token ablation.** The trained transition and after checkpoints are evaluated with gist-only P-steps (`emit_slots: false`). If gist-only ≈ full (CI around 0, high agreement), the LM does not use the slot tokens.
+4. **Optimization health.**
+   - Training curves (first and last 20 updates), and validation gold-letter NLL from the logged letter log-probs.
+   - Per-group relative weight change against an exactly replicated initialization (the replica is validated by the untouched alert/retention parameters).
+   - LoRA B norms and CST gate statistics.
+5. **Activation probe** on 8 validation videos:
+   - CST gated-residual / input norm;
+   - effective spatial coverage of the tokens the LM sees on P-steps (1 = uniform grid);
+   - gist-attention entropy and slot coverage.
+
+   LLaVA multiple-choice data has no region labels, so coverage stands in for evidence retention.
+
+### 10.3 Follow-up, chosen by rule from the diagnostics (one change; same data, seed, schedule and budget)
+
+| Diagnostic outcome | Pilot-004 (single change) | Acceptance criterion |
+|---|---|---|
+| Optimization unhealthy: CST or slot branch weights ≈ init, LoRA B ≈ 0, or loss still falling steeply at update 100 | Same 3 arms, 1,000 updates (only the schedule changes) | Any slot arm ≥ b4 with the CI lower bound > −1 pp. Otherwise undertraining is ruled out as the explanation. |
+| Healthy, and gist-only ≈ full (slot tokens unused) or coverage(slot arms) ≪ coverage(b4) | `after` arm with the 8 learned gist tokens replaced by 8 grid pools (`gist_mode: grid`), against b4 (20 grid pools) | ≥ b4 + 2 pp: surprise-selected tokens add value over grid tokens. CI excluding 0 below: selection is harmful here; stop slot-token work on short clips and move the test to transition-sensitive benchmarks (OVO-Bench forward, TOC-Bench). |
+| Healthy, and slot tokens used (gist-only clearly worse than full) | Same 3 arms on a transition-sensitive set (OVO-Bench forward / TOC-Bench), no retraining | Slot arm ≥ b4 + 2 pp on that set |
+
+The CST gate stays as it is in pilot-004. If the probe shows a negligible residual ratio (< 1e-2), opening it (a separate learning rate for the gate) is a later, separate experiment.

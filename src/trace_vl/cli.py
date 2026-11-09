@@ -436,6 +436,14 @@ def _v3_parser(commands):
     c = sub.add_parser("score-alerts")
     c.add_argument("predictions")
     c.add_argument("--output")
+    c = sub.add_parser("diagnose-pilot", help="pilot run diagnostics: provenance, agreement, curves, weights, probe")
+    c.add_argument("--runs", required=True, help="run directory of scripts/run_pilot003.sh")
+    c.add_argument("--data-dir", required=True)
+    c.add_argument("--video-root", required=True)
+    c.add_argument("--probe-videos", type=int, default=8)
+    c.add_argument("--device", default="cuda")
+    c.add_argument("--cpu-only", action="store_true", help="skip weight replication and the activation probe")
+    c.add_argument("--output")
     c = sub.add_parser("build-stage2", help="long streams with delayed time-referenced questions (Stage 2 data)")
     c.add_argument("records", help="Stage 1 records (e.g. convert-llava-mc output) or timed records")
     c.add_argument("--output", required=True)
@@ -496,6 +504,18 @@ def _v3(args):
         from .v3.anomaly import score_alerts
 
         return show(score_alerts(args.predictions, args.output))
+    if args.action == "diagnose-pilot":
+        from .v3 import diagnose
+
+        report = diagnose.cpu_report(Path(args.runs))
+        report["ablation"] = diagnose.ablation_report(Path(args.runs))
+        if not args.cpu_only:
+            report["weights"] = diagnose.weight_changes(Path(args.runs), args.device)
+            report["probe"] = diagnose.activation_probe(Path(args.runs), Path(args.data_dir), Path(args.video_root),
+                                                        args.probe_videos, args.device)  # fmt: skip
+        if args.output:
+            Path(args.output).write_text(json.dumps(report, indent=2, default=str) + "\n")
+        return show(report)
     if args.action == "build-stage2":
         return show(v3data.build_stage2_streams(args.records, args.output, args.video_root, args.split,
                                                 args.stream_seconds, delay_min=args.delay_min,
