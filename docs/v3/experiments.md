@@ -363,3 +363,66 @@ Do transition tokens help where temporal change matters? This uses existing pilo
 - **Otherwise stop transition-token work.** The paper follows outcome C (B4 compression, learned memory retention, alert head; transition tokens reported as a negative ablation).
 - after − b4 is reported with the same statistics; it is secondary and does not gate.
 - One evaluation; no re-selection and no retraining.
+
+### 13.1 Temporal diagnostic result (operator, `9653e2a`, 2026-11-09): stopping rule fails, transition track closed
+
+OVO-Bench diagnostic half: 475 questions / 200 videos (315 temporal, 160 static); the frozen final half (863 / 192) was not evaluated.
+
+| Arm | Temporal | Static | LM tokens/step |
+|---|---:|---:|---:|
+| native | 49.52% | 59.38% | 190.2 |
+| transition-grid | 47.30% | 51.88% | 43.8 |
+| after-grid | 45.71% | 55.00% | 43.8 |
+| b4 | 47.30% | 60.63% | 43.8 |
+
+transition − b4 (pp):
+
+| Category | Δ | 95% CI |
+|---|---:|---:|
+| temporal | 0.00 | [−4.48, +4.58] |
+| static | −8.75 | [−14.71, −3.45] |
+| interaction | +8.75 | [+1.81, +16.20] |
+
+The interaction comes from worse static accuracy, not from a temporal gain. **`continue_transition_track = false`.** Pilots 002–005 and this diagnostic are kept as negative evidence for this implementation and recipe; this is not a universal claim against transition representations. **B4 is the compression baseline. The paper follows outcome C.** The token reduction (−77% vs native) is a count, not a measured latency, FLOP or memory saving; B4 is not claimed lossless or superior to native.
+
+## 14. Stage-2 memory pilot: learned retention vs heuristics at equal budget (predeclared)
+
+**Question:** with the B4 representation and a real memory budget, does the **learned** retention scorer keep the right evidence better than surprise mass or FIFO?
+
+**Data** (`scripts/run_memory_pilot.sh`, `trace_vl.v3.memory_pilot`):
+- MC questions of the already-extracted LLaVA subset.
+- **Every video in the Stage 1 train/val manifests is excluded.**
+- Splits are frozen at **source-video level before stitching**: train / dev / test 80/10/10 by hash. Pilot caps: 3,000 / 400 / 400 videos.
+- Streams are about 300 s, stitched within each split:
+  - 40% distractor clips (never asked about);
+  - delayed questions 45–240 s after their clip (beyond the 16 s window);
+  - 20% immediate questions (within-window control);
+  - each question names its interval.
+- **dev** is used for this pilot. **test** is frozen. The OVO final half is not used.
+
+**Model and budget:**
+- Stage 2 from pilot-005's B4 final checkpoint (`memory_pilot_b4.yaml`), 300 updates on 4×A100.
+- Memory: a **16 s window + 1,024 older tokens**. B4 emits about 13k tokens per 300 s, so most must be evicted.
+- Truncated BPTT (chunks of 8 steps, also cut at question times) and retention BCE against later-question evidence windows. Labels come from annotations at training time only; the scorer's features (age, mass, hits, slot/step) contain no question information at evaluation.
+
+**Evaluation** (dev, 40 streams):
+- **The same Stage-2 checkpoint under policies tkm / mass / fifo / full.** Only the policy changes.
+- **tkm with `evict_every 8`**, to quantify the train/eval eviction-cadence mismatch: training evicts at chunk ends, inference every step.
+- Separately, **the Stage-1 B4 checkpoint under mass / fifo / full** (does Stage-2 training help?).
+- Reported per run:
+  - accuracy (all, beyond-window, within-window) with a stream-cluster bootstrap;
+  - evidence kept;
+  - retained KV tokens and MB;
+  - evicted / streamed tokens;
+  - evidence age;
+  - seconds per stream.
+
+**Decision:**
+- **Learned retention is supported** only if s2_tkm − s2_mass **and** s2_tkm − s2_fifo on beyond-window questions are each ≥ +3 pp with a stream-bootstrap CI lower bound > 0. This also requires:
+  - **memory pressure**: evictions occur, FIFO keeps ≤ 80% of the evidence, and ≥ 100 beyond-window questions;
+  - **equal retained KV** (within 2%).
+- Otherwise retention is not a contribution: report the heuristics and do not scale Stage 2 for retention.
+
+**Smoke mode** comes first: 2 updates and 2 dev streams per run. It checks loading, evictions, nonzero scorer updates and assembly of all eight evaluations.
+
+**Limits:** truncated gradients across chunks; chunk-end eviction in training (quantified by the evict-8 run); one seed; clip-level evidence windows. Alerts are a separate experiment.

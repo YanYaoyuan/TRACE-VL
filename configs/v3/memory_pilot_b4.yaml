@@ -1,0 +1,20 @@
+# Stage-2 memory pilot (experiments.md section 14): B4 representation (pilot-005's B4 arm config, so its final
+# checkpoint loads unchanged), trained through the streaming cache with the learned TKM retention policy.
+# Memory pressure by construction: 16 s recent window + 1,024 older-token budget (B4 streams ~44 tokens/step, so a
+# 300 s stream emits ~13k tokens and most must be evicted). Evaluation swaps ONLY memory.policy at this budget.
+extends: pilot005_b4.yaml
+memory:
+  policy: tkm
+  window_seconds: 16.0
+  budget_tokens: 1024
+  evict_every: 1
+stage2:
+  chunk_steps: 8
+  max_seconds: 600.0
+  steps: 300
+  grad_accum: 1
+  question_weight: 1.0
+  retention_weight: 0.5
+  lr_scale: 0.5
+train:
+  save_every: 100

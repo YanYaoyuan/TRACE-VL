@@ -337,6 +337,9 @@ def train_stage2(cfg: V3Config, streams_path: str, video_root: str, output: str,
             optimizer.zero_grad(set_to_none=True)
             stats = [runner.run(random.choice(records), video_root, 1.0 / s2.grad_accum) for _ in range(s2.grad_accum)]
             all_reduce_grads(module_params + lora_params, world)
+            retention = list(modules.retention.parameters())
+            retention_grad = math.sqrt(sum(float(p.grad.float().pow(2).sum()) for p in retention if p.grad is not None))
+            retention_before = [p.detach().clone() for p in retention]
             norms = {}
             for name, group in zip(("modules", "lora"), optimizer.param_groups):
                 params = [p for p in group["params"] if p.grad is not None]
@@ -344,8 +347,11 @@ def train_stage2(cfg: V3Config, streams_path: str, video_root: str, output: str,
             if not all(math.isfinite(v) for v in norms.values()):
                 raise FloatingPointError(f"nonfinite gradient norm: {norms}")
             optimizer.step()
+            retention_update = math.sqrt(sum(float((p.detach() - b).float().pow(2).sum())
+                                             for p, b in zip(retention, retention_before)))  # fmt: skip
             if rank == 0:
                 line = {"step": step + 1, **summarize(stats), "grad_norm_modules": norms["modules"],
+                        "grad_norm_retention": retention_grad, "update_norm_retention": retention_update,
                         "grad_norm_lora": norms["lora"], "gate_abs_mean": float(modules.cst.gate.abs().mean()),
                         "lr": optimizer.param_groups[0]["lr"], "elapsed": round(clock.perf_counter() - started, 1),
                         "peak_gb": torch.cuda.max_memory_allocated(device) / 1e9}  # fmt: skip
@@ -399,7 +405,8 @@ def summarize_streams(rows: list[dict], replicates: int = 2000, seed: int = 7) -
 
 def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: str, mode: str = "v3",
                      checkpoint: str | None = None, adapter: str | None = None, policy: str | None = None,
-                     device: str = "cuda", split: str = "val", limit: int | None = None) -> dict:  # fmt: skip
+                     device: str = "cuda", split: str = "val", limit: int | None = None, shard=(0, 1),
+                     evict_every: int | None = None) -> dict:  # fmt: skip
     """Stream each held-out Stage 2 stream once with the inference session; ask its delayed questions at their
     times. `policy` overrides memory.policy at the same budget (tkm vs mass / fifo / window controls)."""
     from .backbone import Backbone
@@ -407,8 +414,10 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
     from .harness import _modules, clean_partial, read_unit, run_fingerprint, write_unit
     from .session import StreamSession
 
-    if policy is not None:
-        cfg = V3Config.from_dict({**cfg.to_dict(), "memory": {**cfg.to_dict()["memory"], "policy": policy}})
+    if policy is not None or evict_every is not None:
+        memory = {**cfg.to_dict()["memory"]}
+        memory.update({k: v for k, v in (("policy", policy), ("evict_every", evict_every)) if v is not None})
+        cfg = V3Config.from_dict({**cfg.to_dict(), "memory": memory})
     if mode == "v3" and not checkpoint:
         raise ValueError("--mode v3 needs a --checkpoint")
     records = [r for r in read_jsonl(streams_path) if r.get("split") == split and r.get("questions")]
@@ -428,14 +437,17 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
     if units.exists():
         clean_partial(units)
     done = {r["id"] for r in records if read_unit(units, r["id"], fingerprint["id"]) is not None}
-    bb = Backbone(cfg.backbone, cfg.stream, device)
-    if adapter:
-        bb.add_lora(0, 0, adapter=adapter)
-        bb.model.eval()
-    modules = _modules(cfg, bb, checkpoint, device) if mode == "v3" else None
+    todo = [i for i, r in enumerate(records) if r["id"] not in done and i % shard[1] == shard[0]]
+    bb = modules = None
+    if todo:  # an assembly-only call (everything already evaluated) does not load the model
+        bb = Backbone(cfg.backbone, cfg.stream, device)
+        if adapter:
+            bb.add_lora(0, 0, adapter=adapter)
+            bb.model.eval()
+        modules = _modules(cfg, bb, checkpoint, device) if mode == "v3" else None
     gap = cfg.stream.frame_gap
-    for record in records:
-        if record["id"] in done:
+    for index, record in enumerate(records):
+        if record["id"] in done or index % shard[1] != shard[0]:
             continue
         times = stream_times(record, cfg.stream.step_seconds, gap, cfg.stage2.max_seconds)
         if not times:
@@ -445,28 +457,41 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
         reader = StepReader(record, video_root)
         rows, appended = [], []
         try:
+            started = clock.perf_counter()
             for k, t in enumerate(times):
                 result = session.step(reader.step(t, gap), t)
                 appended.append((t, result.tokens))
                 for q in due.get(k, []):
                     kept = evidence_kept(session.memory, appended, q.get("evidence"))
                     choice, _ = session.ask(q["question"], q["options"])
+                    evidence_end = max((b for _, b in q.get("evidence") or []), default=None)
                     rows.append({"stream": record["id"], "id": q["id"], "t": q["time"], "delay": q.get("delay", 0.0),
+                                 "evidence_age": None if evidence_end is None else round(float(q["time"]) - evidence_end, 3),
                                  "correct": int(choice == q["answer"]), "evidence_kept": kept,
-                                 "kv_tokens": len(session.memory), "run": fingerprint["id"]})  # fmt: skip
+                                 "kv_tokens": len(session.memory), "kv_mb": bb.kv_bytes(session.cache) / 2**20,
+                                 "evicted_tokens": session.memory.evicted_tokens, "streamed_tokens": sum(n for _, n in appended),
+                                 "run": fingerprint["id"]})  # fmt: skip
+            for row in rows:
+                row["stream_seconds_elapsed"] = round(clock.perf_counter() - started, 2)
+                row["stream_steps"] = len(times)
         finally:
             reader.close()
         write_unit(units, record["id"], rows, fingerprint["id"])
         del session
         torch.cuda.empty_cache()
-    rows = []
+    rows, pending = [], 0
     for record in records:
         if not stream_times(record, cfg.stream.step_seconds, gap, cfg.stage2.max_seconds):
             continue
         unit = read_unit(units, record["id"], fingerprint["id"])
         if unit is None:
-            raise RuntimeError(f"stream {record['id']} has no complete result")
+            if shard[1] == 1:
+                raise RuntimeError(f"stream {record['id']} has no complete result")
+            pending += 1  # another shard's stream: the last shard to finish assembles
+            continue
         rows += unit
+    if pending:
+        return {"shard": list(shard), "pending_streams_other_shards": pending}
     target = output / "predictions.jsonl"  # assembled from complete streams only; rewritten each time
     write_jsonl(target, rows)
     summary = summarize_streams(read_jsonl(target))

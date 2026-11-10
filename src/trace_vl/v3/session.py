@@ -138,7 +138,8 @@ class StreamSession:
         self.memory.append(tokens.shape[0], kinds, t, groups)
         self.memory.append(1, "text", t, ("step", self.step_index))
         self._score_groups(info, t, drift)
-        mask = self.memory.keep_mask(t)
+        evict_now = (self.step_index + 1) % self.cfg.memory.evict_every == 0
+        mask = self.memory.keep_mask(t) if evict_now else None
         if mask is not None:
             bb.evict(self.cache, mask)
             self.memory.apply(mask)

@@ -96,6 +96,9 @@ class MemoryConfig:
     sink_steps: int = 1  # first steps always kept (plus the prompt)
     window_seconds: float = 32.0  # recent steps always kept
     budget_tokens: int = 4096  # tokens kept beyond sink + window + dialogue
+    # Evict every N steps (1 = every step, the inference default). Stage 2 training evicts at chunk ends
+    # (chunk_steps, and question times), so evaluating with N = chunk_steps quantifies that train/eval mismatch.
+    evict_every: int = 1
 
 
 @dataclass
@@ -208,6 +211,8 @@ class V3Config:
             raise ValueError("transition.pooled_tokens must be a positive integer")
         if config.stage2.chunk_steps < 1 or config.stage2.max_seconds <= 0 or config.stage2.grad_accum < 1:
             raise ValueError("stage2.chunk_steps / grad_accum must be >= 1 and stage2.max_seconds positive")
+        if config.memory.evict_every < 1:
+            raise ValueError("memory.evict_every must be >= 1")
         if config.memory.policy not in {"full", "window", "drift", "tkm", "fifo", "mass"}:
             raise ValueError("memory.policy must be full, window, drift, tkm, mass or fifo")
         if config.cst.dim % config.cst.heads:

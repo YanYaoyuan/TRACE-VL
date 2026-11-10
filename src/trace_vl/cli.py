@@ -510,6 +510,17 @@ def _v3_parser(commands):
     c.add_argument("--split", default="val")
     c.add_argument("--limit", type=int)
     c.add_argument("--device", default="cuda")
+    c.add_argument("--shard", type=_shard, default=(0, 1))
+    c.add_argument("--evict-every", type=int, help="override memory.evict_every (train/eval eviction parity check)")
+    c = sub.add_parser("stage2-splits", help="freeze train/dev/test at source-video level before stitching streams")
+    c.add_argument("records", nargs="+", help="MC records (convert-llava-mc output)")
+    c.add_argument("--exclude", nargs="*", default=[], help="manifests whose videos are excluded (Stage 1 train/val)")
+    c.add_argument("--output", required=True)
+    c.add_argument("--max-videos", nargs=3, type=int, metavar=("TRAIN", "DEV", "TEST"), help="seeded per-split video caps")
+    c = sub.add_parser("memory-report", help="memory pilot: policies at equal budget, paired stream bootstrap, decision")
+    c.add_argument("--eval-root", required=True)
+    c.add_argument("--window-seconds", type=float, required=True)
+    c.add_argument("--output")
     c = sub.add_parser("train-stage2", help="Stage 2 long-stream training through the streaming cache (torchrun)")
     c.add_argument("--config", default="configs/v3/stage2.yaml")
     c.add_argument("--streams", required=True, help="build-stage2 output")
@@ -578,6 +589,18 @@ def _v3(args):
         from .v3.temporal import temporal_report
 
         report = temporal_report(args.eval_root, args.records)
+        if args.output:
+            Path(args.output).write_text(json.dumps(report, indent=2) + "\n")
+        return show(report)
+    if args.action == "stage2-splits":
+        from .v3.memory_pilot import make_splits
+
+        caps = dict(zip(("train", "dev", "test"), args.max_videos)) if args.max_videos else None
+        return show(make_splits(args.records, args.exclude, args.output, max_videos=caps))
+    if args.action == "memory-report":
+        from .v3.memory_pilot import memory_report
+
+        report = memory_report(args.eval_root, args.window_seconds)
         if args.output:
             Path(args.output).write_text(json.dumps(report, indent=2) + "\n")
         return show(report)
@@ -662,7 +685,8 @@ def _v3(args):
         from .v3.train_stage2 import evaluate_streams
 
         return show(evaluate_streams(cfg, args.streams, args.video_root, args.output, args.mode, args.checkpoint,
-                                     args.adapter, args.policy, args.device, args.split, args.limit))  # fmt: skip
+                                     args.adapter, args.policy, args.device, args.split, args.limit, args.shard,
+                                     args.evict_every))  # fmt: skip
     if args.action == "train-stage2":
         from .v3.train_stage2 import train_stage2
 
