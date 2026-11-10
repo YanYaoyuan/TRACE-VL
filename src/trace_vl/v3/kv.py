@@ -46,9 +46,16 @@ class KVMemory:
     def __len__(self):
         return len(self.kind)
 
-    def keep_mask(self, now: float) -> torch.Tensor | None:
+    def keep_mask(self, now: float, policy: str | None = None) -> torch.Tensor | None:
+        """Tokens to keep. `policy` overrides cfg.policy (counterfactual audits on the same memory state).
+
+        fill "groups": admit whole older groups in rank order while they fit (a group that does not fit is
+        skipped), so different rankings can leave different unused capacity.
+        fill "exact" (pilot budget repair): admit whole groups while they fit, then the newest tokens of the next
+        ranked group up to the budget, so every policy keeps exactly min(budget, older tokens) older tokens."""
         cfg = self.cfg
-        if cfg.policy == "full":
+        policy = policy or cfg.policy
+        if policy == "full":
             return None
         recent_from = now - cfg.window_seconds
         keep = [p or t >= recent_from for p, t in zip(self.protected, self.time)]
@@ -59,21 +66,38 @@ class KVMemory:
                 continue
             sizes[g] = sizes.get(g, 0) + 1
             newest[g] = max(newest.get(g, float("-inf")), self.time[i])
-        if cfg.policy == "window" or not sizes:
-            chosen = set()
-        else:
-            if cfg.policy == "fifo":
+        chosen, partial = set(), {}
+        if policy != "window" and sizes:
+            if policy == "fifo":
                 ranked = sorted(sizes, key=lambda g: newest[g], reverse=True)
             else:  # drift / tkm / mass: by score, ties broken by recency
                 ranked = sorted(sizes, key=lambda g: (self.scores.get(g, float("-inf")), newest[g]), reverse=True)
-            chosen, used = set(), 0
+            used = 0
             for g in ranked:
-                if used + sizes[g] > cfg.budget_tokens:
-                    continue
-                chosen.add(g)
-                used += sizes[g]
-        mask = torch.tensor([k or g in chosen for k, g in zip(keep, self.group)], dtype=torch.bool)
+                if used + sizes[g] <= cfg.budget_tokens:
+                    chosen.add(g)
+                    used += sizes[g]
+                elif cfg.fill == "exact":
+                    if cfg.budget_tokens - used > 0:
+                        partial[g] = cfg.budget_tokens - used
+                    break
+        keep_index = {i for i, (k, g) in enumerate(zip(keep, self.group)) if k or g in chosen}
+        for g, take in partial.items():
+            members = sorted((i for i, gg in enumerate(self.group) if gg == g and not keep[i]),
+                             key=lambda i: (self.time[i], i), reverse=True)  # fmt: skip
+            keep_index.update(members[:take])
+        mask = torch.tensor([i in keep_index for i in range(len(self.group))], dtype=torch.bool)
         return None if bool(mask.all()) else mask
+
+    def accounting(self, now: float) -> dict:
+        """Current KV split: protected (prompt/sink), recent window, older (budgeted), and unused older capacity."""
+        recent_from = now - self.cfg.window_seconds
+        protected = sum(self.protected)
+        window = sum(1 for p, t in zip(self.protected, self.time) if not p and t >= recent_from)
+        older = len(self.kind) - protected - window
+        groups = {g for p, t, g in zip(self.protected, self.time, self.group) if not p and t < recent_from}
+        return {"protected": protected, "window": window, "older": older, "older_groups": len(groups),
+                "older_unused": max(0, self.cfg.budget_tokens - older)}
 
     def apply(self, mask: torch.Tensor):
         idx = mask.nonzero().flatten().tolist()

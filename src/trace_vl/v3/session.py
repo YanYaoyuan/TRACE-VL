@@ -69,6 +69,8 @@ class StreamSession:
         self.last_context = None  # (taps, xy, t, clock) of the latest step, for decide()
         self.last_info = None
         self.evict_steps: set | None = None  # explicit eviction steps (Stage-2 training schedule); None = every N
+        self.audit = False  # memory audit: counterfactual FIFO overlap and score correlations at each eviction
+        self.audit_stats: dict[str, list[float]] = {"jaccard_vs_fifo": [], "score_recency_rho": [], "score_mass_rho": []}
         self.trace_ids = [] if trace else None  # token ids as the processor would write them (checks)
         self.trace_query = None
         self._prefill_prompt()
@@ -144,6 +146,8 @@ class StreamSession:
         else:
             evict_now = (self.step_index + 1) % self.cfg.memory.evict_every == 0
         mask = self.memory.keep_mask(t) if evict_now else None
+        if self.audit and mask is not None and self.cfg.memory.policy in {"tkm", "mass"}:
+            self._audit_eviction(t, mask)
         if mask is not None:
             bb.evict(self.cache, mask)
             self.memory.apply(mask)
@@ -170,6 +174,34 @@ class StreamSession:
             self.decision_memory.add(torch.cat(latent), t)
         self.step_index += 1
         return result
+
+    def _audit_eviction(self, t: float, mask: torch.Tensor):
+        """Same memory state: which older tokens this policy keeps vs FIFO (Jaccard), and whether its group scores
+        track recency (newest time) or surprise mass (Spearman rank correlations over the older groups)."""
+        memory = self.memory
+        recent_from = t - self.cfg.memory.window_seconds
+        older = [i for i, (p, tt) in enumerate(zip(memory.protected, memory.time)) if not p and tt < recent_from]
+        fifo = memory.keep_mask(t, policy="fifo")
+        kept = {i for i in older if bool(mask[i])}
+        kept_fifo = {i for i in older if fifo is None or bool(fifo[i])}
+        union = kept | kept_fifo
+        if union:
+            self.audit_stats["jaccard_vs_fifo"].append(len(kept & kept_fifo) / len(union))
+        groups = sorted({memory.group[i] for i in older if memory.group[i] in memory.scores})
+        if len(groups) >= 3:
+            newest = {g: max(memory.time[i] for i in older if memory.group[i] == g) for g in groups}
+            scores = [memory.scores[g] for g in groups]
+            self.audit_stats["score_recency_rho"].append(spearman(scores, [newest[g] for g in groups]))
+            masses = [self.book.groups[g].mass if g in self.book.groups else 0.0 for g in groups]
+            self.audit_stats["score_mass_rho"].append(spearman(scores, masses))
+
+    def audit_summary(self, t: float) -> dict:
+        out = {f"kv_{k}": v for k, v in self.memory.accounting(t).items()}
+        for key, values in self.audit_stats.items():
+            clean = [v for v in values if v == v]
+            out[f"audit_{key}_mean"] = round(sum(clean) / len(clean), 4) if clean else None
+        out["audit_evictions"] = len(self.audit_stats["jaccard_vs_fifo"])
+        return out
 
     def _clock(self, info, t: float) -> torch.Tensor:
         surprise = float(info.surprise.mean()) if info is not None else 0.0
@@ -293,4 +325,28 @@ def observe_step(book: RetentionBook, info, t: float, step_index: int):
     slot_ids = list(dict.fromkeys(g for g in info.groups if g >= 0))
     for g, mass in zip(slot_ids, info.aux.get("active_masses", [])):
         book.observe(("slot", g), t, float(mass), is_slot=True)
+
+
+def spearman(a: list[float], b: list[float]) -> float:
+    """Spearman rank correlation with average ranks for ties (NaN when either side is constant)."""
+
+    def ranks(values):
+        order = sorted(range(len(values)), key=lambda i: values[i])
+        r = [0.0] * len(values)
+        i = 0
+        while i < len(order):
+            j = i
+            while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+                j += 1
+            for k in range(i, j + 1):
+                r[order[k]] = (i + j) / 2
+            i = j + 1
+        return r
+
+    ra, rb = ranks(a), ranks(b)
+    n = len(a)
+    ma, mb = sum(ra) / n, sum(rb) / n
+    cov = sum((x - ma) * (y - mb) for x, y in zip(ra, rb))
+    va, vb = sum((x - ma) ** 2 for x in ra), sum((y - mb) ** 2 for y in rb)
+    return cov / (va * vb) ** 0.5 if va > 0 and vb > 0 else float("nan")
 

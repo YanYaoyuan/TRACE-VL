@@ -474,3 +474,32 @@ The pilot verifies this record (passed, and matching revision, config, initializ
 **Training reuse** requires the trainer's atomic completion record, written after both final saves. It must match the resolved config, the step count, the contiguous metrics, the artifact hashes and the run identity (source revision, training-stream hash, stream media identity, Stage-1 module and adapter identity). Otherwise the attempt is kept as `train.incomplete-*` and retrained. Changed inputs for an existing output directory are rejected.
 
 **Limits:** truncated gradients across chunks; chunk-end eviction in training (quantified by the evict-8 run); one seed; clip-level evidence windows. Alerts are a separate experiment.
+
+### 14.1 Memory pilot result (`448adf1`, 300 updates; tester analysis on issue #4) and evaluation-only budget repair
+
+**Data:**
+- 802 dev questions, of which 571 are actual beyond-window questions across 37 streams; median evidence age 68.6 s.
+- 954 dev-assigned videos produced 55 streams; the first 40 were used.
+- Train and test data were reused.
+
+**Status: `invalid`.**
+- Retained-KV spread across policies was 2.14% (mass vs FIFO), against the 2% limit, which is not relaxed.
+- Descriptively, TKM shows no delayed-QA gain over FIFO: 73.9% vs 74.1%, with a 0.15% KV difference; TKM − FIFO = −0.18 pp [−0.57, 0.00].
+- Stage-2 training shows promising **descriptive** S2 − S1 gains under fixed policies (FIFO +4.7 pp beyond-window). These need paired intervals.
+- **No learned-memory contribution is established.**
+
+**Cause (from code):** `keep_mask` admitted whole groups of varying size under the 1,024-token older budget and skipped groups that did not fit, so different rankings leave different unused capacity.
+
+**One predeclared, accuracy-independent correction:** `memory.fill: exact` (`configs/v3/memory_pilot_b4_exactfill.yaml`). Whole groups are admitted in rank order, then the newest tokens of the next-ranked group fill the budget exactly. Every policy therefore retains min(budget, older tokens), which is identical across policies at every step: the window and protected tokens depend only on time, and all policies append the same tokens. The correction applies to all compared policies.
+
+**Evaluation-only repair run** (`scripts/run_memory_eval_repair.sh`):
+- **Inputs:** the frozen S1/S2 checkpoints (completion record, Stage-1 identity verified) and the identical 40-stream manifest (hash recorded). The config is identical except `memory.fill`. Training used `groups`; this mismatch is recorded and does not retroactively validate the `448adf1` run.
+- **Steps:**
+  1. Paired S2 − S1 (FIFO / mass / full) and per-question TKM vs FIFO/mass agreement, from the **existing** predictions.
+  2. Budget **pre-check** on the 2 shortest + 2 longest manifest streams; the complete evaluation runs only if the KV spread is ≤ 2%.
+  3. All eight evaluations with the **memory audit**:
+     - KV split (protected, window, older, unused older capacity, older groups) at every question;
+     - Jaccard overlap of the older tokens TKM/mass keep vs a FIFO counterfactual on the same memory state;
+     - Spearman correlation of retention scores with recency and with surprise mass at every eviction. This tests whether the scorer effectively ranks by recency.
+- **Decision rule unchanged**; the full policy remains the unbounded reference. The frozen test split is untouched; no new data or training.
+

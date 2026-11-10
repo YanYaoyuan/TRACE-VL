@@ -434,3 +434,54 @@ def verify_smoke(smoke_ok: str | Path, expected: dict) -> list[str]:
         if record.get(key) != expected.get(key):
             problems.append(f"smoke {key} differs from the intended pilot")
     return problems
+
+
+# ---------------------------------------------------------------------------- pilot follow-up (448adf1 review)
+def memory_analysis(eval_root: str | Path, window_seconds: float) -> dict:
+    """From existing predictions: paired S2 - S1 under each heuristic policy, per-question TKM vs FIFO/mass agreement,
+    and the memory audit fields when present (KV split, unused capacity, FIFO overlap, score correlations)."""
+    root = Path(eval_root)
+    runs = {d.name: _rows(d) for d in sorted(root.iterdir()) if (d / "predictions.jsonl").is_file()}
+    beyond = lambda r: r.get("evidence_age") is not None and r["evidence_age"] > window_seconds  # noqa: E731
+    out = {"stage2_minus_stage1": {}, "agreement": {}, "audit": {}}
+    for policy in ("fifo", "mass", "full"):
+        a, b = f"s2_{policy}", f"s1_{policy}"
+        if a in runs and b in runs:
+            out["stage2_minus_stage1"][policy] = {"beyond_window": _paired(runs[a], runs[b], beyond),
+                                                  "all": _paired(runs[a], runs[b], lambda r: True)}  # fmt: skip
+    for other in ("s2_fifo", "s2_mass"):
+        if "s2_tkm" in runs and other in runs:
+            a, b = {r["id"]: r for r in runs["s2_tkm"]}, {r["id"]: r for r in runs[other]}
+            counts = defaultdict(int)
+            for key in a.keys() & b.keys():
+                ca, cb = a[key]["correct"], b[key]["correct"]
+                counts["both_correct" if ca and cb else "only_tkm" if ca else f"only_{other}" if cb else "both_wrong"] += 1
+            out["agreement"][f"s2_tkm_vs_{other}"] = {**counts, "n": len(a.keys() & b.keys())}
+    for name, rows in runs.items():
+        fields = [k for k in ("kv_protected", "kv_window", "kv_older", "kv_older_unused", "kv_older_groups",
+                              "audit_jaccard_vs_fifo_mean", "audit_score_recency_rho_mean", "audit_score_mass_rho_mean")
+                  if any(r.get(k) is not None for r in rows)]  # fmt: skip
+        if fields:
+            out["audit"][name] = {k: round(sum(r[k] for r in rows if r.get(k) is not None)
+                                           / max(1, sum(r.get(k) is not None for r in rows)), 4) for k in fields}  # fmt: skip
+    return out
+
+
+def budget_precheck(eval_root: str | Path, policies=("s2_tkm", "s2_mass", "s2_fifo"), tolerance: float = 0.02) -> dict:
+    """Mean retained KV per policy on the pre-check streams; passes only if max/min - 1 <= tolerance (the original
+    2% equal-budget criterion, applied before the complete evaluation)."""
+    kv = {}
+    for name in policies:
+        rows = _rows(Path(eval_root) / name)
+        kv[name] = sum(r["kv_tokens"] for r in rows) / max(1, len(rows))
+    spread = max(kv.values()) / min(kv.values()) - 1 if kv and min(kv.values()) > 0 else float("inf")
+    return {"kv_tokens_mean": kv, "spread": spread, "tolerance": tolerance, "passed": spread <= tolerance}
+
+
+def precheck_streams(streams_path: str | Path, out_path: str | Path, per_end: int = 2) -> list[str]:
+    """Budget pre-check manifest: the `per_end` shortest and longest streams of the evaluation manifest (by duration,
+    ties by id), chosen from metadata only."""
+    rows = sorted(read_jsonl(streams_path), key=lambda r: (r["duration"], r["id"]))
+    chosen = rows[:per_end] + [r for r in rows[-per_end:] if r not in rows[:per_end]]
+    write_jsonl(out_path, chosen)
+    return [r["id"] for r in chosen]

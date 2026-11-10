@@ -422,7 +422,7 @@ def summarize_streams(rows: list[dict], replicates: int = 2000, seed: int = 7) -
 def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: str, mode: str = "v3",
                      checkpoint: str | None = None, adapter: str | None = None, policy: str | None = None,
                      device: str = "cuda", split: str = "val", limit: int | None = None, shard=(0, 1),
-                     evict_every: int | None = None, evict_schedule: str = "every") -> dict:  # fmt: skip
+                     evict_every: int | None = None, evict_schedule: str = "every", audit: bool = False) -> dict:  # fmt: skip
     """Stream each held-out Stage 2 stream once with the inference session; ask its delayed questions at their
     times. `policy` overrides memory.policy at the same budget (tkm vs mass / fifo / window controls)."""
     from .backbone import Backbone
@@ -446,7 +446,7 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
     output.mkdir(parents=True, exist_ok=True)
     if evict_schedule not in {"every", "train"}:
         raise ValueError("evict_schedule must be every (memory.evict_every) or train (Stage-2 chunk schedule)")
-    fingerprint = run_fingerprint(cfg, streams_path, f"stage2-{mode}-{split}-evict-{evict_schedule}", checkpoint, adapter,
+    fingerprint = run_fingerprint(cfg, streams_path, f"stage2-{mode}-{split}-evict-{evict_schedule}-audit-{int(audit)}", checkpoint, adapter,
                                   video_root, records)  # fmt: skip
     run_file = output / "run.json"
     if run_file.exists() and json.loads(run_file.read_text()).get("id") != fingerprint["id"]:
@@ -475,6 +475,7 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
         session = StreamSession(bb, cfg, modules, mode=mode)
         if evict_schedule == "train":
             session.evict_steps = eviction_steps(times, record["questions"], cfg.stage2.chunk_steps, gap)
+        session.audit = audit
         reader = StepReader(record, video_root)
         rows, appended = [], []
         try:
@@ -493,6 +494,7 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
                                  "evicted_tokens": session.memory.evicted_tokens,
                                  "kv_appended_tokens": len(session.memory) + session.memory.evicted_tokens,
                                  "visual_tokens_streamed": sum(n for _, n in appended),
+                                 **(session.audit_summary(float(q["time"])) if audit else {}),
                                  "run": fingerprint["id"]})  # fmt: skip
             for row in rows:
                 row["stream_seconds_elapsed"] = round(clock.perf_counter() - started, 2)

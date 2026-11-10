@@ -367,3 +367,75 @@ def test_pilot_dev_shortage_is_rejected_and_stale_prep_refused(tmp_path):
     check_prep_request(tmp_path / "data" / "prep-request.json", request)  # same request: allowed (resume)
     with pytest.raises(ValueError, match="new output directory"):
         check_prep_request(tmp_path / "data" / "prep-request.json", {**request, "dev_cap": 400})
+
+
+# ---------------------------------------------------------------------------- budget repair (448adf1 pilot: KV spread 2.14%)
+def filled_memory(fill, policy, budget=10):
+    from trace_vl.v3.config import MemoryConfig
+    from trace_vl.v3.kv import KVMemory
+
+    mem = KVMemory(MemoryConfig(policy=policy, window_seconds=5.0, budget_tokens=budget, fill=fill))
+    mem.append(2, "prompt", -1.0, ("prompt",), protected=True)
+    for k, size in enumerate((6, 6, 3, 4, 7)):  # older groups of different sizes at t = 0..4
+        mem.append(size, "gist", float(k), ("step", k))
+        mem.scores[("step", k)] = [0.9, 0.1, 0.8, 0.2, 0.5][k]
+    mem.append(4, "gist", 20.0, ("step", 99))  # inside the window at now = 21
+    return mem
+
+
+@pytest.mark.parametrize("policy", ["tkm", "fifo", "mass"])
+def test_exact_fill_keeps_exactly_the_budget_for_every_policy(policy):
+    mem = filled_memory("exact", policy)
+    mem.apply(mem.keep_mask(21.0))
+    acc = mem.accounting(21.0)
+    assert acc["older"] == 10 and acc["older_unused"] == 0 and acc["protected"] == 2 and acc["window"] == 4
+
+
+def test_group_fill_can_leave_policy_dependent_unused_capacity():
+    used = {}
+    for policy in ("tkm", "fifo"):
+        mem = filled_memory("groups", policy)
+        mem.apply(mem.keep_mask(21.0))
+        used[policy] = mem.accounting(21.0)["older"]
+    assert used["tkm"] != used["fifo"]  # tkm: 6 (score .9) + 3 (.8) = 9; fifo: 7 (t=4) then 6 does not fit, 3 fits = 10
+    assert used == {"tkm": 9, "fifo": 10}
+
+
+def test_exact_fill_partial_group_keeps_its_newest_tokens():
+    from trace_vl.v3.config import MemoryConfig
+    from trace_vl.v3.kv import KVMemory
+
+    mem = KVMemory(MemoryConfig(policy="tkm", window_seconds=1.0, budget_tokens=3, fill="exact"))
+    mem.append(2, "after", 0.0, ("slot", 1))
+    mem.append(2, "after", 1.0, ("slot", 1))  # the same slot group seen again, newer tokens
+    mem.scores[("slot", 1)] = 1.0
+    mask = mem.keep_mask(10.0)
+    assert mask.tolist() == [False, True, True, True]  # 3 of 4: the oldest token is dropped
+
+
+def test_spearman_and_fill_validation():
+    from trace_vl.v3.session import spearman
+
+    assert spearman([1, 2, 3, 4], [10, 20, 30, 40]) == pytest.approx(1.0)
+    assert spearman([1, 2, 3, 4], [4, 3, 2, 1]) == pytest.approx(-1.0)
+    assert spearman([1, 1, 1], [1, 2, 3]) != spearman([1, 1, 1], [1, 2, 3])  # NaN for a constant side
+    with pytest.raises(ValueError, match="fill"):
+        V3Config.from_dict({"memory": {"fill": "partial"}})
+
+
+def test_follow_up_analysis_pairs_stage2_with_stage1_and_checks_budget(tmp_path):
+    from trace_vl.v3.memory_pilot import budget_precheck, memory_analysis, precheck_streams
+
+    good, bad = (lambda s, q: q != 4, 0.7), (lambda s, q: q in (0, 1), 0.3)
+    all_runs(tmp_path / "eval", good, bad, bad)
+    a = memory_analysis(tmp_path / "eval", 16.0)
+    assert set(a["stage2_minus_stage1"]) == {"fifo", "mass", "full"}
+    assert a["agreement"]["s2_tkm_vs_s2_fifo"]["only_tkm"] == 60 and a["agreement"]["s2_tkm_vs_s2_fifo"]["n"] == 150
+    assert budget_precheck(tmp_path / "eval")["passed"]  # equal KV in all_runs
+    write_run(tmp_path / "eval2", "s2_tkm", rows_for(*good, kv=1700))
+    write_run(tmp_path / "eval2", "s2_mass", rows_for(*bad, kv=1750))
+    write_run(tmp_path / "eval2", "s2_fifo", rows_for(*bad, kv=1700))
+    assert not budget_precheck(tmp_path / "eval2")["passed"]  # 2.94% > 2%
+    streams = [{"id": f"s{i}", "duration": d} for i, d in enumerate((300, 250, 310, 260, 290))]
+    (tmp_path / "m.jsonl").write_text("".join(json.dumps(r) + "\n" for r in streams))
+    assert precheck_streams(tmp_path / "m.jsonl", tmp_path / "p.jsonl") == ["s1", "s3", "s0", "s2"]
