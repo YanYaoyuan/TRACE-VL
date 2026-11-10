@@ -373,8 +373,11 @@ def train_stage2(cfg: V3Config, streams_path: str, video_root: str, output: str,
                         from .pilot import write_completion
 
                         identity = output / "train-identity.json"  # written by the runner before training
+                        # Stage-2 artifact contract: only the final module/LoRA pair (no train.checkpoint_steps snapshots,
+                        # which belong to Stage 1 and may be inherited by the config); the verifier uses the same ().
                         write_completion(output, total_steps, cfg.to_dict(),
-                                         json.loads(identity.read_text()) if identity.is_file() else None)
+                                         json.loads(identity.read_text()) if identity.is_file() else None,
+                                         checkpoint_steps=())
         tracker.upload(f"{output.parent.name}-{output.name}-logs", "training-logs",
                        [output / "metrics.jsonl", output / "run.json"], base=output)  # fmt: skip
         return output

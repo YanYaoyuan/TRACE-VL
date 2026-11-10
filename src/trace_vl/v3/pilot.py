@@ -50,11 +50,19 @@ def artifact_hashes(output: Path, checkpoint_steps=()) -> dict:
     return hashes
 
 
-def write_completion(output: Path, step: int, config: dict, extra: dict | None = None):
+def _snapshot_steps(config: dict, checkpoint_steps) -> tuple:
+    """Intermediate snapshots the record must cover: Stage 1 uses train.checkpoint_steps from the config; a trainer
+    with another artifact contract (Stage 2 saves only the final pair) passes checkpoint_steps=() explicitly."""
+    if checkpoint_steps is not None:
+        return tuple(checkpoint_steps)
+    return tuple((config.get("train") or {}).get("checkpoint_steps") or ())
+
+
+def write_completion(output: Path, step: int, config: dict, extra: dict | None = None, checkpoint_steps=None):
     """Called by the trainer (rank 0) only after the final module and LoRA saves returned. `extra` pins further
     run identity (e.g. Stage 2: training streams, initial checkpoint, source revision)."""
     output = Path(output)
-    steps = (config.get("train") or {}).get("checkpoint_steps") or ()
+    steps = _snapshot_steps(config, checkpoint_steps)
     record = {"step": step, "config": config, "artifacts": artifact_hashes(output, steps)}
     if extra is not None:
         record["extra"] = extra
@@ -66,7 +74,8 @@ def write_completion(output: Path, step: int, config: dict, extra: dict | None =
     os.replace(tmp, output / COMPLETE)
 
 
-def training_complete(output: Path, config: dict, steps: int, extra: dict | None = None) -> tuple[bool, str]:
+def training_complete(output: Path, config: dict, steps: int, extra: dict | None = None,
+                      checkpoint_steps=None) -> tuple[bool, str]:  # fmt: skip
     """(True, "") only if the completion record matches the expected config/step, the artifacts on disk still
     hash to the recorded values, and the metric log holds exactly steps 1..`steps`."""
     output = Path(output)
@@ -84,7 +93,7 @@ def training_complete(output: Path, config: dict, steps: int, extra: dict | None
     if extra is not None and record.get("extra") != extra:
         return False, "trained with a different run identity (streams, initialization or source)"
     try:
-        if artifact_hashes(output, (config.get("train") or {}).get("checkpoint_steps") or ()) != record.get("artifacts"):
+        if artifact_hashes(output, _snapshot_steps(config, checkpoint_steps)) != record.get("artifacts"):
             return False, "checkpoint/adapter files differ from the completion record"
     except FileNotFoundError as error:
         return False, str(error)

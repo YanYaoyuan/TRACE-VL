@@ -103,11 +103,14 @@ PY
 
 log "[3/6] Stage-2 training from the Stage-1 B4 checkpoint (${TRACE_STEPS} updates, ${TRACE_GPUS} GPUs)"
 export TRACE_S2="$TRACE_OUT/train"
-if ! "${py[@]}" - <<'PY'
+# shellcheck source=scripts/memory_pilot_lib.sh
+source "$root/scripts/memory_pilot_lib.sh"
+completion_check() {  # exit 0 = complete and identical (skip), 1 = train
+  "${py[@]}" - <<'PY'
 import json, os, sys
 from pathlib import Path
 from trace_vl.v3.config import load_v3_config
-from trace_vl.v3.memory_pilot import init_identity, source_identity, stream_media_identity, _sha
+from trace_vl.v3.memory_pilot import STAGE2_CHECKPOINT_STEPS, init_identity, source_identity, stream_media_identity, _sha
 from trace_vl.v3.pilot import training_complete
 out, s2 = Path(os.environ["TRACE_OUT"]), Path(os.environ["TRACE_S2"])
 cfg, _ = load_v3_config(os.environ["TRACE_CFG"])
@@ -116,30 +119,20 @@ identity = {"revision": source_identity(Path("src/trace_vl/v3")), "streams_sha25
             "media": stream_media_identity(streams, os.environ["TRACE_VIDEO_ROOT"]), "init": init_identity(os.environ["TRACE_S1"]),
             "steps": int(os.environ["TRACE_STEPS"])}
 (out / "train-identity.expected.json").write_text(json.dumps(identity, indent=2) + "\n")
-ok, reason = training_complete(s2, cfg.to_dict(), int(os.environ["TRACE_STEPS"]), extra=identity)
-print("training complete and identical, skipped" if ok else f"training needed: {reason}")
+ok, reason = training_complete(s2, cfg.to_dict(), int(os.environ["TRACE_STEPS"]), extra=identity,
+                               checkpoint_steps=STAGE2_CHECKPOINT_STEPS)
+print("completion check:", "complete and identical" if ok else f"training needed ({reason})")
 sys.exit(0 if ok else 1)
 PY
-then :; else
-  if [[ -e "$TRACE_S2" ]]; then stale="$TRACE_S2.incomplete-$(date +%s)"; mv "$TRACE_S2" "$stale"; log "  previous attempt kept at $stale"; fi
-  mkdir -p "$TRACE_S2"
+}
+run_training() {
   cp "$TRACE_OUT/train-identity.expected.json" "$TRACE_S2/train-identity.json"
   "$uv_bin" run --locked --no-sync torchrun --standalone --nproc_per_node="$TRACE_GPUS" -m trace_vl.cli v3 train-stage2 \
     --config "$TRACE_CFG" --streams "$TRACE_OUT/data/streams/train.jsonl" --video-root "$TRACE_VIDEO_ROOT" --output "$TRACE_S2" \
     --init "$TRACE_S1/modules.pt" --adapter "$TRACE_S1/lora" --max-steps "$TRACE_STEPS"
-  "${py[@]}" - <<'PY'
-import json, os
-from pathlib import Path
-from trace_vl.v3.config import load_v3_config
-from trace_vl.v3.pilot import training_complete
-out = Path(os.environ["TRACE_OUT"])
-cfg, _ = load_v3_config(os.environ["TRACE_CFG"])
-identity = json.loads((out / "train-identity.expected.json").read_text())
-ok, reason = training_complete(Path(os.environ["TRACE_S2"]), cfg.to_dict(), int(os.environ["TRACE_STEPS"]), extra=identity)
-if not ok:
-    raise SystemExit(f"training finished without a valid completion record: {reason}")
-PY
-fi
+  completion_check || { echo "training finished without a valid completion record" >&2; exit 1; }
+}
+maybe_train "$TRACE_S2"
 
 run_eval() {  # name, checkpoint dir, extra args...
   local name="$1" ckpt="$2"; shift 2

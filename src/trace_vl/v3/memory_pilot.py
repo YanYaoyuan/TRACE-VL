@@ -104,6 +104,7 @@ def _paired(a: list[dict], b: list[dict], keep) -> dict:
     return {"n": den, "delta_pp": round(100 * num / den, 3) if den else None, "ci95_pp": _stream_bootstrap(per)}
 
 
+STAGE2_CHECKPOINT_STEPS = ()  # Stage-2 artifact contract: final module/LoRA pair only (writer and verifier)
 EXPECTED_RUNS = ("s2_tkm", "s2_mass", "s2_fifo", "s2_full", "s2_tkm_trainsched", "s1_mass", "s1_fifo", "s1_full")
 
 
@@ -229,6 +230,11 @@ def memory_report(eval_root: str, window_seconds: float, primary: str = "s2_tkm"
             "seconds_per_stream": round(sum(r.get("stream_seconds_elapsed", 0) for r in streams.values()) / max(1, len(streams)), 2),
         }  # fmt: skip
     pairs = {}
+    if invalid:  # incomplete or mismatched coverage: no paired statistics on partial question sets
+        return {"window_seconds": window_seconds, "runs": summary, "paired": {},
+                "decision": {"status": "invalid", "invalid_reasons": invalid, "gain_rule_met": None,
+                             "meaning": "inconclusive: incomplete or mismatched prediction coverage; no paired comparison "
+                                        "was computed and no conclusion about retention is drawn"}}  # fmt: skip
     if primary in runs:
         for other in [*heuristics, upper, f"{primary}_trainsched"]:
             if other in runs:

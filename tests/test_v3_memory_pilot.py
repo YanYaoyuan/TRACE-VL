@@ -181,3 +181,71 @@ def test_memory_pilot_config_loads_and_evict_every_is_validated():
     assert cfg.transition.p_step_mode == "pooled" and cfg.memory.policy == "tkm" and cfg.memory.budget_tokens == 1024
     with pytest.raises(ValueError, match="evict_every"):
         V3Config.from_dict({"memory": {"evict_every": 0}})
+
+
+# ---------------------------------------------------------------------------- integration regressions (review of 3eedb89)
+import subprocess  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+LIB = Path(__file__).resolve().parents[1] / "scripts" / "memory_pilot_lib.sh"
+
+
+def run_branch(tmp_path, check_exit: int, existing: bool):
+    """Source the runner's actual maybe_train with stub completion_check / run_training."""
+    target = tmp_path / "train"
+    if existing:
+        target.mkdir()
+        (target / "old.txt").write_text("previous attempt")
+    script = f"""
+set -euo pipefail
+source "{LIB}"
+completion_check() {{ return {check_exit}; }}
+run_training() {{ echo trained > "{target}/marker"; }}
+maybe_train "{target}"
+"""
+    proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    return target, proc.stdout
+
+
+def test_runner_trains_when_incomplete_and_skips_when_complete(tmp_path):
+    for case in ("fresh", "incomplete", "complete"):
+        (tmp_path / case).mkdir()
+    target, out = run_branch(tmp_path / "fresh", 1, existing=False)
+    assert (target / "marker").is_file() and "skipped" not in out  # fresh (check exits 1) -> trains
+    target, out = run_branch(tmp_path / "incomplete", 1, existing=True)
+    assert (target / "marker").is_file() and not (target / "old.txt").exists()  # incomplete -> kept aside, retrained
+    assert list((tmp_path / "incomplete").glob("train.incomplete-*/old.txt"))
+    target, out = run_branch(tmp_path / "complete", 0, existing=True)
+    assert "skipped" in out and not (target / "marker").exists() and (target / "old.txt").is_file()  # complete -> skip
+
+
+@pytest.mark.parametrize("steps", [2, 300])
+def test_stage2_completion_with_the_real_memory_pilot_config(tmp_path, steps):
+    import inspect
+
+    from trace_vl.v3 import train_stage2
+    from trace_vl.v3.memory_pilot import STAGE2_CHECKPOINT_STEPS
+
+    cfg = load_v3_config("configs/v3/memory_pilot_b4.yaml")[0].to_dict()
+    assert cfg["train"]["checkpoint_steps"] == [100, 300, 1000]  # inherited Stage-1 snapshot schedule
+    out = tmp_path / "train"
+    trained(out, steps=steps, record=False)
+    with pytest.raises(FileNotFoundError):  # Stage-1 semantics unchanged: snapshots required by default
+        write_completion(out, steps, cfg, IDENTITY)
+    write_completion(out, steps, cfg, IDENTITY, checkpoint_steps=STAGE2_CHECKPOINT_STEPS)  # Stage-2 contract
+    assert training_complete(out, cfg, steps, extra=IDENTITY, checkpoint_steps=STAGE2_CHECKPOINT_STEPS) == (True, "")
+    assert "checkpoint_steps=()" in inspect.getsource(train_stage2.train_stage2)  # the trainer writes the same contract
+    assert STAGE2_CHECKPOINT_STEPS == ()
+
+
+def test_missing_prediction_in_a_present_arm_is_invalid_not_a_crash(tmp_path):
+    base = [{"stream": "s0", "id": q, "evidence_age": 60.0, "correct": 1, "evidence_kept": 0.5, "kv_tokens": 100,
+             "kv_mb": 1.0, "evicted_tokens": 5, "streamed_tokens": 50, "stream_seconds_elapsed": 1.0} for q in ("q0", "q1")]  # fmt: skip
+    for name in EXPECTED_RUNS:
+        write_run(tmp_path, name, base[:1] if name == "s2_mass" else base)
+    r = memory_report(str(tmp_path), 16.0, expected_runs=EXPECTED_RUNS, expected_ids={"q0", "q1"})
+    assert r["decision"]["status"] == "invalid" and r["paired"] == {}
+    assert any("s2_mass" in reason for reason in r["decision"]["invalid_reasons"])
+    assert not smoke_checks(r, [{"grad_norm_retention": 1.0, "ret_pos": 1, "ret_neg": 1}],
+                            {"dev_selected": {"beyond_window": 5}})["expected_runs_complete"]
