@@ -37,3 +37,12 @@
 - **Single-seed results** are never used in the paper. The main table uses 3 seeds and a once-only held-out test set.
 
 Progress against this plan is posted on issue #4 at each milestone.
+
+## Status 2026-11-10: outcome C
+
+- Pilot-005 failed the gate (experiments.md §12.1).
+- The temporal diagnostic failed its predeclared rule (§13.1). The transition track is closed, and **B4 is the compression baseline**.
+- The paper follows outcome C: a ~2B streaming model with B4-style compression, **learned memory retention** (to be shown: §14 memory pilot) and the **alert head** (separate audited experiment).
+- Transition tokens are reported as a negative ablation for this implementation and recipe.
+- Milestone 2 shrinks to B4 + seeds. Milestones 3 (memory) and 4 (alerts) are now the core contributions; neither is established yet.
+
