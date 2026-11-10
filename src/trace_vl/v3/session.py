@@ -71,6 +71,7 @@ class StreamSession:
         self.evict_steps: set | None = None  # explicit eviction steps (Stage-2 training schedule); None = every N
         self.audit = False  # memory audit: counterfactual FIFO overlap and score correlations at each eviction
         self.audit_stats: dict[str, list[float]] = {"jaccard_vs_fifo": [], "score_recency_rho": [], "score_mass_rho": []}
+        self.eviction_audit: dict = {"events": 0, "last_t": None, "last": None, "older_max": 0, "cap_violations": 0}
         self.trace_ids = [] if trace else None  # token ids as the processor would write them (checks)
         self.trace_query = None
         self._prefill_prompt()
@@ -152,6 +153,8 @@ class StreamSession:
             bb.evict(self.cache, mask)
             self.memory.apply(mask)
             self.book.prune(set(self.memory.group))
+            if self.audit:
+                self._audit_cap(t)
 
         result = StepResult(t, tokens.shape[0], info.is_i_step if info else True, len(self.memory),
                             seconds_vision, seconds_lm, drift)  # fmt: skip
@@ -195,12 +198,44 @@ class StreamSession:
             masses = [self.book.groups[g].mass if g in self.book.groups else 0.0 for g in groups]
             self.audit_stats["score_mass_rho"].append(spearman(scores, masses))
 
-    def audit_summary(self, t: float) -> dict:
-        out = {f"kv_{k}": v for k, v in self.memory.accounting(t).items()}
+    def _audit_cap(self, t: float):
+        """Older-memory cap at the eviction itself: the KV split right after the mask is applied, classified at the
+        eviction (consumed step) time t. This is the clock the budget is enforced on."""
+        acc = self.memory.accounting(t)
+        ev = self.eviction_audit
+        ev["events"] += 1
+        ev["last_t"], ev["last"] = t, acc
+        ev["older_max"] = max(ev["older_max"], acc["older"])
+        if self.cfg.memory.policy != "full" and acc["older"] > self.cfg.memory.budget_tokens:
+            ev["cap_violations"] += 1
+
+    def audit_summary(self, t_question: float, t_step: float | None = None) -> dict:
+        """Per-question audit row. Three clocks, labelled separately:
+        - kv_evict_*: KV split right after the most recent eviction, ages at that eviction time (audit_evict_t);
+          the older-memory cap applies here (audit_older_max_at_eviction, audit_older_cap_violations over all
+          evictions so far).
+        - kv_step_*: the current memory, ages at the last consumed step time (t_step).
+        - kv_qtime_*: the current memory, ages at the question time; tokens that left the recent window after the
+          last eviction count as older here, so kv_qtime_older can exceed the budget without any cap violation.
+        audit_*_mean are cumulative session means over the eviction events up to this question (not per-event
+        values); audit_*_sum / audit_*_n allow event-weighted pooling across streams."""
+        out = {f"kv_qtime_{k}": v for k, v in self.memory.accounting(t_question).items()}
+        if t_step is not None:
+            out["audit_step_t"] = t_step
+            out.update({f"kv_step_{k}": v for k, v in self.memory.accounting(t_step).items()})
+        ev = self.eviction_audit
+        out["audit_evict_t"] = ev["last_t"]
+        out.update({f"kv_evict_{k}": v for k, v in (ev["last"] or {}).items()})
+        out["audit_eviction_events"] = ev["events"]
+        out["audit_older_max_at_eviction"] = ev["older_max"] if ev["events"] else None
+        out["audit_older_cap_violations"] = ev["cap_violations"]
         for key, values in self.audit_stats.items():
             clean = [v for v in values if v == v]
             out[f"audit_{key}_mean"] = round(sum(clean) / len(clean), 4) if clean else None
+            out[f"audit_{key}_sum"] = round(sum(clean), 6)
+            out[f"audit_{key}_n"] = len(clean)
         out["audit_evictions"] = len(self.audit_stats["jaccard_vs_fifo"])
+        out["audit_scope"] = "cumulative-session-at-question"
         return out
 
     def _clock(self, info, t: float) -> torch.Tensor:

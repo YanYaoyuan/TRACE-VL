@@ -413,6 +413,64 @@ def test_exact_fill_partial_group_keeps_its_newest_tokens():
     assert mask.tolist() == [False, True, True, True]  # 3 of 4: the oldest token is dropped
 
 
+def audit_session(policy="tkm"):
+    """A StreamSession shell with only the memory-audit state (no backbone)."""
+    from types import SimpleNamespace
+
+    from trace_vl.v3.session import StreamSession
+
+    session = StreamSession.__new__(StreamSession)
+    session.memory = filled_memory("exact", policy)
+    session.cfg = SimpleNamespace(memory=session.memory.cfg)
+    session.audit_stats = {"jaccard_vs_fifo": [], "score_recency_rho": [], "score_mass_rho": []}
+    session.eviction_audit = {"events": 0, "last_t": None, "last": None, "older_max": 0, "cap_violations": 0}
+    return session
+
+
+def test_audit_checks_the_cap_at_eviction_time_and_labels_question_time_ages():
+    """evalrepair af2f961: kv_older > 1024 in 783/802 TKM rows was question-time reclassification, not a cap breach."""
+    session = audit_session()
+    session.memory.apply(session.memory.keep_mask(21.0))
+    session._audit_cap(21.0)
+    session.audit_stats["jaccard_vs_fifo"] += [1.0, 0.5]
+    row = session.audit_summary(27.0, t_step=21.0)
+    assert row["audit_evict_t"] == 21.0 and row["kv_evict_older"] == 10 and row["kv_evict_window"] == 4
+    assert row["audit_older_max_at_eviction"] == 10 and row["audit_older_cap_violations"] == 0
+    assert row["kv_step_older"] == 10
+    assert row["kv_qtime_older"] == 14 and row["kv_qtime_window"] == 0  # the window tokens aged past 5 s
+    assert "kv_older" not in row and row["audit_scope"] == "cumulative-session-at-question"
+    assert row["audit_jaccard_vs_fifo_mean"] == 0.75
+    assert (row["audit_jaccard_vs_fifo_sum"], row["audit_jaccard_vs_fifo_n"]) == (1.5, 2)
+    session.memory.append(30, "gist", 0.5, ("step", 50))  # an older group admitted without eviction: a breach
+    session._audit_cap(21.0)
+    row = session.audit_summary(21.0, t_step=21.0)
+    assert row["audit_older_cap_violations"] == 1 and row["audit_older_max_at_eviction"] == 40
+    assert row["audit_eviction_events"] == 2
+
+
+def test_audit_aggregate_separates_clocks_and_weights_events():
+    from trace_vl.v3.memory_pilot import audit_aggregate
+
+    legacy = [{"stream": "a", "kv_older": 1100, "kv_window": 0, "audit_jaccard_vs_fifo_mean": 0.9}]
+    agg = audit_aggregate(legacy)
+    assert agg["question_time"]["older"] == 1100 and agg["question_time"]["legacy_fields"] is True
+    assert "at_eviction" not in agg and agg["cumulative_at_question"]["jaccard_vs_fifo"] == 0.9
+
+    def row(stream, events, older, s, n, qtime=1076):
+        return {"stream": stream, "kv_qtime_older": qtime, "kv_evict_older": older, "audit_eviction_events": events,
+                "audit_older_max_at_eviction": older, "audit_older_cap_violations": 0, "audit_evictions": n,
+                "audit_jaccard_vs_fifo_mean": s / n, "audit_jaccard_vs_fifo_sum": s, "audit_jaccard_vs_fifo_n": n}
+
+    rows = [row("a", 1, 1024, 1.0, 1), row("a", 3, 1024, 2.4, 3), row("b", 9, 1000, 9.0, 9)]
+    agg = audit_aggregate(rows)
+    assert agg["question_time"]["older"] == 1076 and agg["question_time"]["legacy_fields"] is False
+    assert agg["at_eviction"]["older_max"] == 1024 and agg["at_eviction"]["cap_violations"] == 0
+    assert agg["at_eviction"]["eviction_events"] == 12
+    assert agg["event_weighted"]["jaccard_vs_fifo"] == round(11.4 / 12, 4)  # last row per stream, pooled events
+    assert agg["event_weighted"]["jaccard_vs_fifo_events"] == 12
+    assert agg["cumulative_at_question"]["jaccard_vs_fifo"] == round((1.0 + 0.8 + 1.0) / 3, 4)
+
+
 def test_spearman_and_fill_validation():
     from trace_vl.v3.session import spearman
 

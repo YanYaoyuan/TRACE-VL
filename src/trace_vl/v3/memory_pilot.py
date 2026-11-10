@@ -458,12 +458,64 @@ def memory_analysis(eval_root: str | Path, window_seconds: float) -> dict:
                 counts["both_correct" if ca and cb else "only_tkm" if ca else f"only_{other}" if cb else "both_wrong"] += 1
             out["agreement"][f"s2_tkm_vs_{other}"] = {**counts, "n": len(a.keys() & b.keys())}
     for name, rows in runs.items():
-        fields = [k for k in ("kv_protected", "kv_window", "kv_older", "kv_older_unused", "kv_older_groups",
-                              "audit_jaccard_vs_fifo_mean", "audit_score_recency_rho_mean", "audit_score_mass_rho_mean")
-                  if any(r.get(k) is not None for r in rows)]  # fmt: skip
-        if fields:
-            out["audit"][name] = {k: round(sum(r[k] for r in rows if r.get(k) is not None)
-                                           / max(1, sum(r.get(k) is not None for r in rows)), 4) for k in fields}  # fmt: skip
+        audit = audit_aggregate(rows)
+        if audit:
+            out["audit"][name] = audit
+    return out
+
+
+AUDIT_SPLIT = ("protected", "window", "older", "older_unused", "older_groups")
+AUDIT_STATS = ("jaccard_vs_fifo", "score_recency_rho", "score_mass_rho")
+
+
+def _mean_field(rows: list[dict], key: str):
+    vals = [r[key] for r in rows if r.get(key) is not None]
+    return round(sum(vals) / len(vals), 4) if vals else None
+
+
+def audit_aggregate(rows: list[dict]) -> dict:
+    """Memory-audit aggregates of one arm, each labelled by its clock and averaging unit.
+
+    question_time: KV split with token ages at each question's time, averaged over questions. Legacy rows
+      (af2f961 and earlier: kv_older, ...) were measured on this clock and are read as such. kv older here
+      includes tokens that left the recent window after the last eviction, so it is NOT the cap check.
+    at_eviction: KV split right after the latest eviction (ages at that eviction time), averaged over questions,
+      plus the cap check over all eviction events (max older tokens, number of events above the budget; the
+      per-stream values come from the stream's last question row, whose counters are cumulative).
+    cumulative_at_question: audit_*_mean averaged over questions, i.e. an average of cumulative session summaries
+      taken at question times (early evictions weigh more), as reported in af2f961.
+    event_weighted: pooled over eviction events (sum / n of each stream's last row), when the rows carry sums."""
+    out: dict = {}
+    legacy = not any("kv_qtime_older" in r for r in rows)
+    qt = {k: _mean_field(rows, f"kv_{k}" if legacy else f"kv_qtime_{k}") for k in AUDIT_SPLIT}
+    if any(v is not None for v in qt.values()):
+        out["question_time"] = {**{k: v for k, v in qt.items() if v is not None}, "legacy_fields": legacy}
+    if any(r.get("kv_evict_older") is not None for r in rows):
+        last: dict = {}
+        for r in rows:
+            if (r.get("audit_eviction_events") or 0) >= (last.get(r["stream"], {}).get("audit_eviction_events") or 0):
+                last[r["stream"]] = r
+        maxima = [r["audit_older_max_at_eviction"] for r in last.values() if r.get("audit_older_max_at_eviction") is not None]
+        out["at_eviction"] = {
+            **{k: _mean_field(rows, f"kv_evict_{k}") for k in AUDIT_SPLIT},
+            "eviction_events": sum(r.get("audit_eviction_events") or 0 for r in last.values()),
+            "older_max": max(maxima) if maxima else None,
+            "cap_violations": sum(r.get("audit_older_cap_violations") or 0 for r in last.values()),
+        }
+    cum = {k: _mean_field(rows, f"audit_{k}_mean") for k in AUDIT_STATS}
+    if any(v is not None for v in cum.values()):
+        out["cumulative_at_question"] = {k: v for k, v in cum.items() if v is not None}
+    if any(r.get("audit_jaccard_vs_fifo_n") is not None for r in rows):
+        last = {}
+        for r in rows:
+            if (r.get("audit_evictions") or 0) >= (last.get(r["stream"], {}).get("audit_evictions") or 0):
+                last[r["stream"]] = r
+        pooled = {}
+        for k in AUDIT_STATS:
+            n = sum(r.get(f"audit_{k}_n") or 0 for r in last.values())
+            pooled[k] = round(sum(r.get(f"audit_{k}_sum") or 0.0 for r in last.values()) / n, 4) if n else None
+            pooled[f"{k}_events"] = n
+        out["event_weighted"] = pooled
     return out
 
 

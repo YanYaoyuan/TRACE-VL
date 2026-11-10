@@ -494,7 +494,7 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
                                  "evicted_tokens": session.memory.evicted_tokens,
                                  "kv_appended_tokens": len(session.memory) + session.memory.evicted_tokens,
                                  "visual_tokens_streamed": sum(n for _, n in appended),
-                                 **(session.audit_summary(float(q["time"])) if audit else {}),
+                                 **(session.audit_summary(float(q["time"]), t_step=float(t)) if audit else {}),
                                  "run": fingerprint["id"]})  # fmt: skip
             for row in rows:
                 row["stream_seconds_elapsed"] = round(clock.perf_counter() - started, 2)

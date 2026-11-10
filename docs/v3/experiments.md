@@ -503,3 +503,63 @@ The pilot verifies this record (passed, and matching revision, config, initializ
      - Spearman correlation of retention scores with recency and with surprise mass at every eviction. This tests whether the scorer effectively ranks by recency.
 - **Decision rule unchanged**; the full policy remains the unbounded reference. The frozen test split is untouched; no new data or training.
 
+
+### 14.2 Repair result (operator run `memory-evalrepair-af2f961-001`; tester verification on issue #4, 2026-11-10): **negative** for the current TKM; positive paired evidence for Stage-2 training
+
+The tester recomputed every statistic independently (separate implementation; 4,000 stream-cluster bootstrap draws, seed 7). All 14 paired deltas and CIs in `memory-report.json` and `analysis.json` reproduce exactly.
+
+**Validity:**
+- All eight arms have the same 802 question IDs on the same 40 streams; 571 questions are beyond the 16 s window.
+- Total KV is identical **for every question** across the five restricted every-step arms (S1 FIFO/mass, S2 FIFO/mass/TKM), mean 1891.71 tokens.
+- All validity checks pass. The gain criterion fails. **Status: `negative`.** The `448adf1` group-packing run stays `invalid`; this result does not change it.
+
+| Comparison (paired, stream-cluster bootstrap) | Beyond-window | All questions |
+|---|---|---|
+| S2 FIFO − S1 FIFO | **+4.90 pp [2.46, 7.30]** (424 vs 396 / 571) | **+3.87 pp [1.83, 5.89]** (626 vs 595 / 802) |
+| S2 full − S1 full | +2.98 pp [0.17, 5.85] | +2.87 pp [0.60, 5.19] |
+| S2 mass − S1 mass | +1.58 pp [−2.17, 5.21] (not established) | — |
+| S2 TKM − S2 FIFO | −0.18 pp [−0.57, 0] (423 vs 424) | 0 (626 vs 626) |
+| S2 TKM − S2 full | −8.58 pp [−11.73, −5.52] | — |
+
+- TKM and FIFO correctness differs on 2 of 802 questions, one each way. The files log correctness, not the chosen letter, so this is correctness agreement, not proof of identical answers.
+- The scorer behaves like recency. Score/recency Spearman 0.927. Same-state counterfactual Jaccard of kept older tokens vs FIFO 0.964. Both are averages of cumulative session summaries taken at question times. They do not compare two independently evolved trajectories.
+- FIFO keeps about 84.2% less measured KV than full history. This is KV-cache storage only: not total GPU memory, and no latency speedup is shown.
+
+**Decision:**
+1. **The age/surprise-only TKM contribution claim is closed** for this recipe. No more updates are spent trying to make it beat FIFO. No further 300-update TKM run.
+2. **The Stage-2 checkpoint and B4 + FIFO are the working baseline.** S2 − S1 under FIFO is paired, statistically supported evidence for the Stage-2-trained checkpoint on this dev benchmark. It does not isolate a loss or module (Stage 2 changes the training data, the BPTT schedule and the retention head together). It is not yet evidence of external generalization or paper novelty.
+3. **Preserved:** the S2 checkpoint (`memory-pilot-448adf1-001/train`), all prediction files of both runs, and both experiment records (§14.1, §14.2).
+
+**Audit reporting issue (fixed in code, no rerun needed for the decision):** the evalrepair rows show `kv_older` > 1024 in 783/802 TKM rows (mean 1075.97), despite the exact cap. Two clocks were mixed:
+- eviction and the cap use the consumed step time;
+- `audit_summary(q["time"])` reclassified recent/older tokens at the later question time, so window tokens that aged out after the last eviction counted as older.
+
+The total-KV match and the paired accuracy result are unaffected. The audit rows now carry three labelled clocks:
+- `kv_evict_*` and `audit_evict_t`: the split right after the latest eviction, aged at that time. This is where the cap applies. `audit_older_max_at_eviction` and `audit_older_cap_violations` cover every eviction event.
+- `kv_step_*` and `audit_step_t`: aged at the last consumed step.
+- `kv_qtime_*`: aged at question time. Legacy `kv_*` fields are read as question-time.
+
+Aggregates are labelled too. `cumulative_at_question` is an average of cumulative summaries at question times. `event_weighted` pools sums and counts over eviction events per stream. `memory_analysis` reads the af2f961 predictions unchanged. Regression tests: `test_audit_checks_the_cap_at_eviction_time_and_labels_question_time_ages` and `test_audit_aggregate_separates_clocks_and_weights_events`.
+
+### 14.3 Next bounded milestone (proposed, not started): does the Stage-2 gain transfer?
+
+**Question:** does S2 − S1 under FIFO hold on an independent streaming benchmark that is already on the host, with no training and no use of any frozen final split?
+
+**Set:** the OVO-Bench diagnostic half (475 questions / 200 videos; backward-tracing and real-time MC; local option-likelihood protocol).
+- It was evaluated once before, in §13, to compare Stage-1 compression arms. It has never been used for Stage 2, memory or checkpoint choices. That prior use is stated with the result.
+- The OVO final half (863 / 192) stays frozen.
+- There is no other already-converted streaming set. Video-MME is offline and is kept for M2.
+
+**Arms (4, frozen checkpoints, exact fill, same budget as §14):** S1-FIFO, S2-FIFO, S1-full, S2-full.
+
+**Needed code:** an OVO → stream-record adapter. It groups each video's questions at their `realtime`, with one stream per video. The rules are fixed before any run:
+- Questions beyond `stage2.max_seconds` are excluded and counted, with the same exclusions for every arm.
+- OVO has no evidence spans. The delayed-memory endpoint is therefore the backward-tracing task family, not "beyond-window".
+
+**Predeclared rule** (video-cluster bootstrap, 4,000 draws, seed 7):
+- **Primary:** S2-FIFO − S1-FIFO on backward-tracing questions. **Transfer is shown** if Δ ≥ +2 pp and the CI lower bound is > 0.
+- **Secondary** (reported, does not gate): all questions; real-time questions, with a no-harm check (CI lower bound > −2 pp); S2-full − S1-full.
+- Pass → plan Stage-2 seeds and data scaling, then the memory mechanism below. Fail → the Stage-2 gain is recorded as in-distribution only. No scaling of data or compute before the cause is understood.
+- One evaluation; no re-selection, no retraining.
+
+**After that (sketch, not proposed for running yet):** one content-aware memory mechanism with an equal-budget, falsifiable comparison against B4 + FIFO. The cheapest falsifier comes first: a **training-free redundancy-aware selector** (for example, keep older groups greedily by novelty, 1 − max cosine similarity of pooled keys to already-kept groups) on the §14 dev manifest under exact fill. If it does not beat FIFO, a learned content-aware scorer gets no training run. No architectural additions are trained on their own.

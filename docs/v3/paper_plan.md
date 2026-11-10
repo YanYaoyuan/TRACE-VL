@@ -46,3 +46,9 @@ Progress against this plan is posted on issue #4 at each milestone.
 - Transition tokens are reported as a negative ablation for this implementation and recipe.
 - Milestone 2 shrinks to B4 + seeds. Milestones 3 (memory) and 4 (alerts) are now the core contributions; neither is established yet.
 
+## Status update 2026-11-10 (evening): memory pilot repair (experiments.md §14.2)
+
+- **Learned retention (TKM) is negative.** At exactly equal KV it ties FIFO: −0.18 pp [−0.57, 0] beyond-window. The scorer tracks recency (ρ 0.93; Jaccard vs FIFO 0.96). The age/surprise-only retention claim is dropped.
+- **Stage-2 training is positive on dev.** S2 − S1 under FIFO: +4.90 pp [2.46, 7.30] beyond-window, +3.87 pp [1.83, 5.89] overall. This is a candidate contribution only once it transfers to an independent benchmark (§14.3, proposed).
+- Working baseline: **B4 compression + Stage-2 checkpoint + FIFO memory.** A memory contribution now requires a content-aware mechanism that beats this baseline at equal budget, screened training-free first.
+
