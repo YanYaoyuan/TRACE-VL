@@ -2,7 +2,7 @@
 # Stage-2 memory pilot on 4 A100s (experiments.md §14). Run SMOKE first, then PILOT, each in its own directory:
 #   TRACE_MODE=smoke bash launch_memory_pilot_a100.sh   (~30-45 min incl. data build; plumbing checks)
 #   TRACE_MODE=pilot bash launch_memory_pilot_a100.sh   (~4-5 h: data build, 300 updates, 8 dev evaluations)
-# Code 3eedb89 (exact snapshot). Reads the pilot-005 run, Stage-1 manifests and the extracted LLaVA media; writes only
+# Code ac5fa12 (exact snapshot). Reads the pilot-005 run, Stage-1 manifests and the extracted LLaVA media; writes only
 # into TRACE_OUT. No other experiment directory is modified. The frozen test split and the OVO final half are unused.
 set -Eeuo pipefail
 export TRACE_MODE="${TRACE_MODE:?Set TRACE_MODE=smoke (first) or TRACE_MODE=pilot}"
@@ -12,13 +12,13 @@ export TRACE_DATA_DIR="${TRACE_DATA_DIR:-/nas-data/vlm/yyy/tracevl-data/stage1-3
 export TRACE_VIDEO_ROOT="${TRACE_VIDEO_ROOT:-/nas-data/vlm/llava/media}"
 export TRACE_LLAVA_ROOT="${TRACE_LLAVA_ROOT:-/nas-data/vlm/llava}"
 export TRACE_MODEL="${TRACE_MODEL:-/nas-data/vlm/models/qwen3.5_2b}"
-export TRACE_OUT="${TRACE_OUT:-/nas-data/vlm/yyy/tracevl-runs/memory-${TRACE_MODE}-3eedb89-001}"
+export TRACE_OUT="${TRACE_OUT:-/nas-data/vlm/yyy/tracevl-runs/memory-${TRACE_MODE}-ac5fa12-001}"
 export TRACE_GPUS=4 CUDA_VISIBLE_DEVICES=0,1,2,3
 export TRACE_UV_BIN="${TRACE_UV_BIN:-uv}"
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$TRACE_REPO/.venv}"
 export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TRACE_WANDB="${TRACE_WANDB:-0}"
-rev=3eedb890f91f469b7b1cbed690628ecc5cf6ec59
+rev=ac5fa12fe466de655b934747a9bc5fc60a83b0b3
 mkdir -p "$TRACE_OUT"
 exec 8>"$TRACE_OUT/.launcher.lock"
 flock -n 8 || { echo 'This launcher is already running.' >&2; exit 2; }
@@ -28,7 +28,7 @@ if [[ -f "$TRACE_OUT/base-revision.txt" && "$(cat "$TRACE_OUT/base-revision.txt"
 fi
 # Pilot authorization is machine-checked by the runner against the smoke run's smoke-ok.json (passed, same revision,
 # resolved config, initial checkpoint and data sources); a digest file is not an authorization.
-export TRACE_SMOKE_OK="${TRACE_SMOKE_OK:-/nas-data/vlm/yyy/tracevl-runs/memory-smoke-3eedb89-001/smoke-ok.json}"
+export TRACE_SMOKE_OK="${TRACE_SMOKE_OK:-/nas-data/vlm/yyy/tracevl-runs/memory-smoke-ac5fa12-001/smoke-ok.json}"
 if ! git -C "$TRACE_REPO" cat-file -e "$rev^{commit}" 2>/dev/null; then
   git -C "$TRACE_REPO" fetch origin design/v3-transition-streaming
 fi
@@ -57,13 +57,13 @@ assert identity.get('pilot') == 'pilot005', 'Stage-1 run is not pilot-005'
 cfg = identity['configs']['b4']
 ok, reason = training_complete(run/'train'/'b4', cfg, cfg['train']['steps'])
 assert ok, f'b4: {reason}'
-print('Code 3eedb89; mode', os.environ['TRACE_MODE'], '; Stage-1 B4 checkpoint verified; GPUs:', [torch.cuda.get_device_name(i) for i in range(4)])
+print('Code ac5fa12; mode', os.environ['TRACE_MODE'], '; Stage-1 B4 checkpoint verified; GPUs:', [torch.cuda.get_device_name(i) for i in range(4)])
 PY
 
-if "$TRACE_UV_BIN" run --locked --no-sync python -c 'import pytest' 2>/dev/null; then
-  CUDA_VISIBLE_DEVICES= "$TRACE_UV_BIN" run --locked --no-sync python -m pytest -q -p no:cacheprovider \
-    tests/test_v3_memory_pilot.py tests/test_v3_stage2.py
-fi
+"$TRACE_UV_BIN" run --locked --no-sync python -c 'import pytest' 2>/dev/null \
+  || { echo 'pytest is required for the launch gate (uv pip install pytest into the environment)' >&2; exit 2; }
+CUDA_VISIBLE_DEVICES= "$TRACE_UV_BIN" run --locked --no-sync python -m pytest -q -p no:cacheprovider \
+  tests/test_v3_memory_pilot.py tests/test_v3_stage2.py tests/test_v3_pilot003.py
 
 bash scripts/run_memory_pilot.sh
 echo "VERIFIED ($TRACE_MODE). Submit: $TRACE_OUT/memory-digest.txt, memory-report.json, data/report.json,"
