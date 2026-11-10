@@ -312,3 +312,58 @@ def test_too_few_eligible_streams_stop_before_training(tmp_path):
                       train_path=tmp_path / "sel.jsonl")  # fmt: skip
     problems = data_problems(rep, "smoke")
     assert any("selected dev streams 1 < 2" in p for p in problems) and any("usable train streams 1 < 2" in p for p in problems)
+
+
+# ---------------------------------------------------------------------------- dev-only expansion (pilot dev streams 25 < 30)
+def build_old_split(tmp_path):
+    rows = [{"id": f"q{v}-{k}", "video": f"v{v}.mp4", "question": "?", "options": ["a", "b"], "answer": 0}
+            for v in range(600) for k in range(2)]  # fmt: skip
+    (tmp_path / "mc.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    (tmp_path / "s1.jsonl").write_text("".join(json.dumps({"video": f"v{v}.mp4"}) + "\n" for v in range(20)))
+    make_splits([str(tmp_path / "mc.jsonl")], [str(tmp_path / "s1.jsonl")], str(tmp_path / "old"),
+                max_videos={"train": 200, "dev": 10, "test": 20})  # fmt: skip
+    return [str(tmp_path / "mc.jsonl")], [str(tmp_path / "s1.jsonl")]
+
+
+def test_dev_expansion_keeps_train_and_test_byte_identical(tmp_path):
+    from trace_vl.v3.memory_pilot import expand_dev_split
+
+    records, exclude = build_old_split(tmp_path)
+    m = expand_dev_split(records, exclude, tmp_path / "old", tmp_path / "new")
+    for split in ("train", "test"):
+        assert (tmp_path / "new" / f"{split}.jsonl").read_bytes() == (tmp_path / "old" / f"{split}.jsonl").read_bytes()
+    old_dev = {json.loads(x)["video"] for x in (tmp_path / "old" / "dev.jsonl").read_text().splitlines()}
+    new_dev = {json.loads(x)["video"] for x in (tmp_path / "new" / "dev.jsonl").read_text().splitlines()}
+    assert len(new_dev) == m["dev_available_videos"] > len(old_dev) == 10  # the reproduced shortage: capped dev
+    train_test = {json.loads(x)["video"] for s in ("train", "test") for x in (tmp_path / "new" / f"{s}.jsonl").read_text().splitlines()}
+    assert not new_dev & train_test and all(int(v[1:-4]) >= 20 for v in new_dev)  # no leakage, Stage-1 excluded
+    small = expand_dev_split(records, exclude, tmp_path / "old", tmp_path / "small", dev_cap=15)
+    small_dev = {json.loads(x)["video"] for x in (tmp_path / "small" / "dev.jsonl").read_text().splitlines()}
+    assert len(small_dev) == 15 and small_dev <= new_dev  # prefix rule: a larger cap only adds videos
+    again = expand_dev_split(records, exclude, tmp_path / "old", tmp_path / "again", dev_cap=15)
+    assert again["splits"]["dev"]["sha256"] == small["splits"]["dev"]["sha256"]  # deterministic
+    assert m["previous"]["dev"]["videos"] == 10 and m["dev_rule"] == "dev-hash-prefix-v1"
+
+
+def test_dev_expansion_refuses_tampered_or_mismatched_reuse(tmp_path):
+    from trace_vl.v3.memory_pilot import expand_dev_split
+
+    records, exclude = build_old_split(tmp_path)
+    with pytest.raises(ValueError, match="seed or fractions"):
+        expand_dev_split(records, exclude, tmp_path / "old", tmp_path / "x", seed=8)
+    (tmp_path / "old" / "test.jsonl").write_text("tampered\n")
+    with pytest.raises(ValueError, match="recorded hash"):
+        expand_dev_split(records, exclude, tmp_path / "old", tmp_path / "y")
+
+
+def test_pilot_dev_shortage_is_rejected_and_stale_prep_refused(tmp_path):
+    from trace_vl.v3.memory_pilot import check_prep_request
+
+    rep = {"streams": {"train": {"streams": 164}}, "train_used": {"streams": 164},
+           "dev_selected": {"streams": 25, "beyond_window": 300}}  # fmt: skip
+    assert data_problems(rep, "pilot") == ["selected dev streams 25 < 30"]  # the A100 pilot stop, unchanged gate
+    request = {"mode": "pilot", "caps": "3000 400 400", "reuse": "/old/data", "dev_cap": None}
+    check_prep_request(tmp_path / "data" / "prep-request.json", request)
+    check_prep_request(tmp_path / "data" / "prep-request.json", request)  # same request: allowed (resume)
+    with pytest.raises(ValueError, match="new output directory"):
+        check_prep_request(tmp_path / "data" / "prep-request.json", {**request, "dev_cap": 400})

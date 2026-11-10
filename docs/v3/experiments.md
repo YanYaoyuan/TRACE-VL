@@ -434,6 +434,24 @@ The interaction comes from worse static accuracy, not from a temporal gain. **`c
 - Smoke and pilot compatibility is checked on protocol, revision, config, initialization and data sources; sizes and the selection rule are mode-specific by design.
 - First A100 smoke attempt (`ac5fa12`, caps 60/20/20): correctly stopped by the data gate (0 beyond-window dev questions in the first two streams). It is preserved for provenance.
 
+**A100 smoke at `77c5050`: passed** (2 updates, 2 dev streams).
+- All six checks true; 37 actual beyond-window questions.
+- Retention gradient norms 0.21 / 0.25; 2,316 positive / 1,412 negative labels.
+- Retained-KV spread 0.98%.
+- The formal decision was `invalid` (37 < 100 beyond-window questions), which is expected for a plumbing smoke. The smoke results are descriptive only.
+
+**Formal pilot attempt at `77c5050`:** stopped by the data gate before training. The 400 dev videos produced 25 streams, below the required 30. Preserved for provenance.
+
+**Data-preparation change (dev-only expansion, `TRACE_REUSE_DATA`):**
+- The failed pilot's **train and frozen test manifests and streams are reused byte for byte** (hash-verified copies).
+- The dev split is rebuilt from **all videos the same frozen split assigns to dev** (same seed and fractions, Stage-1 exclusions), ordered by sha256(`7:dev:<video>`). This is a prefix rule, `TRACE_PILOT_DEV_CAP` optional.
+- Train and test are never resampled; `make_splits`' sequential RNG would change test if the dev cap changed.
+- `data/prep.json` records the old and new caps, the available dev videos, the reused-file hashes and the old and new dev-stream hashes.
+- The model, training settings, first-40 dev rule, ≥ 30-stream and ≥ 100-question gates, and the gain and budget criteria are unchanged.
+- A matching smoke is rerun at the new revision; the revision check is not bypassed.
+
+**Token accounting:** evicted and appended counts are both KV tokens (text + visual), reported as `KV evicted X of Y appended`. Visual tokens streamed are reported separately; the old "evicted of streamed" ratio mixed the two.
+
 **Data sufficiency is checked before any GPU time** (`data/report.json`): source videos after exclusion, per-split counts, stream counts and durations, and **actual** evidence ages of the questions the evaluator will ask. A nominal 45–240 s delay is clipped at the stream end, so the actual age is used. Pilot thresholds: ≥ 50 training streams, ≥ 30 selected dev streams, ≥ 100 actual beyond-window dev questions. Otherwise the run stops.
 
 **Decision (three states, `memory_report`):**

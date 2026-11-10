@@ -490,7 +490,9 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
                                  "evidence_age": None if evidence_end is None else round(float(q["time"]) - evidence_end, 3),
                                  "correct": int(choice == q["answer"]), "evidence_kept": kept,
                                  "kv_tokens": len(session.memory), "kv_mb": bb.kv_bytes(session.cache) / 2**20,
-                                 "evicted_tokens": session.memory.evicted_tokens, "streamed_tokens": sum(n for _, n in appended),
+                                 "evicted_tokens": session.memory.evicted_tokens,
+                                 "kv_appended_tokens": len(session.memory) + session.memory.evicted_tokens,
+                                 "visual_tokens_streamed": sum(n for _, n in appended),
                                  "run": fingerprint["id"]})  # fmt: skip
             for row in rows:
                 row["stream_seconds_elapsed"] = round(clock.perf_counter() - started, 2)

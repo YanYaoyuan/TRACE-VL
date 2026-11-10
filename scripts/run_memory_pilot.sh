@@ -10,9 +10,13 @@ cd "$root"
 : "${TRACE_MODE:?smoke or pilot}" "${TRACE_S1_RUN:?}" "${TRACE_DATA_DIR:?}" "${TRACE_VIDEO_ROOT:?}" "${TRACE_LLAVA_ROOT:?}" "${TRACE_OUT:?}"
 export TRACE_GPUS="${TRACE_GPUS:-4}" TRACE_LLAVA_MC_JSON="${TRACE_LLAVA_MC_JSON:-}" TRACE_MODEL="${TRACE_MODEL:-}"
 export TRACE_SMOKE_OK="${TRACE_SMOKE_OK:-}"
+# Pilot data reuse (dev-only expansion): TRACE_REUSE_DATA=<earlier pilot>/data keeps its train and frozen test
+# manifests/streams byte for byte and rebuilds only dev from the same frozen split; TRACE_PILOT_DEV_CAP caps dev videos
+# (default: all dev-assigned videos).
+export TRACE_REUSE_DATA="${TRACE_REUSE_DATA:-}" TRACE_PILOT_DEV_CAP="${TRACE_PILOT_DEV_CAP:-}"
 case "$TRACE_MODE" in
   smoke) export TRACE_STEPS=2 TRACE_DEV_STREAMS=2 TRACE_CAPS="${TRACE_SMOKE_CAPS:-600 200 200}" ;;  # candidate pool
-  pilot) export TRACE_STEPS=300 TRACE_DEV_STREAMS=40 TRACE_CAPS="3000 400 400" ;;
+  pilot) export TRACE_STEPS=300 TRACE_DEV_STREAMS=40 TRACE_CAPS="${TRACE_PILOT_CAPS:-3000 400 400}" ;;
   *) echo "TRACE_MODE must be smoke or pilot" >&2; exit 2 ;;
 esac
 uv_bin="${TRACE_UV_BIN:-uv}"
@@ -58,13 +62,61 @@ if os.environ["TRACE_MODE"] == "pilot":
 PY
 
 log "[1/6] Data: convert MC questions; freeze splits by source video (Stage-1 videos excluded); stitch per split"
+"${py[@]}" - <<'PY'
+import json, os
+from pathlib import Path
+out = Path(os.environ["TRACE_OUT"]) / "data"
+request = {"mode": os.environ["TRACE_MODE"], "caps": os.environ["TRACE_CAPS"], "reuse": os.environ["TRACE_REUSE_DATA"] or None,
+           "dev_cap": os.environ["TRACE_PILOT_DEV_CAP"] or None}
+from trace_vl.v3.memory_pilot import check_prep_request
+try:
+    check_prep_request(out / "prep-request.json", request)
+except ValueError as error:
+    raise SystemExit(str(error))
+PY
 if [[ ! -f "$TRACE_OUT/data/streams/dev.jsonl" ]]; then
-  rm -rf "$TRACE_OUT/data" && mkdir -p "$TRACE_OUT/data/streams"
-  "${py[@]}" -m trace_vl.cli v3 convert-llava-mc "${mc[@]}" --video-root "$TRACE_VIDEO_ROOT" --output "$TRACE_OUT/data/mc_all.jsonl" --val-fraction 0
-  # shellcheck disable=SC2086
-  "${py[@]}" -m trace_vl.cli v3 stage2-splits "$TRACE_OUT/data/mc_all.jsonl" --exclude "$TRACE_DATA_DIR/train.jsonl" "$TRACE_DATA_DIR/val.jsonl" \
-    --output "$TRACE_OUT/data/splits" --max-videos $TRACE_CAPS
-  "${py[@]}" - <<'PY'
+  mkdir -p "$TRACE_OUT/data/streams"
+  if [[ -n "$TRACE_REUSE_DATA" ]]; then
+    "${py[@]}" - <<'PY'
+import hashlib, json, os, shutil
+from pathlib import Path
+from trace_vl.v3.data import build_stage2_streams
+from trace_vl.v3.memory_pilot import expand_dev_split
+out, reuse = Path(os.environ["TRACE_OUT"]), Path(os.environ["TRACE_REUSE_DATA"])
+sha = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()  # noqa: E731
+old_expected = json.loads((reuse.parent / "expected.json").read_text())
+new_expected = json.loads((out / "expected.json").read_text())
+if old_expected["data_sources"] != new_expected["data_sources"]:
+    raise SystemExit("the reused run was prepared from different data sources; refusing to reuse it")
+data = out / "data"
+shutil.copyfile(reuse / "mc_all.jsonl", data / "mc_all.jsonl")
+excluded = [str(Path(os.environ["TRACE_DATA_DIR"]) / f) for f in ("train.jsonl", "val.jsonl")]
+cap = int(os.environ["TRACE_PILOT_DEV_CAP"]) if os.environ["TRACE_PILOT_DEV_CAP"] else None
+manifest = expand_dev_split([str(data / "mc_all.jsonl")], excluded, reuse / "splits", data / "splits", dev_cap=cap)
+copied = {}
+for split in ("train", "test"):  # training and frozen test streams reused byte for byte
+    shutil.copyfile(reuse / "streams" / f"{split}.jsonl", data / "streams" / f"{split}.jsonl")
+    copied[split] = {"from": str(reuse / "streams" / f"{split}.jsonl"), "sha256": sha(data / "streams" / f"{split}.jsonl")}
+b = json.loads((out / "build-params.json").read_text())
+dev = build_stage2_streams(str(data / "splits" / "dev.jsonl"), str(data / "streams" / "dev.tmp"), os.environ["TRACE_VIDEO_ROOT"],
+                           split="dev", stream_seconds=b["stream_seconds"], delay_min=b["delay_min"], delay_max=b["delay_max"],
+                           immediate_fraction=b["immediate_fraction"], distractor_fraction=b["distractor_fraction"])
+(data / "streams" / "dev.tmp").replace(data / "streams" / "dev.jsonl")
+prep = {"data_preparation": "dev-only expansion with reused train/test (PR #3 review: pilot dev streams 25 < 30)",
+        "reused_data_dir": str(reuse), "mc_all_sha256": sha(data / "mc_all.jsonl"), "reused_streams": copied,
+        "splits": manifest, "dev_streams_built": dev,
+        "previous_dev_streams_sha256": sha(reuse / "streams" / "dev.jsonl"),
+        "new_dev_streams_sha256": sha(data / "streams" / "dev.jsonl")}
+(data / "prep.json").write_text(json.dumps(prep, indent=2) + "\n")
+(data / "streams" / "build.json").write_text(json.dumps({"dev": dev, "train": "reused", "test": "reused"}, indent=2) + "\n")
+print(json.dumps({"dev_available_videos": manifest["dev_available_videos"], "dev": manifest["splits"]["dev"], "dev_streams": dev}, indent=2))
+PY
+  else
+    "${py[@]}" -m trace_vl.cli v3 convert-llava-mc "${mc[@]}" --video-root "$TRACE_VIDEO_ROOT" --output "$TRACE_OUT/data/mc_all.jsonl" --val-fraction 0
+    # shellcheck disable=SC2086
+    "${py[@]}" -m trace_vl.cli v3 stage2-splits "$TRACE_OUT/data/mc_all.jsonl" --exclude "$TRACE_DATA_DIR/train.jsonl" "$TRACE_DATA_DIR/val.jsonl" \
+      --output "$TRACE_OUT/data/splits" --max-videos $TRACE_CAPS
+    "${py[@]}" - <<'PY'
 import json, os
 from pathlib import Path
 from trace_vl.v3.data import build_stage2_streams
@@ -80,6 +132,7 @@ for split in ("train", "test", "dev"):  # dev last: its presence marks a complet
     (out / "streams" / f"{split}.tmp").replace(out / "streams" / f"{split}.jsonl")
 (out / "streams" / "build.json").write_text(json.dumps(report, indent=2) + "\n")
 PY
+  fi
 fi
 
 log "[2/6] Stream selection (metadata only, before any model) and data sufficiency (before any GPU time)"
@@ -190,7 +243,8 @@ r = memory_report(str(out / "eval"), cfg.memory.window_seconds, expected_runs=EX
 metrics = [json.loads(s) for s in (out / "train" / "metrics.jsonl").read_text().splitlines() if s.strip()]
 data_rep = json.loads((out / "data" / "report.json").read_text())
 lines = [f"MEMORY PILOT DIGEST (mode {mode}; dev split; window {r['window_seconds']} s; policy over age/surprise statistics)",
-         f"data: {json.dumps(data_rep['dev_selected'])}; train streams {data_rep['streams']['train']['streams']}; "
+         f"data: {json.dumps(data_rep['dev_selected'])}; train streams constructed {data_rep['streams']['train']['streams']}, "
+         f"selected for training {data_rep['train_used']['streams']}; "
          f"excluded Stage-1 videos {data_rep['excluded_stage1_videos']}",
          f"training: {len(metrics)} updates; retention grad first/last {metrics[0].get('grad_norm_retention')}/"
          f"{metrics[-1].get('grad_norm_retention')}; ret_pos/neg total {sum(m.get('ret_pos', 0) for m in metrics)}/"
@@ -199,7 +253,8 @@ for name, s in r["runs"].items():
     lines.append(f"{name}: all {s['all']['accuracy_pct']} {s['all']['ci95_pct']} (n {s['all']['n']}) | beyond-window "
                  f"{s['beyond_window']['accuracy_pct']} {s['beyond_window']['ci95_pct']} (n {s['beyond_window']['n']}) | "
                  f"evidence kept {s['evidence_kept_beyond_window']} | KV {s['kv_tokens_mean']} tok ({s['kv_mb_mean']} MB) | "
-                 f"evicted {s['evicted_tokens_mean']} of {s['streamed_tokens_mean']} | age median {s['evidence_age_median']} s | "
+                 f"KV evicted {s['evicted_tokens_mean']} of {s['kv_appended_tokens_mean']} appended (visual streamed "
+                 f"{s['visual_tokens_streamed_mean']}) | age median {s['evidence_age_median']} s | "
                  f"{s['seconds_per_stream']} s/stream")
 for pair, p in r["paired"].items():
     lines.append(f"{pair}: beyond-window {p['beyond_window']['delta_pp']} {p['beyond_window']['ci95_pp']} | all {p['all']['delta_pp']} {p['all']['ci95_pp']}")

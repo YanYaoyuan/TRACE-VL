@@ -58,6 +58,63 @@ def make_splits(records: list[str], exclude: list[str], out_dir: str, fractions=
     return manifest
 
 
+def check_prep_request(target: str | Path, request: dict) -> None:
+    """Record the data-preparation request; an existing directory prepared differently is refused (no stale reuse)."""
+    target = Path(target)
+    if target.exists():
+        previous = json.loads(target.read_text())
+        if previous != request:
+            raise ValueError(f"{target.parent} was prepared with {previous}, not {request}; use a new output directory")
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(request, indent=2) + "\n")
+
+
+DEV_RULE = "dev-hash-prefix-v1"
+
+
+def expand_dev_split(records: list[str], exclude: list[str], reuse_dir: str | Path, out_dir: str | Path,
+                     dev_cap: int | None = None, seed: int = 7, fractions=(0.8, 0.1, 0.1)) -> dict:  # fmt: skip
+    """Dev-only expansion that PRESERVES a previous run's train and frozen test manifests.
+
+    `reuse_dir` is an earlier `make_splits` output (train/dev/test.jsonl + manifest.json). Its train.jsonl and
+    test.jsonl are verified against their recorded hashes and copied byte for byte. The dev split is rebuilt from
+    the videos the same frozen source-video split assigns to dev (same seed and fractions, Stage-1 exclusions),
+    ordered by sha256(f"{seed}:dev:{video}") and capped at `dev_cap` (None = all available): a prefix rule, so a
+    larger cap only adds videos, and train/test are never resampled (make_splits' sequential RNG would)."""
+    import shutil
+
+    reuse, out = Path(reuse_dir), Path(out_dir)
+    old = json.loads((reuse / "manifest.json").read_text())
+    if [float(f) for f in old["fractions"]] != [float(f) for f in fractions] or old["seed"] != seed:
+        raise ValueError("reused split was made with a different seed or fractions")
+    out.mkdir(parents=True, exist_ok=True)
+    for split in ("train", "test"):
+        if _sha(reuse / f"{split}.jsonl") != old["splits"][split]["sha256"]:
+            raise ValueError(f"reused {split}.jsonl does not match its recorded hash")
+        shutil.copyfile(reuse / f"{split}.jsonl", out / f"{split}.jsonl")
+    kept = {s: {r["video"] for r in read_jsonl(out / f"{s}.jsonl")} for s in ("train", "test")}
+    excluded = {r["video"] for path in exclude for r in read_jsonl(path)}
+    rows = [r for path in records for r in read_jsonl(path) if r.get("video") and r["video"] not in excluded
+            and r.get("question") and r.get("options") and split_of(r["video"], seed, fractions) == "dev"]  # fmt: skip
+    pool = sorted({r["video"] for r in rows}, key=lambda v: hashlib.sha256(f"{seed}:dev:{v}".encode()).hexdigest())
+    if set(pool) & (kept["train"] | kept["test"]):
+        raise AssertionError("dev pool overlaps the reused train/test manifests")
+    chosen = set(pool if dev_cap is None else pool[:dev_cap])
+    dev = sorted(({**r, "split": "dev"} for r in rows if r["video"] in chosen), key=lambda r: r["id"])
+    write_jsonl(out / "dev.jsonl", dev)
+    manifest = {
+        **{k: old[k] for k in ("records", "excluded_manifests", "excluded_videos", "fractions", "seed")},
+        "dev_rule": DEV_RULE, "dev_cap": dev_cap, "dev_available_videos": len(pool),
+        "previous": {"manifest_sha256": _sha(reuse / "manifest.json"), "max_videos": old.get("max_videos"),
+                     "dev": old["splits"]["dev"]},
+        "splits": {"train": old["splits"]["train"], "test": old["splits"]["test"],
+                   "dev": {"questions": len(dev), "videos": len(chosen), "sha256": _sha(out / "dev.jsonl")}},
+    }  # fmt: skip
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    return manifest
+
+
 # ---------------------------------------------------------------------------- report
 def _median(values: list[float]):
     v = sorted(values)
@@ -292,7 +349,10 @@ def memory_report(eval_root: str, window_seconds: float, primary: str = "s2_tkm"
             "kv_tokens_mean": round(sum(r["kv_tokens"] for r in rows) / n, 1),
             "kv_mb_mean": round(sum(r.get("kv_mb", 0.0) for r in rows) / n, 3),
             "evicted_tokens_mean": round(sum(r.get("evicted_tokens", 0) for r in rows) / n, 1),
-            "streamed_tokens_mean": round(sum(r.get("streamed_tokens", 0) for r in rows) / n, 1),
+            # evicted and appended are both KV tokens (text + visual); visual_tokens_streamed is visual only
+            "kv_appended_tokens_mean": round(sum(r.get("kv_appended_tokens", 0) for r in rows) / n, 1),
+            "visual_tokens_streamed_mean": round(sum(r.get("visual_tokens_streamed", r.get("streamed_tokens", 0))
+                                                     for r in rows) / n, 1),
             "evidence_age_median": _median([r["evidence_age"] for r in rows if r.get("evidence_age") is not None]),
             "seconds_per_stream": round(sum(r.get("stream_seconds_elapsed", 0) for r in streams.values()) / max(1, len(streams)), 2),
         }  # fmt: skip
