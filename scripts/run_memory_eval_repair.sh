@@ -31,15 +31,17 @@ from trace_vl.v3.memory_pilot import STAGE2_CHECKPOINT_STEPS, init_identity
 from trace_vl.v3.pilot import training_complete
 run, out = Path(os.environ["TRACE_PILOT_RUN"]), Path(os.environ["TRACE_OUT"])
 identity = json.loads((run / "train-identity.expected.json").read_text())
-cfg_old, _ = load_v3_config(run / "memory_pilot_b4.yaml")
-ok, reason = training_complete(run / "train", cfg_old.to_dict(), identity["steps"], extra=identity,
+# The pilot's resolved config as its own code recorded it (pre-dates memory.fill, which defaults to "groups").
+old_config = json.loads((run / "expected.json").read_text())["config"]
+ok, reason = training_complete(run / "train", old_config, identity["steps"], extra=identity,
                                checkpoint_steps=STAGE2_CHECKPOINT_STEPS)
 assert ok, f"Stage-2 checkpoint not verified: {reason}"
 assert init_identity(os.environ["TRACE_S1"]) == identity["init"], "Stage-1 checkpoint differs from the pilot's initialization"
 cfg_new, _ = load_v3_config(os.environ["TRACE_CFG"])
-a, b = cfg_old.to_dict(), cfg_new.to_dict()
-assert b["memory"].pop("fill") == "exact" and a["memory"].pop("fill") == "groups"
-assert a == b, "evaluation config differs from the pilot beyond memory.fill"
+b = cfg_new.to_dict()
+assert b["memory"].pop("fill") == "exact" and old_config["memory"].get("fill", "groups") == "groups"
+old_config["memory"].pop("fill", None)
+assert old_config == b, "evaluation config differs from the pilot beyond memory.fill"
 manifest = Path(os.environ["TRACE_MANIFEST"])
 record = {"pilot_run": str(run), "manifest": str(manifest), "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
           "stage2_identity": identity, "protocol_change": "memory.fill groups -> exact (evaluation only; training used groups)"}
