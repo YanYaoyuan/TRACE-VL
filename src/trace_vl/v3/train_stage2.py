@@ -419,6 +419,14 @@ def summarize_streams(rows: list[dict], replicates: int = 2000, seed: int = 7) -
             "kv_tokens_mean": sum(r["kv_tokens"] for r in rows) / len(rows), "run": rows[0].get("run")}  # fmt: skip
 
 
+def live_state(session) -> tuple:
+    """Cheap fingerprint of the live stream: memory length, step index, KV bytes and the recurrent state's sum."""
+    bb = session.bb
+    state = bb.recurrent_state(session.cache)
+    total = None if state is None else float(state.float().sum())
+    return len(session.memory), session.step_index, bb.kv_bytes(session.cache), total
+
+
 def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: str, mode: str = "v3",
                      checkpoint: str | None = None, adapter: str | None = None, policy: str | None = None,
                      device: str = "cuda", split: str = "val", limit: int | None = None, shard=(0, 1),
@@ -485,11 +493,15 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
                 appended.append((t, result.tokens))
                 for q in due.get(k, []):
                     kept = evidence_kept(session.memory, appended, q.get("evidence"))
+                    before = live_state(session)
                     choice, _ = session.ask(q["question"], q["options"])
+                    if live_state(session) != before:  # questions run on a fork; the live stream must not change
+                        raise RuntimeError(f"question {q['id']} changed the live stream state")
                     evidence_end = max((b for _, b in q.get("evidence") or []), default=None)
                     rows.append({"stream": record["id"], "id": q["id"], "t": q["time"], "delay": q.get("delay", 0.0),
                                  "evidence_age": None if evidence_end is None else round(float(q["time"]) - evidence_end, 3),
-                                 "correct": int(choice == q["answer"]), "evidence_kept": kept,
+                                 "correct": int(choice == q["answer"]), "choice": int(choice), "evidence_kept": kept,
+                                 "t_step": float(t), "step_window_end": round(float(t) + gap / 2, 4),
                                  "kv_tokens": len(session.memory), "kv_mb": bb.kv_bytes(session.cache) / 2**20,
                                  "evicted_tokens": session.memory.evicted_tokens,
                                  "kv_appended_tokens": len(session.memory) + session.memory.evicted_tokens,

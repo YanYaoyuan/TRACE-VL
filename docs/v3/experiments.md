@@ -541,25 +541,51 @@ The total-KV match and the paired accuracy result are unaffected. The audit rows
 
 Aggregates are labelled too. `cumulative_at_question` is an average of cumulative summaries at question times. `event_weighted` pools sums and counts over eviction events per stream. `memory_analysis` reads the af2f961 predictions unchanged. Regression tests: `test_audit_checks_the_cap_at_eviction_time_and_labels_question_time_ages` and `test_audit_aggregate_separates_clocks_and_weights_events`.
 
-### 14.3 Next bounded milestone (proposed, not started): does the Stage-2 gain transfer?
+### 14.3 Next bounded milestone: does the Stage-2 gain transfer? (endpoint corrected after tester review; evaluation only)
 
-**Question:** does S2 − S1 under FIFO hold on an independent streaming benchmark that is already on the host, with no training and no use of any frozen final split?
+**Correction to the first draft.** The §13 manifest (475 q / 200 videos) is **not** a backward + real-time MC set:
+- `temporal.py` excluded EPM/HLD/CRR and included the forward tasks REC/SSR.
+- Its only backward task is ASI (51 questions).
+- OVO-Bench (our `OVO_MCQ_TASKS` and the official repository) defines backward as **EPM/ASI/HLD**.
 
-**Set:** the OVO-Bench diagnostic half (475 questions / 200 videos; backward-tracing and real-time MC; local option-likelihood protocol).
-- It was evaluated once before, in §13, to compare Stage-1 compression arms. It has never been used for Stage 2, memory or checkpoint choices. That prior use is stated with the result.
-- The OVO final half (863 / 192) stays frozen.
-- There is no other already-converted streaming set. Video-MME is offline and is kept for M2.
+**Population: `ovo-transfer-dev-v1`** (`src/trace_vl/v3/ovo_transfer.py`). This is a new, explicitly named manifest, not the 475-question one.
+- **Videos:** exactly the 200 videos of the §13 diagnostic manifest. Disjointness from the frozen final half is checked on video IDs: no overlap with `final_frozen.jsonl`, and every video hashes to the diagnostic half.
+- **Questions:** every official MC question on those videos, re-converted from the official annotation. The conversion must equal the §13 conversion record for record. Included are the backward tasks EPM/ASI/HLD and the six real-time tasks STU/OJR/ATR/ACR/OCR/FPD, with query time ≤ 600 s (the Stage-2 maximum).
+  - This expands the question population, and the expansion is disclosed.
+  - Eligibility uses data and protocol only. Every exclusion is counted: duplicate ID, missing time, invalid options/answer, query time > 600 s, video unreadable, query after the video end, no complete step before the query.
+- **Status:** the videos are external to LLaVA training but already informed the §13 decision. Results are reported as an **external-dataset development evaluation**, not a held-out confirmation. Final confirmation stays separate. The frozen final half is untouched.
+- **Adequacy, fixed before GPU work:** at least 150 backward questions, at least 30 backward videos, and no video holding more than 10% of backward questions. Below this, the inventory is reported and the GPU stages refuse to run unless the owner accepts it (`TRACE_ACCEPT_INVENTORY=1`). An underpowered run is not evidence against transfer.
 
-**Arms (4, frozen checkpoints, exact fill, same budget as §14):** S1-FIFO, S2-FIFO, S1-full, S2-full.
+**Protocol:**
+- **Arms:** frozen S1 (pilot-005 B4) and S2 (`448adf1`) × FIFO/full. Exact fill, §14 budget and config.
+- **Streaming:** one stream per video, cut at its latest eligible query time. Each video is streamed once per arm, with identical step times in every arm.
+- **No future frames:** each question is answered after the last step whose two-frame window ends at or before its query time.
+- **Fork isolation:** the question runs on a fork. `evaluate_streams` now stops if the live state (memory length, step index, KV bytes, recurrent-state sum) changes across a question.
+- **Each prediction row records** `choice`, `t_step` and `step_window_end`.
+- **Mandatory coverage checks:** every arm has exactly the manifest's question IDs once each, matching stream and time, window end ≤ query time, and an identical step schedule across arms.
+- OVO has no evidence spans, so backward results are **never** relabelled "evidence older than 16 s".
 
-**Needed code:** an OVO → stream-record adapter. It groups each video's questions at their `realtime`, with one stream per video. The rules are fixed before any run:
-- Questions beyond `stage2.max_seconds` are excluded and counted, with the same exclusions for every arm.
-- OVO has no evidence spans. The delayed-memory endpoint is therefore the backward-tracing task family, not "beyond-window".
+**Predeclared rule** (video-cluster bootstrap, 4,000 draws, seed 7, the same percentile convention as §14):
+- **Primary:** S2-FIFO − S1-FIFO on **pooled EPM/ASI/HLD, question-weighted accuracy**. `continue` if Δ ≥ +2 pp and the CI lower bound is > 0.
+- **Also reported, no gate:**
+  - each backward task, plus a backward task-macro Δ with its own CI;
+  - all questions;
+  - real-time, with a no-harm check (CI lower bound > −2 pp);
+  - S2-full − S1-full;
+  - S2-FIFO − S2-full.
+- **Statuses:**
+  - `invalid_coverage`: missing or invalid coverage; no conclusion.
+  - `threshold_not_met_inconclusive`: the CI still includes +2 pp.
+  - `threshold_not_met`: the CI excludes +2 pp on this population.
+  - `continue`.
+- A failed threshold does not establish that Stage-2 gains can never transfer.
+- No retraining or scaling is authorized by this milestone.
 
-**Predeclared rule** (video-cluster bootstrap, 4,000 draws, seed 7):
-- **Primary:** S2-FIFO − S1-FIFO on backward-tracing questions. **Transfer is shown** if Δ ≥ +2 pp and the CI lower bound is > 0.
-- **Secondary** (reported, does not gate): all questions; real-time questions, with a no-harm check (CI lower bound > −2 pp); S2-full − S1-full.
-- Pass → plan Stage-2 seeds and data scaling, then the memory mechanism below. Fail → the Stage-2 gain is recorded as in-distribution only. No scaling of data or compute before the cause is understood.
-- One evaluation; no re-selection, no retraining.
+**Stages** (`scripts/run_ovo_transfer.sh`, pinned launcher `scripts/launch_ovo_transfer_a100.sh`):
+1. `inventory`: CPU only. Split-hash check, re-conversion check, manifest and inventory. Submitted before any GPU work.
+2. `flow`: S1/S2 FIFO on the 2 shortest + 2 longest streams. Checks coverage, no future frames and identical schedules, and estimates wall time.
+3. `full`: the four arms, the report and the decision.
 
-**After that (sketch, not proposed for running yet):** one content-aware memory mechanism with an equal-budget, falsifiable comparison against B4 + FIFO. The cheapest falsifier comes first: a **training-free redundancy-aware selector** (for example, keep older groups greedily by novelty, 1 − max cosine similarity of pooled keys to already-kept groups) on the §14 dev manifest under exact fill. If it does not beat FIFO, a learned content-aware scorer gets no training run. No architectural additions are trained on their own.
+Provenance (`inputs.json`): manifest and question hashes, the resolved config hash, the S1/S2 checkpoint identities (the Stage-2 completion record re-verified), and the hashes of the af2f961 dev baseline predictions.
+
+**Later (sketch, not proposed for running):** a training-free redundancy-aware selector is a cheap baseline against B4 + FIFO at exact equal budget. Its failure would reject only that selector. It would not rule out learned content-aware or task-relevance memory mechanisms in general.

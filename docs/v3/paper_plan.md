@@ -50,5 +50,5 @@ Progress against this plan is posted on issue #4 at each milestone.
 
 - **Learned retention (TKM) is negative.** At exactly equal KV it ties FIFO: −0.18 pp [−0.57, 0] beyond-window. The scorer tracks recency (ρ 0.93; Jaccard vs FIFO 0.96). The age/surprise-only retention claim is dropped.
 - **Stage-2 training is positive on dev.** S2 − S1 under FIFO: +4.90 pp [2.46, 7.30] beyond-window, +3.87 pp [1.83, 5.89] overall. This is a candidate contribution only once it transfers to an independent benchmark (§14.3, proposed).
-- Working baseline: **B4 compression + Stage-2 checkpoint + FIFO memory.** A memory contribution now requires a content-aware mechanism that beats this baseline at equal budget, screened training-free first.
+- Working baseline: **B4 compression + Stage-2 checkpoint + FIFO memory.** A memory contribution now requires a content-aware mechanism that beats this baseline at equal budget. A cheap training-free selector is one baseline for this, not a test of every content-aware design.
 

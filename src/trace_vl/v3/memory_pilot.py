@@ -480,11 +480,13 @@ def audit_aggregate(rows: list[dict]) -> dict:
       (af2f961 and earlier: kv_older, ...) were measured on this clock and are read as such. kv older here
       includes tokens that left the recent window after the last eviction, so it is NOT the cap check.
     at_eviction: KV split right after the latest eviction (ages at that eviction time), averaged over questions,
-      plus the cap check over all eviction events (max older tokens, number of events above the budget; the
-      per-stream values come from the stream's last question row, whose counters are cumulative).
+      plus the cap check over the eviction events up to each stream's LAST EVALUATED QUESTION (max older tokens,
+      number of events above the budget; taken from that row, whose counters are cumulative). Evictions after the
+      last question (stream tail) are not covered.
     cumulative_at_question: audit_*_mean averaged over questions, i.e. an average of cumulative session summaries
       taken at question times (early evictions weigh more), as reported in af2f961.
-    event_weighted: pooled over eviction events (sum / n of each stream's last row), when the rows carry sums."""
+    event_weighted: pooled over eviction events up to each stream's last evaluated question (sum / n of that row),
+      when the rows carry sums."""
     out: dict = {}
     legacy = not any("kv_qtime_older" in r for r in rows)
     qt = {k: _mean_field(rows, f"kv_{k}" if legacy else f"kv_qtime_{k}") for k in AUDIT_SPLIT}
@@ -501,6 +503,7 @@ def audit_aggregate(rows: list[dict]) -> dict:
             "eviction_events": sum(r.get("audit_eviction_events") or 0 for r in last.values()),
             "older_max": max(maxima) if maxima else None,
             "cap_violations": sum(r.get("audit_older_cap_violations") or 0 for r in last.values()),
+            "events_scope": "through-last-evaluated-question-per-stream",
         }
     cum = {k: _mean_field(rows, f"audit_{k}_mean") for k in AUDIT_STATS}
     if any(v is not None for v in cum.values()):
@@ -515,6 +518,7 @@ def audit_aggregate(rows: list[dict]) -> dict:
             n = sum(r.get(f"audit_{k}_n") or 0 for r in last.values())
             pooled[k] = round(sum(r.get(f"audit_{k}_sum") or 0.0 for r in last.values()) / n, 4) if n else None
             pooled[f"{k}_events"] = n
+        pooled["events_scope"] = "through-last-evaluated-question-per-stream"
         out["event_weighted"] = pooled
     return out
 
