@@ -387,7 +387,9 @@ The interaction comes from worse static accuracy, not from a temporal gain. **`c
 
 ## 14. Stage-2 memory pilot: learned retention vs heuristics at equal budget (predeclared)
 
-**Question:** with the B4 representation and a real memory budget, does the **learned** retention scorer keep the right evidence better than surprise mass or FIFO?
+**Question:** with the B4 representation and a real memory budget, does a **learned retention policy over age and surprise statistics** keep the right evidence better than surprise mass or FIFO?
+
+**Scope:** in pooled B4 mode, retention groups are whole steps. Of the scorer's six inputs, drift is 0, hits is 1 and the slot/step flags are fixed, so effectively **age and surprise mass** vary. Queried and distractor clips are assigned at random, so semantic relevance is not observable from these inputs. This is **not** content-aware semantic memory, and results are interpreted within that feature set. No semantic features are added in this experiment.
 
 **Data** (`scripts/run_memory_pilot.sh`, `trace_vl.v3.memory_pilot`):
 - MC questions of the already-extracted LLaVA subset.
@@ -407,7 +409,7 @@ The interaction comes from worse static accuracy, not from a temporal gain. **`c
 
 **Evaluation** (dev, 40 streams):
 - **The same Stage-2 checkpoint under policies tkm / mass / fifo / full.** Only the policy changes.
-- **tkm with `evict_every 8`**, to quantify the train/eval eviction-cadence mismatch: training evicts at chunk ends, inference every step.
+- **tkm with `evict_schedule: train`** (`s2_tkm_trainsched`): evicts after exactly the steps where Stage-2 training evicts. Both use `eviction_steps()` from the same `chunk_plan`, including question-time cuts and the final partial chunk. `s2_tkm − s2_tkm_trainsched` measures the effect of evicting every step (inference) versus the training schedule. Parity of retained memory follows from the shared schedule and identical scoring at those steps, which is tested at the schedule level; there is no model-level replay test.
 - Separately, **the Stage-1 B4 checkpoint under mass / fifo / full** (does Stage-2 training help?).
 - Reported per run:
   - accuracy (all, beyond-window, within-window) with a stream-cluster bootstrap;
@@ -417,12 +419,25 @@ The interaction comes from worse static accuracy, not from a temporal gain. **`c
   - evidence age;
   - seconds per stream.
 
-**Decision:**
-- **Learned retention is supported** only if s2_tkm − s2_mass **and** s2_tkm − s2_fifo on beyond-window questions are each ≥ +3 pp with a stream-bootstrap CI lower bound > 0. This also requires:
+**Data sufficiency is checked before any GPU time** (`data/report.json`): source videos after exclusion, per-split counts, stream counts and durations, and **actual** evidence ages of the questions the evaluator will ask. A nominal 45–240 s delay is clipped at the stream end, so the actual age is used. Pilot thresholds: ≥ 50 training streams, ≥ 30 selected dev streams, ≥ 100 actual beyond-window dev questions. Otherwise the run stops.
+
+**Decision (three states, `memory_report`):**
+- **invalid / inconclusive:** a validity prerequisite fails. That covers missing or incomplete runs against the expected question set, < 100 beyond-window questions, no evictions, FIFO keeping > 80% of the evidence, or unequal retained KV. No conclusion about retention is drawn.
+- **negative:** valid, but the gain rule fails. Learned retention over age/surprise statistics is not a contribution; do not scale Stage 2 for it.
+- **supported:** valid **and** s2_tkm − s2_mass and s2_tkm − s2_fifo on beyond-window questions are each ≥ +3 pp with a stream-bootstrap CI lower bound > 0. Validity also requires:
   - **memory pressure**: evictions occur, FIFO keeps ≤ 80% of the evidence, and ≥ 100 beyond-window questions;
   - **equal retained KV** (within 2%).
 - Otherwise retention is not a contribution: report the heuristics and do not scale Stage 2 for retention.
 
-**Smoke mode** comes first: 2 updates and 2 dev streams per run. It checks loading, evictions, nonzero scorer updates and assembly of all eight evaluations.
+**Smoke mode** comes first: 2 updates and 2 dev streams per run. It writes a machine-checked `smoke-ok.json` recording the checks plus the revision, resolved config, initial checkpoint identity and data sources. The checks are:
+- finite, nonzero retention **gradients**, not just updates (weight decay alone moves weights);
+- both retention label classes present;
+- evictions occurred;
+- all eight expected named runs complete with the expected question set;
+- enough smoke questions.
+
+The pilot verifies this record (passed, and matching revision, config, initialization and data sources; only sizes may differ) before doing anything. A readable digest is not an authorization.
+
+**Training reuse** requires the trainer's atomic completion record, written after both final saves. It must match the resolved config, the step count, the contiguous metrics, the artifact hashes and the run identity (source revision, training-stream hash, stream media identity, Stage-1 module and adapter identity). Otherwise the attempt is kept as `train.incomplete-*` and retrained. Changed inputs for an existing output directory are rejected.
 
 **Limits:** truncated gradients across chunks; chunk-end eviction in training (quantified by the evict-8 run); one seed; clip-level evidence windows. Alerts are a separate experiment.

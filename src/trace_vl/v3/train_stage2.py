@@ -83,6 +83,13 @@ def chunk_plan(times: list[float], questions: list[dict], chunk_steps: int, gap:
     return plan
 
 
+def eviction_steps(times: list[float], questions: list[dict], chunk_steps: int, gap: float) -> set[int]:
+    """Step indices after which Stage-2 training evicts: the last step of every chunk of `chunk_plan` (chunks
+    of `chunk_steps` that also end where a question is due, plus the final partial chunk). Evaluation with
+    `evict_schedule="train"` uses exactly this set, so train/eval eviction parity is by construction."""
+    return {steps[-1] for steps, _ in chunk_plan(times, questions, chunk_steps, gap)}
+
+
 def evidence_label(span: tuple[float, float], now: float, questions: list[dict]) -> float:
     """1 if a question still to be asked (time > now) has an evidence window overlapping the group's time span.
     Groups of unqueried (distractor) clips, and groups whose questions were already asked, are negatives."""
@@ -362,6 +369,12 @@ def train_stage2(cfg: V3Config, streams_path: str, video_root: str, output: str,
                 if (step + 1) % tc.save_every == 0 or step + 1 == total_steps:
                     modules.save(output / "modules.pt", {"step": step + 1, "stage": 2})
                     bb.peft.save_pretrained(output / "lora")
+                    if step + 1 == total_steps:  # only after both final saves returned
+                        from .pilot import write_completion
+
+                        identity = output / "train-identity.json"  # written by the runner before training
+                        write_completion(output, total_steps, cfg.to_dict(),
+                                         json.loads(identity.read_text()) if identity.is_file() else None)
         tracker.upload(f"{output.parent.name}-{output.name}-logs", "training-logs",
                        [output / "metrics.jsonl", output / "run.json"], base=output)  # fmt: skip
         return output
@@ -406,7 +419,7 @@ def summarize_streams(rows: list[dict], replicates: int = 2000, seed: int = 7) -
 def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: str, mode: str = "v3",
                      checkpoint: str | None = None, adapter: str | None = None, policy: str | None = None,
                      device: str = "cuda", split: str = "val", limit: int | None = None, shard=(0, 1),
-                     evict_every: int | None = None) -> dict:  # fmt: skip
+                     evict_every: int | None = None, evict_schedule: str = "every") -> dict:  # fmt: skip
     """Stream each held-out Stage 2 stream once with the inference session; ask its delayed questions at their
     times. `policy` overrides memory.policy at the same budget (tkm vs mass / fifo / window controls)."""
     from .backbone import Backbone
@@ -428,7 +441,10 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
     records = records[:limit] if limit else records
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
-    fingerprint = run_fingerprint(cfg, streams_path, f"stage2-{mode}-{split}", checkpoint, adapter, video_root, records)
+    if evict_schedule not in {"every", "train"}:
+        raise ValueError("evict_schedule must be every (memory.evict_every) or train (Stage-2 chunk schedule)")
+    fingerprint = run_fingerprint(cfg, streams_path, f"stage2-{mode}-{split}-evict-{evict_schedule}", checkpoint, adapter,
+                                  video_root, records)  # fmt: skip
     run_file = output / "run.json"
     if run_file.exists() and json.loads(run_file.read_text()).get("id") != fingerprint["id"]:
         raise ValueError(f"{output} holds a different run; use a new --output")
@@ -454,6 +470,8 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
             continue
         due = {steps[-1]: qs for steps, qs in chunk_plan(times, record["questions"], len(times), gap) if qs}
         session = StreamSession(bb, cfg, modules, mode=mode)
+        if evict_schedule == "train":
+            session.evict_steps = eviction_steps(times, record["questions"], cfg.stage2.chunk_steps, gap)
         reader = StepReader(record, video_root)
         rows, appended = [], []
         try:

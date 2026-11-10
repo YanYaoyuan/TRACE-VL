@@ -511,7 +511,9 @@ def _v3_parser(commands):
     c.add_argument("--limit", type=int)
     c.add_argument("--device", default="cuda")
     c.add_argument("--shard", type=_shard, default=(0, 1))
-    c.add_argument("--evict-every", type=int, help="override memory.evict_every (train/eval eviction parity check)")
+    c.add_argument("--evict-every", type=int, help="override memory.evict_every (eviction-cadence sensitivity)")
+    c.add_argument("--evict-schedule", choices=["every", "train"], default="every",
+                   help="train: evict exactly where Stage-2 training evicts (chunk ends incl. question cuts)")
     c = sub.add_parser("stage2-splits", help="freeze train/dev/test at source-video level before stitching streams")
     c.add_argument("records", nargs="+", help="MC records (convert-llava-mc output)")
     c.add_argument("--exclude", nargs="*", default=[], help="manifests whose videos are excluded (Stage 1 train/val)")
@@ -686,7 +688,7 @@ def _v3(args):
 
         return show(evaluate_streams(cfg, args.streams, args.video_root, args.output, args.mode, args.checkpoint,
                                      args.adapter, args.policy, args.device, args.split, args.limit, args.shard,
-                                     args.evict_every))  # fmt: skip
+                                     args.evict_every, args.evict_schedule))  # fmt: skip
     if args.action == "train-stage2":
         from .v3.train_stage2 import train_stage2
 

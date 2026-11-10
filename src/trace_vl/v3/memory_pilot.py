@@ -104,15 +104,112 @@ def _paired(a: list[dict], b: list[dict], keep) -> dict:
     return {"n": den, "delta_pp": round(100 * num / den, 3) if den else None, "ci95_pp": _stream_bootstrap(per)}
 
 
+EXPECTED_RUNS = ("s2_tkm", "s2_mass", "s2_fifo", "s2_full", "s2_tkm_trainsched", "s1_mass", "s1_fifo", "s1_full")
+
+
+def _sha(path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+# ---------------------------------------------------------------------------- identities
+def init_identity(checkpoint_dir: str | Path) -> dict:
+    """Content identity of the Stage-1 module checkpoint and its LoRA adapter."""
+    from .harness import _dir_identity
+
+    d = Path(checkpoint_dir)
+    return {"modules.pt": _sha(d / "modules.pt"), "lora": _dir_identity(str(d / "lora"))}
+
+
+def source_identity(source_dir: str | Path = Path(__file__).parent) -> str:
+    digest = hashlib.sha256()
+    for p in sorted(Path(source_dir).glob("*.py")):
+        digest.update(p.name.encode() + p.read_bytes())
+    return digest.hexdigest()
+
+
+def data_sources(mc_json: list[str], excluded: list[str], build: dict) -> dict:
+    """Inputs that define the data (sizes/caps excluded, so smoke and pilot can be compared)."""
+    return {"mc_json": {str(p): _sha(p) for p in mc_json}, "excluded": {str(p): _sha(p) for p in excluded}, "build": build}
+
+
+def stream_media_identity(streams_path: str | Path, video_root: str | Path) -> str:
+    from .harness import _video_identity
+
+    clips = [{"video": c["video"]} for r in read_jsonl(streams_path) for c in r.get("clips", [])]
+    return _video_identity(clips, str(video_root))
+
+
+# ---------------------------------------------------------------------------- data sufficiency
+def expected_questions(streams_path: str | Path, split: str, limit: int | None, cfg) -> dict:
+    """Questions the stream evaluator will ask (same stream order, limit and due-time rules), id -> evidence age."""
+    from .train_stage2 import chunk_plan, stream_times
+
+    records = [r for r in read_jsonl(streams_path) if r.get("split") == split and r.get("questions")]
+    records = records[:limit] if limit else records
+    gap, out = cfg.stream.frame_gap, {}
+    for r in records:
+        times = stream_times(r, cfg.stream.step_seconds, gap, cfg.stage2.max_seconds)
+        if not times:
+            continue
+        for _, due in chunk_plan(times, r["questions"], len(times), gap):
+            for q in due:
+                end = max((b for _, b in q.get("evidence") or []), default=None)
+                out[q["id"]] = None if end is None else round(float(q["time"]) - end, 3)
+    return out
+
+
+def data_report(streams_dir: str | Path, splits_manifest: str | Path, dev_limit: int, window: float, cfg) -> dict:
+    streams_dir = Path(streams_dir)
+    rep = {"splits": json.loads(Path(splits_manifest).read_text())["splits"], "streams": {}}
+    for split in SPLITS:
+        rows = read_jsonl(streams_dir / f"{split}.jsonl")
+        durations = sorted(r["duration"] for r in rows)
+        rep["streams"][split] = {
+            "streams": len(rows), "questions": sum(len(r.get("questions", [])) for r in rows),
+            "duration_median": durations[len(durations) // 2] if durations else None,
+            "duration_min": durations[0] if durations else None,
+            "distractor_clips": sum(not c.get("queried", True) for r in rows for c in r.get("clips", [])),
+        }  # fmt: skip
+    ages = expected_questions(streams_dir / "dev.jsonl", "dev", dev_limit, cfg)
+    known = [a for a in ages.values() if a is not None]
+    rep["dev_selected"] = {"streams": min(dev_limit, rep["streams"]["dev"]["streams"]), "questions": len(ages),
+                           "beyond_window": sum(a > window for a in known), "within_window": sum(a <= window for a in known),
+                           "evidence_age_median": sorted(known)[len(known) // 2] if known else None}  # fmt: skip
+    return rep
+
+
+THRESHOLDS = {"smoke": {"train_streams": 2, "dev_streams": 2, "dev_beyond_window": 2},
+              "pilot": {"train_streams": 50, "dev_streams": 30, "dev_beyond_window": 100}}
+
+
+def data_problems(rep: dict, mode: str) -> list[str]:
+    t, problems = THRESHOLDS[mode], []
+    if rep["streams"]["train"]["streams"] < t["train_streams"]:
+        problems.append(f"train streams {rep['streams']['train']['streams']} < {t['train_streams']}")
+    if rep["dev_selected"]["streams"] < t["dev_streams"]:
+        problems.append(f"selected dev streams {rep['dev_selected']['streams']} < {t['dev_streams']}")
+    if rep["dev_selected"]["beyond_window"] < t["dev_beyond_window"]:
+        problems.append(f"beyond-window dev questions {rep['dev_selected']['beyond_window']} < {t['dev_beyond_window']}")
+    return problems
+
+
+# ---------------------------------------------------------------------------- report and decision
 def memory_report(eval_root: str, window_seconds: float, primary: str = "s2_tkm",
-                  heuristics=("s2_mass", "s2_fifo"), upper: str = "s2_full") -> dict:  # fmt: skip
+                  heuristics=("s2_mass", "s2_fifo"), upper: str = "s2_full", expected_runs=None,
+                  expected_ids: set | None = None) -> dict:  # fmt: skip
+    """Per-run statistics, paired deltas and a three-state decision:
+    invalid (validity prerequisites fail: missing/incomplete runs, too few beyond-window questions, no memory
+    pressure, unequal budgets), negative (valid, but the predeclared gain rule fails), supported (both pass)."""
     root = Path(eval_root)
     runs = {d.name: _rows(d) for d in sorted(root.iterdir()) if (d / "predictions.jsonl").is_file()}
-    ids = {name: {r["id"] for r in rows} for name, rows in runs.items()}
-    reference = ids.get(primary)
-    for name, s in ids.items():
-        if reference is not None and s != reference:
-            raise ValueError(f"{name}: question set differs from {primary}")
+    invalid = []
+    for name in expected_runs or ():
+        if name not in runs:
+            invalid.append(f"missing run {name}")
+    reference = expected_ids if expected_ids is not None else ({r["id"] for r in runs[primary]} if primary in runs else None)
+    for name, rows in runs.items():
+        if name in (expected_runs or runs) and reference is not None and {r["id"] for r in rows} != reference:
+            invalid.append(f"{name}: question set differs from the expected set (incomplete coverage)")
     beyond = lambda r: r.get("evidence_age") is not None and r["evidence_age"] > window_seconds  # noqa: E731
     within = lambda r: r.get("evidence_age") is not None and r["evidence_age"] <= window_seconds  # noqa: E731
     summary = {}
@@ -133,23 +230,74 @@ def memory_report(eval_root: str, window_seconds: float, primary: str = "s2_tkm"
         }  # fmt: skip
     pairs = {}
     if primary in runs:
-        for other in [*heuristics, upper, f"{primary}_evict8"]:
+        for other in [*heuristics, upper, f"{primary}_trainsched"]:
             if other in runs:
                 pairs[f"{primary}_minus_{other}"] = {"beyond_window": _paired(runs[primary], runs[other], beyond),
                                                      "all": _paired(runs[primary], runs[other], lambda r: True)}  # fmt: skip
-    decision = None
+    validity, decision = {}, None
     if primary in runs and all(h in runs for h in heuristics):
-        gains = [pairs[f"{primary}_minus_{h}"]["beyond_window"] for h in heuristics]
         kv = [summary[x]["kv_tokens_mean"] for x in (primary, *heuristics)]
-        fifo_kept = summary.get(heuristics[-1], {}).get("evidence_kept_beyond_window")
-        pressure = (summary[primary]["evicted_tokens_mean"] > 0 and fifo_kept is not None and fifo_kept <= 0.8
-                    and summary[primary]["beyond_window"]["n"] >= 100)  # fmt: skip
-        equal_budget = max(kv) <= 1.02 * min(kv)
-        supported = pressure and equal_budget and all(g["delta_pp"] is not None and g["delta_pp"] >= 3.0
-                                                      and g["ci95_pp"][0] is not None and g["ci95_pp"][0] > 0 for g in gains)
-        decision = {"memory_pressure": pressure, "equal_budget": equal_budget, "learned_retention_supported": supported,
-                    "rule": "s2_tkm - each heuristic on beyond-window questions >= +3 pp with stream-bootstrap CI lower > 0, "
-                            "with memory pressure (evictions, FIFO evidence kept <= 0.8, >= 100 beyond-window questions) "
-                            "and equal retained KV (within 2%)",
-                    "if_false": "retention is not a contribution: report heuristics; do not scale Stage 2 for retention"}  # fmt: skip
+        fifo_kept = summary[heuristics[-1]]["evidence_kept_beyond_window"]
+        validity = {
+            "complete_coverage": not invalid,
+            "enough_beyond_window": summary[primary]["beyond_window"]["n"] >= 100,
+            "evictions": summary[primary]["evicted_tokens_mean"] > 0,
+            "fifo_loses_evidence": fifo_kept is not None and fifo_kept <= 0.8,
+            "equal_budget": max(kv) <= 1.02 * min(kv),
+        }
+        gains = [pairs[f"{primary}_minus_{h}"]["beyond_window"] for h in heuristics]
+        gain = all(g["delta_pp"] is not None and g["delta_pp"] >= 3.0 and g["ci95_pp"][0] is not None
+                   and g["ci95_pp"][0] > 0 for g in gains)  # fmt: skip
+        status = "invalid" if not all(validity.values()) else ("supported" if gain else "negative")
+        decision = {
+            "status": status, "validity": validity, "gain_rule_met": gain,
+            "invalid_reasons": invalid + [k for k, v in validity.items() if not v],
+            "rule": "valid: complete coverage, >= 100 beyond-window questions, evictions, FIFO evidence kept <= 0.8, retained "
+                    "KV within 2%; supported: valid and s2_tkm - each heuristic on beyond-window questions >= +3 pp with "
+                    "stream-bootstrap CI lower > 0",
+            "meaning": {"invalid": "inconclusive: the experiment did not test retention; fix the setup, no conclusion",
+                        "negative": "valid test, gain rule failed: learned retention (over age/surprise statistics) is not "
+                                    "a contribution; do not scale Stage 2 for retention",
+                        "supported": "learned retention over age/surprise statistics beats both heuristics here"}[status],
+        }  # fmt: skip
+    elif invalid or primary not in runs:
+        decision = {"status": "invalid", "invalid_reasons": invalid or [f"missing {primary}"],
+                    "meaning": "inconclusive: the experiment did not test retention"}  # fmt: skip
     return {"window_seconds": window_seconds, "runs": summary, "paired": pairs, "decision": decision}
+
+
+# ---------------------------------------------------------------------------- smoke authorization
+def smoke_checks(report: dict, metrics: list[dict], data_rep: dict) -> dict:
+    """Machine-checked smoke success (not just a readable digest)."""
+    import math
+
+    grads = [m.get("grad_norm_retention") for m in metrics]
+    reasons = (report.get("decision") or {}).get("invalid_reasons", [])
+    coverage = [r for r in reasons if r.startswith("missing run") or "question set" in r]
+    return {
+        "training_updates_logged": len(metrics) > 0,
+        "retention_gradient_finite_nonzero": any(g is not None and math.isfinite(g) and g > 0 for g in grads)
+        and all(g is None or math.isfinite(g) for g in grads),
+        "retention_labels_both_classes": sum(m.get("ret_pos", 0) for m in metrics) > 0
+        and sum(m.get("ret_neg", 0) for m in metrics) > 0,
+        "evictions": (report["runs"].get("s2_tkm") or {}).get("evicted_tokens_mean", 0) > 0,
+        "expected_runs_complete": not coverage and all(name in report["runs"] for name in EXPECTED_RUNS),
+        "enough_smoke_questions": data_rep["dev_selected"]["beyond_window"] >= THRESHOLDS["smoke"]["dev_beyond_window"],
+    }  # fmt: skip
+
+
+def verify_smoke(smoke_ok: str | Path, expected: dict) -> list[str]:
+    """Problems preventing a pilot (empty list = authorized). `expected` holds revision, config, init and data
+    sources of the intended pilot; smoke and pilot may differ only in sizes (caps, steps, dev stream count)."""
+    path = Path(smoke_ok)
+    if not path.is_file():
+        return [f"no smoke authorization at {path}"]
+    try:
+        record = json.loads(path.read_text())
+    except ValueError:
+        return [f"unreadable smoke authorization {path}"]
+    problems = [] if record.get("passed") is True else ["smoke did not pass"]
+    for key in ("revision", "config", "init", "data_sources"):
+        if record.get(key) != expected.get(key):
+            problems.append(f"smoke {key} differs from the intended pilot")
+    return problems

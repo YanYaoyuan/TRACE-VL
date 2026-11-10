@@ -50,11 +50,14 @@ def artifact_hashes(output: Path, checkpoint_steps=()) -> dict:
     return hashes
 
 
-def write_completion(output: Path, step: int, config: dict):
-    """Called by the trainer (rank 0) only after the final module and LoRA saves returned."""
+def write_completion(output: Path, step: int, config: dict, extra: dict | None = None):
+    """Called by the trainer (rank 0) only after the final module and LoRA saves returned. `extra` pins further
+    run identity (e.g. Stage 2: training streams, initial checkpoint, source revision)."""
     output = Path(output)
     steps = (config.get("train") or {}).get("checkpoint_steps") or ()
     record = {"step": step, "config": config, "artifacts": artifact_hashes(output, steps)}
+    if extra is not None:
+        record["extra"] = extra
     tmp = output / (COMPLETE + ".tmp")
     with tmp.open("w") as handle:
         handle.write(json.dumps(record, indent=2) + "\n")
@@ -63,7 +66,7 @@ def write_completion(output: Path, step: int, config: dict):
     os.replace(tmp, output / COMPLETE)
 
 
-def training_complete(output: Path, config: dict, steps: int) -> tuple[bool, str]:
+def training_complete(output: Path, config: dict, steps: int, extra: dict | None = None) -> tuple[bool, str]:
     """(True, "") only if the completion record matches the expected config/step, the artifacts on disk still
     hash to the recorded values, and the metric log holds exactly steps 1..`steps`."""
     output = Path(output)
@@ -78,6 +81,8 @@ def training_complete(output: Path, config: dict, steps: int) -> tuple[bool, str
         return False, f"completed step {record.get('step')} != {steps}"
     if record.get("config") != config:
         return False, "trained with a different resolved config"
+    if extra is not None and record.get("extra") != extra:
+        return False, "trained with a different run identity (streams, initialization or source)"
     try:
         if artifact_hashes(output, (config.get("train") or {}).get("checkpoint_steps") or ()) != record.get("artifacts"):
             return False, "checkpoint/adapter files differ from the completion record"
