@@ -162,7 +162,7 @@ def test_smoke_requires_a_real_retention_signal():
 
 
 def test_pilot_authorization_requires_a_matching_passed_smoke(tmp_path):
-    expected = {"revision": "r", "config": {"a": 1}, "init": {"m": "x"}, "data_sources": {"mc": "h"}}
+    expected = {"protocol": "memory-pilot-v2", "revision": "r", "config": {"a": 1}, "init": {"m": "x"}, "data_sources": {"mc": "h"}}
     path = tmp_path / "smoke-ok.json"
     assert verify_smoke(path, expected)  # missing
     path.write_text("")
@@ -249,3 +249,66 @@ def test_missing_prediction_in_a_present_arm_is_invalid_not_a_crash(tmp_path):
     assert any("s2_mass" in reason for reason in r["decision"]["invalid_reasons"])
     assert not smoke_checks(r, [{"grad_norm_retention": 1.0, "ret_pos": 1, "ret_neg": 1}],
                             {"dev_selected": {"beyond_window": 5}})["expected_runs_complete"]
+
+
+# ---------------------------------------------------------------------------- smoke selection (A100 smoke data-gate stop)
+def selection_streams():
+    """Early short streams with only immediate questions, then long streams with delayed questions, plus a test-split
+    stream (must never be selected from dev) and a long stream whose delayed question is clipped at its end."""
+    rows = []
+    for i in range(3):  # short leftovers: 60 s, question right after the clip (age 0)
+        rows.append({"id": f"short{i}", "split": "dev", "duration": 60.0, "clips": [],
+                     "questions": [{"id": f"short{i}-q", "time": 50.0, "evidence": [[20.0, 50.0]], "delay": 0.0}]})
+    for i in range(4):  # eligible: 300 s, evidence ends at 100 s, asked at 200 s (age 100 > 16)
+        rows.append({"id": f"long{i}", "split": "dev", "duration": 300.0, "clips": [],
+                     "questions": [{"id": f"long{i}-q", "time": 200.0, "evidence": [[60.0, 100.0]], "delay": 100.0}]})
+    rows.append({"id": "clipped", "split": "dev", "duration": 300.0, "clips": [],  # nominal delay 120 s, actual age 5 s
+                 "questions": [{"id": "clipped-q", "time": 299.0, "evidence": [[260.0, 294.0]], "delay": 120.0}]})
+    rows.append({"id": "testlong", "split": "test", "duration": 300.0, "clips": [],
+                 "questions": [{"id": "t-q", "time": 200.0, "evidence": [[60.0, 100.0]], "delay": 100.0}]})
+    return rows
+
+
+def test_smoke_selection_is_deterministic_eligible_and_split_isolated(tmp_path):
+    from trace_vl.v3.memory_pilot import PILOT_RULE, SMOKE_RULE, data_report, select_streams
+
+    cfg = load_v3_config("configs/v3/memory_pilot_b4.yaml")[0]
+    src = tmp_path / "dev.jsonl"
+    src.write_text("".join(json.dumps(r) + "\n" for r in selection_streams()))
+    a = select_streams(src, "dev", cfg, SMOKE_RULE, 2, tmp_path / "a.jsonl")
+    b = select_streams(src, "dev", cfg, SMOKE_RULE, 2, tmp_path / "b.jsonl")
+    ids = [x["id"] for x in a["selected"]]
+    assert ids == [x["id"] for x in b["selected"]] and a["sha256"] == b["sha256"]  # deterministic
+    assert set(ids) <= {"long0", "long1", "long2", "long3"} and len(ids) == 2  # never short or clipped or test
+    assert a["candidates"] == 8 and a["eligible"] == 4  # the test-split stream is not even a candidate
+    assert a["excluded"] == {"too_short": 3, "no_beyond_window_question": 4}  # 3 short (age 0) + clipped (age 5)
+    assert all(age > 16 for x in a["selected"] for age in x["ages"])
+    pilot = select_streams(src, "dev", cfg, PILOT_RULE, 2, tmp_path / "p.jsonl")
+    assert [x["id"] for x in pilot["selected"]] == ["short0", "short1"]  # pilot population unchanged: first n
+    (tmp_path / "streams").mkdir()
+    for split in ("train", "dev", "test"):
+        (tmp_path / "streams" / f"{split}.jsonl").write_text("")
+    (tmp_path / "m.json").write_text(json.dumps({"splits": {}}))
+    rep = data_report(tmp_path / "streams", tmp_path / "m.json", None, 16.0, cfg, dev_path=tmp_path / "a.jsonl",
+                      train_path=tmp_path / "a.jsonl")  # fmt: skip
+    assert rep["dev_selected"]["streams"] == 2 and rep["dev_selected"]["beyond_window"] == 2
+    assert not data_problems(rep, "smoke")
+
+
+def test_too_few_eligible_streams_stop_before_training(tmp_path):
+    from trace_vl.v3.memory_pilot import SMOKE_RULE, data_report, select_streams
+
+    cfg = load_v3_config("configs/v3/memory_pilot_b4.yaml")[0]
+    rows = [r for r in selection_streams() if r["id"] in ("short0", "short1", "clipped", "long0")]
+    src = tmp_path / "dev.jsonl"
+    src.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    sel = select_streams(src, "dev", cfg, SMOKE_RULE, 2, tmp_path / "sel.jsonl")
+    assert sel["eligible"] == 1 and sel["selected_count"] == 1
+    (tmp_path / "streams").mkdir()
+    for split in ("train", "dev", "test"):
+        (tmp_path / "streams" / f"{split}.jsonl").write_text("")
+    (tmp_path / "m.json").write_text(json.dumps({"splits": {}}))
+    rep = data_report(tmp_path / "streams", tmp_path / "m.json", None, 16.0, cfg, dev_path=tmp_path / "sel.jsonl",
+                      train_path=tmp_path / "sel.jsonl")  # fmt: skip
+    problems = data_problems(rep, "smoke")
+    assert any("selected dev streams 1 < 2" in p for p in problems) and any("usable train streams 1 < 2" in p for p in problems)

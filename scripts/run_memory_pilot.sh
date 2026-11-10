@@ -11,7 +11,7 @@ cd "$root"
 export TRACE_GPUS="${TRACE_GPUS:-4}" TRACE_LLAVA_MC_JSON="${TRACE_LLAVA_MC_JSON:-}" TRACE_MODEL="${TRACE_MODEL:-}"
 export TRACE_SMOKE_OK="${TRACE_SMOKE_OK:-}"
 case "$TRACE_MODE" in
-  smoke) export TRACE_STEPS=2 TRACE_DEV_STREAMS=2 TRACE_CAPS="60 20 20" ;;
+  smoke) export TRACE_STEPS=2 TRACE_DEV_STREAMS=2 TRACE_CAPS="${TRACE_SMOKE_CAPS:-600 200 200}" ;;  # candidate pool
   pilot) export TRACE_STEPS=300 TRACE_DEV_STREAMS=40 TRACE_CAPS="3000 400 400" ;;
   *) echo "TRACE_MODE must be smoke or pilot" >&2; exit 2 ;;
 esac
@@ -34,14 +34,14 @@ log "[0/6] Config, run expectations and (pilot) smoke authorization"
 import json, os
 from pathlib import Path
 from trace_vl.v3.config import load_v3_config
-from trace_vl.v3.memory_pilot import data_sources, init_identity, source_identity, verify_smoke
+from trace_vl.v3.memory_pilot import PROTOCOL, data_sources, init_identity, source_identity, verify_smoke
 
 out = Path(os.environ["TRACE_OUT"])
 cfg, _ = load_v3_config(os.environ["TRACE_CFG"])
 build = {"stream_seconds": 300.0, "delay_min": 45.0, "delay_max": 240.0, "immediate_fraction": 0.2,
          "distractor_fraction": 0.4, "split_fractions": [0.8, 0.1, 0.1], "split_seed": 7}
 excluded = [str(Path(os.environ["TRACE_DATA_DIR"]) / f) for f in ("train.jsonl", "val.jsonl")]
-expected = {"revision": source_identity(Path("src/trace_vl/v3")), "config": cfg.to_dict(),
+expected = {"protocol": PROTOCOL, "revision": source_identity(Path("src/trace_vl/v3")), "config": cfg.to_dict(),
             "init": init_identity(os.environ["TRACE_S1"]),
             "data_sources": data_sources(os.environ["TRACE_MC_JSON"].split(), excluded, build)}
 target = out / "expected.json"
@@ -82,23 +82,37 @@ for split in ("train", "test", "dev"):  # dev last: its presence marks a complet
 PY
 fi
 
-log "[2/6] Data sufficiency (before any GPU time): counts after exclusion, streams, ACTUAL beyond-window questions"
+log "[2/6] Stream selection (metadata only, before any model) and data sufficiency (before any GPU time)"
 "${py[@]}" - <<'PY'
 import json, os
 from pathlib import Path
 from trace_vl.v3.config import load_v3_config
-from trace_vl.v3.memory_pilot import data_problems, data_report
+from trace_vl.v3.memory_pilot import PILOT_RULE, SMOKE_RULE, data_problems, data_report, select_streams
 out = Path(os.environ["TRACE_OUT"])
 cfg, _ = load_v3_config(os.environ["TRACE_CFG"])
-rep = data_report(out / "data" / "streams", out / "data" / "splits" / "manifest.json", int(os.environ["TRACE_DEV_STREAMS"]),
-                  cfg.memory.window_seconds, cfg)
+streams = out / "data" / "streams"
+smoke = os.environ["TRACE_MODE"] == "smoke"
+rule = SMOKE_RULE if smoke else PILOT_RULE
+# Smoke: two eligible dev streams (>= 240 s, >= 1 actual beyond-window question), hash-ordered with seed 7, and the
+# eligible long training streams; pilot: its unchanged population (first 40 dev streams, all training streams).
+selection = {
+    "dev": select_streams(streams / "dev.jsonl", "dev", cfg, rule, int(os.environ["TRACE_DEV_STREAMS"]), streams / "dev_selected.jsonl"),
+    "train": select_streams(streams / "train.jsonl", "train", cfg, rule, None, streams / "train_selected.jsonl"),
+}
+(out / "data" / "selection.json").write_text(json.dumps(selection, indent=2) + "\n")
+rep = data_report(streams, out / "data" / "splits" / "manifest.json", None, cfg.memory.window_seconds, cfg,
+                  dev_path=streams / "dev_selected.jsonl", train_path=streams / "train_selected.jsonl")
+rep["selection"] = {split: {k: v for k, v in sel.items() if k != "selected"} | {"selected_ids": [x["id"] for x in sel["selected"]]}
+                    for split, sel in selection.items()}
 rep["excluded_stage1_videos"] = json.loads((out / "data" / "splits" / "manifest.json").read_text())["excluded_videos"]
 problems = data_problems(rep, os.environ["TRACE_MODE"])
 rep["problems"] = problems
 (out / "data" / "report.json").write_text(json.dumps(rep, indent=2) + "\n")
 print(json.dumps(rep, indent=2))
 if problems:
-    raise SystemExit("insufficient data, stopping before training: " + "; ".join(problems))
+    detail = "; ".join(f"{k}: {v['eligible']} eligible of {v['candidates']} candidates, excluded {v['excluded']}"
+                       for k, v in selection.items())
+    raise SystemExit("insufficient data, stopping before training: " + "; ".join(problems) + f" ({detail})")
 PY
 
 log "[3/6] Stage-2 training from the Stage-1 B4 checkpoint (${TRACE_STEPS} updates, ${TRACE_GPUS} GPUs)"
@@ -114,7 +128,7 @@ from trace_vl.v3.memory_pilot import STAGE2_CHECKPOINT_STEPS, init_identity, sou
 from trace_vl.v3.pilot import training_complete
 out, s2 = Path(os.environ["TRACE_OUT"]), Path(os.environ["TRACE_S2"])
 cfg, _ = load_v3_config(os.environ["TRACE_CFG"])
-streams = out / "data" / "streams" / "train.jsonl"
+streams = out / "data" / "streams" / "train_selected.jsonl"
 identity = {"revision": source_identity(Path("src/trace_vl/v3")), "streams_sha256": _sha(streams),
             "media": stream_media_identity(streams, os.environ["TRACE_VIDEO_ROOT"]), "init": init_identity(os.environ["TRACE_S1"]),
             "steps": int(os.environ["TRACE_STEPS"])}
@@ -128,7 +142,7 @@ PY
 run_training() {
   cp "$TRACE_OUT/train-identity.expected.json" "$TRACE_S2/train-identity.json"
   "$uv_bin" run --locked --no-sync torchrun --standalone --nproc_per_node="$TRACE_GPUS" -m trace_vl.cli v3 train-stage2 \
-    --config "$TRACE_CFG" --streams "$TRACE_OUT/data/streams/train.jsonl" --video-root "$TRACE_VIDEO_ROOT" --output "$TRACE_S2" \
+    --config "$TRACE_CFG" --streams "$TRACE_OUT/data/streams/train_selected.jsonl" --video-root "$TRACE_VIDEO_ROOT" --output "$TRACE_S2" \
     --init "$TRACE_S1/modules.pt" --adapter "$TRACE_S1/lora" --max-steps "$TRACE_STEPS"
   completion_check || { echo "training finished without a valid completion record" >&2; exit 1; }
 }
@@ -139,16 +153,16 @@ run_eval() {  # name, checkpoint dir, extra args...
   local pids=()
   for ((i = 0; i < TRACE_GPUS; i++)); do
     CUDA_VISIBLE_DEVICES=$i "$uv_bin" run --locked --no-sync python -m trace_vl.cli v3 eval-stage2 --config "$TRACE_CFG" \
-      --streams "$TRACE_OUT/data/streams/dev.jsonl" --video-root "$TRACE_VIDEO_ROOT" --output "$TRACE_OUT/eval/$name" \
-      --mode v3 --checkpoint "$ckpt/modules.pt" --adapter "$ckpt/lora" --split dev --limit "$TRACE_DEV_STREAMS" \
+      --streams "$TRACE_OUT/data/streams/dev_selected.jsonl" --video-root "$TRACE_VIDEO_ROOT" --output "$TRACE_OUT/eval/$name" \
+      --mode v3 --checkpoint "$ckpt/modules.pt" --adapter "$ckpt/lora" --split dev \
       --shard "$i/$TRACE_GPUS" --device cuda:0 "$@" > "$TRACE_OUT/eval-$name-shard$i.log" 2>&1 &
     pids+=($!)
     sleep 5
   done
   for pid in "${pids[@]}"; do wait "$pid" || { echo "eval $name failed; see $TRACE_OUT/eval-$name-shard*.log" >&2; exit 1; }; done
   CUDA_VISIBLE_DEVICES=0 "$uv_bin" run --locked --no-sync python -m trace_vl.cli v3 eval-stage2 --config "$TRACE_CFG" \
-    --streams "$TRACE_OUT/data/streams/dev.jsonl" --video-root "$TRACE_VIDEO_ROOT" --output "$TRACE_OUT/eval/$name" \
-    --mode v3 --checkpoint "$ckpt/modules.pt" --adapter "$ckpt/lora" --split dev --limit "$TRACE_DEV_STREAMS" "$@" > /dev/null
+    --streams "$TRACE_OUT/data/streams/dev_selected.jsonl" --video-root "$TRACE_VIDEO_ROOT" --output "$TRACE_OUT/eval/$name" \
+    --mode v3 --checkpoint "$ckpt/modules.pt" --adapter "$ckpt/lora" --split dev "$@" > /dev/null
   log "  $name done"
 }
 log "[4/6] Dev evaluation of the Stage-2 model: only the memory policy (or eviction schedule) changes"
@@ -170,7 +184,7 @@ from trace_vl.v3.config import load_v3_config
 from trace_vl.v3.memory_pilot import EXPECTED_RUNS, expected_questions, memory_report, smoke_checks
 out, mode = Path(os.environ["TRACE_OUT"]), os.environ["TRACE_MODE"]
 cfg, _ = load_v3_config(os.environ["TRACE_CFG"])
-ids = set(expected_questions(out / "data" / "streams" / "dev.jsonl", "dev", int(os.environ["TRACE_DEV_STREAMS"]), cfg))
+ids = set(expected_questions(out / "data" / "streams" / "dev_selected.jsonl", "dev", None, cfg))
 r = memory_report(str(out / "eval"), cfg.memory.window_seconds, expected_runs=EXPECTED_RUNS, expected_ids=ids)
 (out / "memory-report.json").write_text(json.dumps(r, indent=2) + "\n")
 metrics = [json.loads(s) for s in (out / "train" / "metrics.jsonl").read_text().splitlines() if s.strip()]

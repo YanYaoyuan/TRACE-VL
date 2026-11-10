@@ -419,6 +419,21 @@ The interaction comes from worse static accuracy, not from a temporal gain. **`c
   - evidence age;
   - seconds per stream.
 
+**Stream selection** (protocol `memory-pilot-v2`; metadata only, fixed before any model is evaluated, never using accuracy). The selected manifests `dev_selected.jsonl` and `train_selected.jsonl` are reused by every run, and `data/selection.json` records:
+- candidates, eligible streams and exclusions by reason;
+- selected IDs with their actual ages and durations;
+- seed and rule version.
+
+| Mode | Rule | Selection |
+|---|---|---|
+| **Smoke** | `smoke-eligible-hash-v1` | Candidate pool of 600/200/200 source videos (configurable). A stream is eligible if its duration is ≥ 240 s **and** it has ≥ 1 *actual* beyond-window question (evaluator due-time rules; nominal delays clipped at the stream end do not count). Eligible streams are ordered by sha256(seed 7 : id). The first two dev streams are evaluated, and all eligible training streams are sampled. |
+| **Pilot** | `pilot-first-n-v1` | Unchanged population: the first 40 dev streams in file order, and all training streams. |
+
+- If fewer than two dev streams or fewer than two training streams are eligible, the run stops before training and reports the counts and reasons.
+- The frozen test split is never used to fill dev, and no thresholds are lowered.
+- Smoke and pilot compatibility is checked on protocol, revision, config, initialization and data sources; sizes and the selection rule are mode-specific by design.
+- First A100 smoke attempt (`ac5fa12`, caps 60/20/20): correctly stopped by the data gate (0 beyond-window dev questions in the first two streams). It is preserved for provenance.
+
 **Data sufficiency is checked before any GPU time** (`data/report.json`): source videos after exclusion, per-split counts, stream counts and durations, and **actual** evidence ages of the questions the evaluator will ask. A nominal 45–240 s delay is clipped at the stream end, so the actual age is used. Pilot thresholds: ≥ 50 training streams, ≥ 30 selected dev streams, ≥ 100 actual beyond-window dev questions. Otherwise the run stops.
 
 **Decision (three states, `memory_report`):**

@@ -159,7 +159,68 @@ def expected_questions(streams_path: str | Path, split: str, limit: int | None, 
     return out
 
 
-def data_report(streams_dir: str | Path, splits_manifest: str | Path, dev_limit: int, window: float, cfg) -> dict:
+PROTOCOL = "memory-pilot-v2"  # v2: explicit stream selection manifests (smoke eligibility rule; pilot first-n)
+SMOKE_RULE = "smoke-eligible-hash-v1"
+PILOT_RULE = "pilot-first-n-v1"
+
+
+def stream_question_ages(record: dict, cfg) -> list[float | None]:
+    """Actual evidence ages of the questions the evaluator asks in one stream (same due-time rules)."""
+    from .train_stage2 import chunk_plan, stream_times
+
+    times = stream_times(record, cfg.stream.step_seconds, cfg.stream.frame_gap, cfg.stage2.max_seconds)
+    if not times:
+        return []
+    ages = []
+    for _, due in chunk_plan(times, record.get("questions", []), len(times), cfg.stream.frame_gap):
+        for q in due:
+            end = max((b for _, b in q.get("evidence") or []), default=None)
+            ages.append(None if end is None else round(float(q["time"]) - end, 3))
+    return ages
+
+
+def select_streams(streams_path: str | Path, split: str, cfg, rule: str, n: int | None, out_path: str | Path,
+                   seed: int = 7, min_duration: float = 240.0, min_beyond: int = 1) -> dict:  # fmt: skip
+    """Deterministic, metadata-only stream selection, fixed before any model is evaluated; never uses accuracy.
+
+    SMOKE_RULE: eligible = duration >= min_duration and >= min_beyond actual beyond-window questions (evidence
+    age > memory.window_seconds under the evaluator's due-time rules); eligible streams ordered by
+    sha256(f"{seed}:{id}"); the first n are selected (n=None: all eligible).
+    PILOT_RULE: the first n streams in file order (the formal pilot's unchanged evaluation population).
+    Writes the selected records to out_path (reused by every run) and returns the selection report."""
+    window = cfg.memory.window_seconds
+    records = [r for r in read_jsonl(streams_path) if r.get("split") == split and r.get("questions")]
+    report = {"rule": rule, "split": split, "seed": seed, "candidates": len(records), "window_seconds": window}
+    if rule == PILOT_RULE:
+        chosen = records[:n] if n else records
+        report.update({"eligible": len(records), "excluded": {}})
+    elif rule == SMOKE_RULE:
+        excluded = {"too_short": 0, "no_beyond_window_question": 0}
+        eligible = []
+        for r in records:
+            beyond = sum(a is not None and a > window for a in stream_question_ages(r, cfg))
+            short = float(r["duration"]) < min_duration
+            excluded["too_short"] += int(short)
+            excluded["no_beyond_window_question"] += int(beyond < min_beyond)
+            if not short and beyond >= min_beyond:
+                eligible.append(r)
+        eligible.sort(key=lambda r: hashlib.sha256(f"{seed}:{r['id']}".encode()).hexdigest())
+        chosen = eligible[:n] if n else eligible
+        report.update({"eligible": len(eligible), "excluded": excluded, "min_duration": min_duration,
+                       "min_beyond_window_questions": min_beyond})  # fmt: skip
+    else:
+        raise ValueError(f"unknown selection rule {rule}")
+    write_jsonl(out_path, chosen)
+    report["selected"] = [{"id": r["id"], "duration": r["duration"], "ages": stream_question_ages(r, cfg)} for r in chosen]
+    report["selected_count"] = len(chosen)
+    report["sha256"] = hashlib.sha256(Path(out_path).read_bytes()).hexdigest()
+    return report
+
+
+def data_report(streams_dir: str | Path, splits_manifest: str | Path, dev_limit: int | None, window: float, cfg,
+                dev_path: str | Path | None = None, train_path: str | Path | None = None) -> dict:  # fmt: skip
+    """Counts per split plus the questions the evaluator will ask on the dev streams actually used (`dev_path`,
+    e.g. the selected manifest, with dev_limit None) and the training streams actually sampled (`train_path`)."""
     streams_dir = Path(streams_dir)
     rep = {"splits": json.loads(Path(splits_manifest).read_text())["splits"], "streams": {}}
     for split in SPLITS:
@@ -171,9 +232,14 @@ def data_report(streams_dir: str | Path, splits_manifest: str | Path, dev_limit:
             "duration_min": durations[0] if durations else None,
             "distractor_clips": sum(not c.get("queried", True) for r in rows for c in r.get("clips", [])),
         }  # fmt: skip
-    ages = expected_questions(streams_dir / "dev.jsonl", "dev", dev_limit, cfg)
+    dev_file = Path(dev_path) if dev_path else streams_dir / "dev.jsonl"
+    ages = expected_questions(dev_file, "dev", dev_limit, cfg)
     known = [a for a in ages.values() if a is not None]
-    rep["dev_selected"] = {"streams": min(dev_limit, rep["streams"]["dev"]["streams"]), "questions": len(ages),
+    dev_count = len([r for r in read_jsonl(dev_file) if r.get("split") == "dev" and r.get("questions")])
+    train_file = Path(train_path) if train_path else streams_dir / "train.jsonl"
+    rep["train_used"] = {"file": train_file.name, "streams": len(read_jsonl(train_file))}
+    rep["dev_selected"] = {"file": dev_file.name, "streams": min(dev_limit, dev_count) if dev_limit else dev_count,
+                           "questions": len(ages),
                            "beyond_window": sum(a > window for a in known), "within_window": sum(a <= window for a in known),
                            "evidence_age_median": sorted(known)[len(known) // 2] if known else None}  # fmt: skip
     return rep
@@ -185,8 +251,9 @@ THRESHOLDS = {"smoke": {"train_streams": 2, "dev_streams": 2, "dev_beyond_window
 
 def data_problems(rep: dict, mode: str) -> list[str]:
     t, problems = THRESHOLDS[mode], []
-    if rep["streams"]["train"]["streams"] < t["train_streams"]:
-        problems.append(f"train streams {rep['streams']['train']['streams']} < {t['train_streams']}")
+    train_used = rep.get("train_used", {}).get("streams", rep["streams"]["train"]["streams"])
+    if train_used < t["train_streams"]:
+        problems.append(f"usable train streams {train_used} < {t['train_streams']}")
     if rep["dev_selected"]["streams"] < t["dev_streams"]:
         problems.append(f"selected dev streams {rep['dev_selected']['streams']} < {t['dev_streams']}")
     if rep["dev_selected"]["beyond_window"] < t["dev_beyond_window"]:
@@ -303,7 +370,7 @@ def verify_smoke(smoke_ok: str | Path, expected: dict) -> list[str]:
     except ValueError:
         return [f"unreadable smoke authorization {path}"]
     problems = [] if record.get("passed") is True else ["smoke did not pass"]
-    for key in ("revision", "config", "init", "data_sources"):
+    for key in ("protocol", "revision", "config", "init", "data_sources"):
         if record.get(key) != expected.get(key):
             problems.append(f"smoke {key} differs from the intended pilot")
     return problems
