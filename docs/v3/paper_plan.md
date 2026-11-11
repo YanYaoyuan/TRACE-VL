@@ -52,3 +52,10 @@ Progress against this plan is posted on issue #4 at each milestone.
 - **Stage-2 training is positive on dev.** S2 − S1 under FIFO: +4.90 pp [2.46, 7.30] beyond-window, +3.87 pp [1.83, 5.89] overall. This is a candidate contribution only once it transfers to an independent benchmark (§14.3, proposed).
 - Working baseline: **B4 compression + Stage-2 checkpoint + FIFO memory.** A memory contribution now requires a content-aware mechanism that beats this baseline at equal budget. A cheap training-free selector is one baseline for this, not a test of every content-aware design.
 
+
+## Status update 2026-11-11: Stage-2 gain did not transfer (experiments.md §14.3c, preliminary)
+
+- On the external OVO development population (`ovo-transfer-dev-v2`, 688 q), S2-FIFO − S1-FIFO is **−4.92 pp [−9.62, −0.35]** on backward and −4.18 pp on real-time. The predeclared continuation rule fails, and the real-time no-harm check fails too.
+- **Consequence:** the current Stage-2 recipe is not a contribution and is not scaled. The working checkpoint for external evaluation reverts to **Stage 1 (B4) + FIFO** until a Stage-2 recipe is shown to transfer.
+- Of outcome C's three parts, only the **alert head** remains untested. The memory contribution has no positive evidence: TKM ties FIFO (§14.2), and Stage-2 training does not transfer (§14.3c).
+- This is pending the tester's independent recomputation from the raw bundle.

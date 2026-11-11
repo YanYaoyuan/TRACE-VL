@@ -615,4 +615,29 @@ Provenance (`inputs.json`): manifest and question hashes, the resolved config ha
   - `be379f7`: archives are deduplicated across overlapping search roots.
 - These fixes only matter when media must be extracted. They do not affect this run, whose media were all readable.
 
+**14.3c Transfer result (operator `cdbac0c`, all four arms complete; PRELIMINARY, transcribed by the tester from the operator's screenshot, 2026-11-11; raw report and predictions not yet independently recomputed).**
+
+Population `ovo-transfer-dev-v2`: 688 questions on 260 streams; the primary backward endpoint has 305 questions on 138 videos; the inventory was adequate.
+
+| Arm | Backward | Real-time | All | Mean KV |
+|---|---:|---:|---:|---:|
+| S1 FIFO | 51.148 | 62.924 | 57.703 | 1747.96 |
+| S2 FIFO | 46.230 | 58.747 | 53.198 | 1747.96 |
+| S1 full | 45.246 | 61.358 | 54.215 | 9703.69 |
+| S2 full | 47.213 | 53.264 | 50.581 | 9703.69 |
+
+| Paired (video-cluster bootstrap) | Backward | Real-time | All |
+|---|---|---|---|
+| **S2-FIFO − S1-FIFO (primary)** | **−4.918 [−9.615, −0.346]** | −4.178 [−7.388, −0.829] | −4.506 [−7.278, −1.778] |
+| S2-full − S1-full | +1.967 [−1.521, 5.158] | −8.094 [−12.022, −4.232] | −3.634 [−6.548, −0.963] |
+
+**Decision (predeclared rule): `threshold_not_met`, `continue_stage2_scaling = false`, `realtime_no_harm = false`.**
+- The +4.90 pp dev gain on stitched LLaVA streams (§14.2) did **not** transfer to this external development population under the declared FIFO endpoint. The current Stage-2 recipe is significantly worse than Stage 1 on backward, real-time and all questions.
+- The full-history backward estimate (+1.97, CI including 0) is not evidence of a gain.
+- Domain mismatch, forgetting and adaptation to the synthetic stitched-stream format are **hypotheses, not established causes**. This is not a blanket rejection of long-stream training.
+- Descriptive only, not tested: S1 FIFO (1.7k KV) is ahead of S1 full (9.7k KV) on backward here (51.1 vs 45.2). More history did not help the Stage-1 model on this population.
+- Checkpoints, manifests and predictions are preserved. No retraining or scaling on the strength of the §14.2 dev gain. The population and thresholds are unchanged.
+- Not comparable to Mage-VL Table 7 (recent four frames at 1 fps, generated answers, category-macro averages over the full benchmark) — this is the development half, query ≤ 600 s, local option likelihood and question-weighted pooling.
+- Next: the tester independently recomputes coverage, identities, equal-budget statistics and paired results from the report bundle before this is final.
+
 **Later (sketch, not proposed for running):** a training-free redundancy-aware selector is a cheap baseline against B4 + FIFO at exact equal budget. Its failure would reject only that selector. It would not rule out learned content-aware or task-relevance memory mechanisms in general.
