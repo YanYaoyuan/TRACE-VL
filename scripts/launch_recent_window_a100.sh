@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Recent-window control on the frozen OVO transfer population (experiments.md §14.4). EVALUATION ONLY: frozen
-# checkpoints, no training, the final half untouched. Code ebb9724 (exact snapshot) in a NEW output directory; the
+# checkpoints, no training, the final half untouched. Code 34ade57 (exact snapshot) in a NEW output directory; the
 # completed transfer run (its manifest, media overlay and four arms), the memory pilot and pilot-005 are only read.
 # ONE command: tests -> verify -> 4-stream GPU flow check with A-B-A isolation -> six evaluations -> report. It
 # continues automatically when a check passes and stops otherwise (flow check: exit 4). Re-running resumes.
@@ -11,14 +11,14 @@ export TRACE_TRANSFER_RUN="${TRACE_TRANSFER_RUN:-/nas-data/vlm/yyy/tracevl-runs/
 export TRACE_PILOT_RUN="${TRACE_PILOT_RUN:-/nas-data/vlm/yyy/tracevl-runs/memory-pilot-448adf1-001}"
 export TRACE_S1_CKPT="${TRACE_S1_CKPT:-/nas-data/vlm/yyy/tracevl-runs/pilot005-6a46fb5-001/train/b4}"
 export TRACE_MODEL="${TRACE_MODEL:-/nas-data/vlm/models/qwen3.5_2b}"
-export TRACE_OUT="${TRACE_OUT:-/nas-data/vlm/yyy/tracevl-runs/recent-window-ebb9724-001}"
+export TRACE_OUT="${TRACE_OUT:-/nas-data/vlm/yyy/tracevl-runs/recent-window-34ade57-001}"
 export TRACE_MIN_FREE_GB="${TRACE_MIN_FREE_GB:-30}"
 export TRACE_GPUS=4 CUDA_VISIBLE_DEVICES=0,1,2,3
 export TRACE_UV_BIN="${TRACE_UV_BIN:-uv}"
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$TRACE_REPO/.venv}"
 export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TRACE_WANDB=0
-rev=ebb9724c291bb3e7d2fda8092ba8f2bb07425058
+rev=34ade5744e2f64c85e6770b3b4caae28b04be954
 mkdir -p "$TRACE_OUT"
 exec 8>"$TRACE_OUT/.launcher.lock"
 flock -n 8 || { echo 'This launcher is already running.' >&2; exit 2; }
@@ -61,7 +61,7 @@ for i in range(4):
     if free / 1e9 < float(os.environ['TRACE_MIN_FREE_GB']):
         low.append(f'GPU {i}: {free / 1e9:.1f} GB free of {total / 1e9:.1f}')
 assert not low, 'Free GPU memory below TRACE_MIN_FREE_GB; stop other jobs first: ' + '; '.join(low)
-print('Code ebb9724 (evaluation only): recent-window control')
+print('Code 34ade57 (evaluation only): recent-window control')
 PY
 
 "$TRACE_UV_BIN" run --locked --no-sync python -c 'import pytest' 2>/dev/null \
