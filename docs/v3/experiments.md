@@ -646,7 +646,7 @@ Population `ovo-transfer-dev-v2`: 688 questions on 260 streams; the primary back
 - **Audit limits:** checkpoint and video bytes were checked against recorded hashes, not rehashed. Causality was checked from logged timestamps, not pixels. One training seed. Per-task findings are exploratory.
 - **Scope:** this rejects the age/surprise retention scorer (§14.2, dev) and this Stage-2 recipe (here). It does not reject content-aware memory or other training recipes in general. The alert head is unvalidated: a possible direction, not an established contribution.
 
-### 14.4 Recent-window control (PROTOCOL SPECIFICATION ONLY; not implemented, not run; evaluation only)
+### 14.4 Recent-window control (protocol accepted by the tester 2026-11-11; implemented, not yet run; evaluation only)
 
 **Question.** How much of the OVO accuracy in §14.3c depends on persistent state (older KV memory and recurrent state), and does the S2 − S1 deficit remain when no persistent state exists? This is a diagnostic. It does not change the §14.3 decision or its rule.
 
@@ -693,6 +693,18 @@ Population `ovo-transfer-dev-v2`: 688 questions on 260 streams; the primary back
 - `recent-window-report.json` and `recent-window-digest.txt`: accuracies per arm, the comparisons above, coverage problems, and the scope note.
 - The launcher log.
 
-**Implementation plan after the protocol is accepted:** a per-question fresh-session evaluator reusing the session and reader code; CPU tests for step selection (last W steps, short streams, no future frames), fresh-state isolation between questions with a fake backbone, coverage checks and the report; a small GPU flow check on 4 streams; one pinned launcher.
+**Protocol choices and corrections from the tester's review (2026-11-11):**
+- `fresh16` is the primary control. `stream_window` stays. Prompt timestamps stay absolute, on the original global sampling grid.
+- `fresh4` is explicitly eight sampled frames, not a Mage-VL four-frame reproduction.
+- **The contrasts are diagnostic, not a clean isolation of one mechanism.** `fifo − stream_window` and `stream_window − fresh16` change the processing trajectory and the representations as well as the retained state. In the fresh arms the position counter restarts, the first fed step is an I-step for the adapter, and the recurrent state starts from its initial value.
+- **The interaction is computed before any differential reading.** An S2 − S1 interval containing 0 under `fresh16`, with a negative one under FIFO, does not show that the deficit is tied to streaming state. The report computes the paired interaction `(S2 − S1)_fifo − (S2 − S1)_fresh16` on the same video bootstrap samples; only an interaction CI excluding 0 supports a differential effect.
+- **Leak detection:** `session_steps = window_steps` does not prove there is no leakage. Every question gets a new session (LM KV, recurrent state, adapter caches, tracker, retention book, decision memory, position counter). The GPU flow check also runs an **A-B-A isolation test** on the real model: the window is answered, then a different window, then the first again in another new session. It requires the same choice and option log-probabilities within 1e-3, and the run stops if this fails.
+- **Decoding:** the video is decoded sequentially from its start exactly as in the stream run, each step once, so the fed pixels are those of the stream run.
+
+**Implementation** (`src/trace_vl/v3/recent_window.py`, `scripts/run_recent_window.sh`, launcher `scripts/launch_recent_window_a100.sh`; CLI `v3 eval-recent-window`):
+- One command runs tests → verify (manifest and config hashes equal the transfer run's; the reused FIFO predictions cover the 688 questions; checkpoints re-verified) → 4-stream flow check with A-B-A isolation → six evaluations → report.
+- Artifacts: `inputs.json`, `flow.json`, `eval/*/predictions.jsonl`, `recent-window-report.json`, `recent-window-digest.txt`.
+
+**Original implementation plan (superseded by the above):** a per-question fresh-session evaluator reusing the session and reader code; CPU tests for step selection (last W steps, short streams, no future frames), fresh-state isolation between questions with a fake backbone, coverage checks and the report; a small GPU flow check on 4 streams; one pinned launcher.
 
 **Later (sketch, not proposed for running):** a training-free redundancy-aware selector is a cheap baseline against B4 + FIFO at exact equal budget. Its failure would reject only that selector. It would not rule out learned content-aware or task-relevance memory mechanisms in general.

@@ -515,6 +515,18 @@ def _v3_parser(commands):
     c.add_argument("--evict-schedule", choices=["every", "train"], default="every",
                    help="train: evict exactly where Stage-2 training evicts (chunk ends incl. question cuts)")
     c.add_argument("--audit", action="store_true", help="log KV accounting, FIFO overlap and score correlations per question")
+    c = sub.add_parser("eval-recent-window", help="fresh-session recent-window control (experiments.md 14.4)")
+    c.add_argument("--config", default="configs/v3/stage2.yaml")
+    c.add_argument("--streams", required=True)
+    c.add_argument("--video-root", required=True)
+    c.add_argument("--output", required=True)
+    c.add_argument("--window", type=int, required=True, help="steps fed to the fresh session before each question")
+    c.add_argument("--checkpoint", required=True)
+    c.add_argument("--adapter")
+    c.add_argument("--split", default="dev")
+    c.add_argument("--device", default="cuda")
+    c.add_argument("--shard", type=_shard, default=(0, 1))
+    c.add_argument("--isolation", type=int, default=0, help="A-B-A isolation checks per stream (flow check)")
     c = sub.add_parser("stage2-splits", help="freeze train/dev/test at source-video level before stitching streams")
     c.add_argument("records", nargs="+", help="MC records (convert-llava-mc output)")
     c.add_argument("--exclude", nargs="*", default=[], help="manifests whose videos are excluded (Stage 1 train/val)")
@@ -690,6 +702,11 @@ def _v3(args):
         return show(evaluate_streams(cfg, args.streams, args.video_root, args.output, args.mode, args.checkpoint,
                                      args.adapter, args.policy, args.device, args.split, args.limit, args.shard,
                                      args.evict_every, args.evict_schedule, args.audit))  # fmt: skip
+    if args.action == "eval-recent-window":
+        from .v3.recent_window import evaluate_recent_window
+
+        return show(evaluate_recent_window(cfg, args.streams, args.video_root, args.output, args.window, args.checkpoint,
+                                           args.adapter, args.device, args.split, args.shard, args.isolation))  # fmt: skip
     if args.action == "train-stage2":
         from .v3.train_stage2 import train_stage2
 
