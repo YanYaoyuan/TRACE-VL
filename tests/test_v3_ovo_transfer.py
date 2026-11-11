@@ -232,3 +232,54 @@ def test_v2_uses_the_whole_diagnostic_hash_half_and_v1_only_the_sampled_videos(t
     assert halves["diagnostic"]["ASI"] == {"questions": 1, "videos": 1}
     with pytest.raises(ValueError, match="population"):
         build_transfer(*args, str(tmp_path / "x"), STEP, GAP, MAX, durations=durations, population="final")
+
+
+def _probe(path):
+    return 60.0 if path.is_file() and path.read_bytes().startswith(b"VIDEO") else None
+
+
+def test_media_overlay_links_available_videos_and_extracts_only_missing_ones(tmp_path):
+    import tarfile
+    import zipfile
+
+    from trace_vl.v3.ovo_transfer import ensure_media
+
+    root, downloads = tmp_path / "videos", tmp_path / "downloads"
+    (root / "src_videos").mkdir(parents=True)
+    (root / "src_videos" / "a.mp4").write_bytes(b"VIDEO-a")
+    (root / "src_videos" / "broken.mp4").write_bytes(b"junk")  # present but unreadable: looked up in the archives
+    downloads.mkdir()
+    with zipfile.ZipFile(downloads / "part1.zip", "w") as z:
+        z.writestr("OVO/src_videos/b.mp4", b"VIDEO-b")
+    payload = tmp_path / "c.mp4"
+    payload.write_bytes(b"VIDEO-c")
+    with tarfile.open(downloads / "part2.tar.gz", "w:gz") as t:
+        t.add(payload, arcname="other/c.mp4")  # different folder: matched by file name
+    with zipfile.ZipFile(downloads / "part3.zip", "w") as z:
+        z.writestr("src_videos/broken.mp4", b"VIDEO-fixed")
+    before = {p: p.read_bytes() for p in downloads.iterdir()}
+    videos = ["src_videos/a.mp4", "src_videos/b.mp4", "src_videos/c.mp4", "src_videos/broken.mp4", "src_videos/none.mp4"]
+    r = ensure_media(videos, root, [downloads], tmp_path / "out", probe=_probe)
+    assert r["available_in_root"] == 1 and set(r["extracted"]) == {"src_videos/b.mp4", "src_videos/c.mp4", "src_videos/broken.mp4"}
+    assert r["still_missing"] == ["src_videos/none.mp4"]
+    overlay = tmp_path / "out" / "media"
+    assert (overlay / "src_videos/a.mp4").resolve() == (root / "src_videos/a.mp4").resolve()
+    assert (overlay / "src_videos/b.mp4").read_bytes() == b"VIDEO-b" and (overlay / "src_videos/c.mp4").read_bytes() == b"VIDEO-c"
+    assert (root / "src_videos" / "broken.mp4").read_bytes() == b"junk"  # originals untouched
+    assert {p: p.read_bytes() for p in downloads.iterdir()} == before  # archives untouched
+
+
+def test_media_overlay_scans_no_archive_when_everything_is_available(tmp_path):
+    from trace_vl.v3.ovo_transfer import ensure_media
+
+    root = tmp_path / "videos"
+    root.mkdir()
+    (root / "a.mp4").write_bytes(b"VIDEO")
+    r = ensure_media(["a.mp4"], root, [tmp_path], tmp_path / "out", probe=_probe)
+    assert r["available_in_root"] == 1 and not r["extracted"] and not r["still_missing"] and r["archives_scanned"] == []
+
+
+def test_exclusions_are_reported_per_task(ovo):
+    _, inv, _ = ovo
+    assert inv["excluded_by_task"]["EPM"] == {"query_time_above_600s": 1}
+    assert inv["excluded_by_task"]["STU"] == {"no_complete_step_before_query": 1}

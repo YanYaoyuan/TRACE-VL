@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # OVO-Bench Stage-2 transfer check (experiments.md §14.3). EVALUATION ONLY: frozen checkpoints, no training.
-# Code 774be51 (exact snapshot) in a NEW output directory; the temporal-diagnostic, memory-pilot, evalrepair and
-# pilot-005 runs are only read. Run the stages in order, each after the previous one has been reviewed:
-#   TRACE_STAGE=inventory bash launch_ovo_transfer_a100.sh   (CPU only, a few minutes; no GPU needed)
-#   TRACE_STAGE=flow      bash launch_ovo_transfer_a100.sh   (4 GPUs; S1/S2 FIFO on 4 streams; time estimate)
-#   TRACE_STAGE=full      bash launch_ovo_transfer_a100.sh   (4 GPUs; four arms; duration from flow.json)
+# Code REV7 (exact snapshot) in a NEW output directory; the temporal-diagnostic, memory-pilot, evalrepair and
+# pilot-005 runs, the OVO downloads and media are only read. ONE command runs prepare -> inventory -> flow -> full and
+# advances automatically when each predeclared check passes; it stops with a report (inventory exit 3, flow exit 4)
+# otherwise. Re-running resumes. TRACE_STAGE=inventory stops before any GPU work.
+#   bash launch_ovo_transfer_a100.sh
 set -Eeuo pipefail
-export TRACE_STAGE="${TRACE_STAGE:?Set TRACE_STAGE=inventory (first), flow, or full}"
+export TRACE_STAGE="${TRACE_STAGE:-all}"
 export TRACE_REPO="${TRACE_REPO:-/data/yyy/TRACE-VL}"
 export TRACE_DIAG_RUN="${TRACE_DIAG_RUN:-/nas-data/vlm/yyy/tracevl-runs/temporal-diag-9653e2a-001}"
 export TRACE_PILOT_RUN="${TRACE_PILOT_RUN:-/nas-data/vlm/yyy/tracevl-runs/memory-pilot-448adf1-001}"
@@ -14,7 +14,7 @@ export TRACE_S1_CKPT="${TRACE_S1_CKPT:-/nas-data/vlm/yyy/tracevl-runs/pilot005-6
 export TRACE_EVALREPAIR_RUN="${TRACE_EVALREPAIR_RUN:-/nas-data/vlm/yyy/tracevl-runs/memory-evalrepair-af2f961-001}"
 export TRACE_MODEL="${TRACE_MODEL:-/nas-data/vlm/models/qwen3.5_2b}"
 export TRACE_OUT="${TRACE_OUT:-/nas-data/vlm/yyy/tracevl-runs/ovo-transfer-774be51-001}"
-export TRACE_ACCEPT_INVENTORY="${TRACE_ACCEPT_INVENTORY:-0}"  # 1 only after the owner accepts an inadequate inventory
+export TRACE_OVO_ROOT="${TRACE_OVO_ROOT:-/nas-data/vlm/data/OVO_Bench}"  # existing downloads, searched only for missing media
 export TRACE_MIN_FREE_GB="${TRACE_MIN_FREE_GB:-30}"
 export TRACE_GPUS=4 CUDA_VISIBLE_DEVICES=0,1,2,3
 export TRACE_UV_BIN="${TRACE_UV_BIN:-uv}"
@@ -71,8 +71,6 @@ CUDA_VISIBLE_DEVICES= "$TRACE_UV_BIN" run --locked --no-sync python -m pytest -q
   tests/test_v3_ovo_transfer.py tests/test_v3_memory_pilot.py tests/test_v3_stage2.py
 
 bash scripts/run_ovo_transfer.sh
-case "$TRACE_STAGE" in
-  inventory) echo "Submit from $TRACE_OUT: inventory-digest.txt, half-counts.json, transfer/inventory.json, transfer-v1-comparison/inventory.json, source.json and the launcher log." ;;
-  flow) echo "Submit from $TRACE_OUT: flow.json, inputs.json, flow/*/predictions.jsonl and the launcher log." ;;
-  full) echo "Submit from $TRACE_OUT: transfer-digest.txt, transfer-report.json, inputs.json, eval/*/predictions.jsonl, transfer/inventory.json and the launcher log." ;;
-esac
+echo "Submit from $TRACE_OUT: inventory-digest.txt, half-counts.json, media.json, source.json, transfer/inventory.json,"
+echo "  transfer-v1-comparison/inventory.json, flow.json, inputs.json, transfer-digest.txt, transfer-report.json,"
+echo "  eval/*/predictions.jsonl and the launcher log (whichever exist; STOPPED-inventory.txt if the inventory stopped)."

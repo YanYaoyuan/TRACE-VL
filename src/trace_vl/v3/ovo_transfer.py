@@ -70,6 +70,97 @@ def probe_duration(path: Path) -> float | None:
         cap.release()
 
 
+ARCHIVE_SUFFIXES = (".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
+
+
+def _archive_members(path: Path) -> list[str]:
+    import tarfile
+    import zipfile
+
+    if path.name.endswith(".zip"):
+        with zipfile.ZipFile(path) as z:
+            return [m for m in z.namelist() if not m.endswith("/")]
+    with tarfile.open(path) as t:
+        return [m.name for m in t.getmembers() if m.isfile()]
+
+
+def _extract_member(archive: Path, member: str, target: Path):
+    import shutil
+    import tarfile
+    import zipfile
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".part")
+    if archive.name.endswith(".zip"):
+        with zipfile.ZipFile(archive) as z, z.open(member) as src, open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst, 1 << 20)
+    else:
+        with tarfile.open(archive) as t, t.extractfile(member) as src, open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst, 1 << 20)
+    tmp.replace(target)
+
+
+def ensure_media(videos: list[str], video_root: str | Path, search_roots: list[str | Path], out_root: str | Path,
+                 probe=None) -> dict:  # fmt: skip
+    """Media for the population as a symlink overlay `out_root/media/<video>` (the evaluation video root).
+
+    A video readable under `video_root` is linked in place. Only a missing or unreadable video is looked up in the
+    archives already downloaded under `search_roots` (member path ending in the video's relative path, else the same
+    file name) and that single member is extracted into `out_root/media-extracted/`. Archives and the original
+    media are only read. Nothing is extracted when every video is available."""
+    probe = probe or probe_duration
+    out = Path(out_root)
+    overlay, extracted_root = out / "media", out / "media-extracted"
+    available, missing, extracted = [], [], {}
+
+    def link(video: str, source: Path):
+        dest = overlay / video
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.is_symlink() or dest.exists():
+            dest.unlink()
+        dest.symlink_to(source.resolve())
+
+    for v in videos:
+        src = Path(video_root) / v
+        if src.is_file() and probe(src) is not None:
+            link(v, src)
+            available.append(v)
+        elif (extracted_root / v).is_file() and probe(extracted_root / v) is not None:
+            link(v, extracted_root / v)  # extracted by an earlier attempt of this run
+            extracted[v] = "previously extracted"
+        else:
+            missing.append(v)
+    archives = []
+    if missing:
+        for root in search_roots:
+            root = Path(root)
+            if root.is_dir():
+                archives += sorted(p for p in root.rglob("*") if p.is_file() and p.name.lower().endswith(ARCHIVE_SUFFIXES))
+        archives = sorted(set(archives))
+        wanted = set(missing)
+        for archive in archives:
+            if not wanted:
+                break
+            try:
+                members = _archive_members(archive)
+            except Exception:  # noqa: BLE001 - an unreadable archive is reported, not fatal
+                continue
+            for v in sorted(wanted):
+                hit = next((m for m in members if m.endswith(v)), None) or next(
+                    (m for m in members if Path(m).name == Path(v).name), None)
+                if hit is None:
+                    continue
+                _extract_member(archive, hit, extracted_root / v)
+                if probe(extracted_root / v) is not None:
+                    link(v, extracted_root / v)
+                    extracted[v] = f"{archive}::{hit}"
+                    wanted.discard(v)
+        missing = sorted(wanted)
+    return {"videos": len(videos), "available_in_root": len(available), "extracted": extracted,
+            "still_missing": missing, "archives_scanned": [str(a) for a in archives], "overlay": str(overlay),
+            "video_root": str(video_root)}  # fmt: skip
+
+
 def _quantiles(values: list[float]) -> dict:
     if not values:
         return {}
@@ -132,6 +223,7 @@ def build_transfer(mc_records: str, diagnostic: str, final_frozen: str, video_ro
         raise AssertionError(f"diagnostic videos overlap the frozen final half: {overlap[:5]} {hashed_final[:5]}")
 
     exclusions: Counter = Counter()
+    excluded_by_task: dict = defaultdict(Counter)
     seen_ids, kept = set(), []
     in_scope = [r for r in mc_all if r["video"] in set(diag_videos) and task_code(r) in OVO_MCQ_TASKS]
     if durations is None:
@@ -139,20 +231,24 @@ def build_transfer(mc_records: str, diagnostic: str, final_frozen: str, video_ro
     for r in sorted(in_scope, key=lambda r: r["id"]):
         q = r.get("query_time")
         options = r.get("options") or []
+        reason = None
         if r["id"] in seen_ids:
-            exclusions["duplicate_id"] += 1
+            reason = "duplicate_id"
         elif q is None:
-            exclusions["query_time_missing"] += 1
+            reason = "query_time_missing"
         elif not (len(options) >= 2 and isinstance(r.get("answer"), int) and 0 <= r["answer"] < len(options)):
-            exclusions["invalid_options_or_answer"] += 1
+            reason = "invalid_options_or_answer"
         elif float(q) > max_query_seconds:
-            exclusions[f"query_time_above_{int(max_query_seconds)}s"] += 1
+            reason = f"query_time_above_{int(max_query_seconds)}s"
         elif durations.get(r["video"]) is None:
-            exclusions["video_missing_or_unreadable"] += 1
+            reason = "video_missing_or_unreadable"
         elif float(q) > durations[r["video"]] + 1.0:
-            exclusions["query_after_video_end"] += 1
+            reason = "query_after_video_end"
         elif not _visible(float(q), step_seconds, gap, min(float(q), durations[r["video"]]), max_seconds):
-            exclusions["no_complete_step_before_query"] += 1
+            reason = "no_complete_step_before_query"
+        if reason:
+            exclusions[reason] += 1
+            excluded_by_task[task_code(r)][reason] += 1
         else:
             kept.append(r)
         seen_ids.add(r["id"])
@@ -214,7 +310,9 @@ def build_transfer(mc_records: str, diagnostic: str, final_frozen: str, video_ro
         "protocol_params": {"max_query_seconds": max_query_seconds, "step_seconds": step_seconds, "frame_gap": gap,
                             "stage2_max_seconds": max_seconds},
         "in_scope_questions": len(in_scope), "in_scope_per_task": dict(sorted(in_scope_tasks.items())),
-        "excluded": dict(sorted(exclusions.items())), "eligible_questions": len(questions), "streams": len(streams),
+        "excluded": dict(sorted(exclusions.items())),
+        "excluded_by_task": {t: dict(sorted(c.items())) for t, c in sorted(excluded_by_task.items())},
+        "eligible_questions": len(questions), "streams": len(streams),
         "stream_seconds": _quantiles([s["duration"] for s in streams]),
         "stream_seconds_total": round(sum(s["duration"] for s in streams), 1),
         "backward": backward, "realtime": realtime,

@@ -554,7 +554,7 @@ Aggregates are labelled too. `cumulative_at_question` is an average of cumulativ
   - This expands the question population, and the expansion is disclosed.
   - Eligibility uses data and protocol only. Every exclusion is counted: duplicate ID, missing time, invalid options/answer, query time > 600 s, video unreadable, query after the video end, no complete step before the query.
 - **Status:** the videos are external to LLaVA training but already informed the §13 decision. Results are reported as an **external-dataset development evaluation**, not a held-out confirmation. Final confirmation stays separate. The frozen final half is untouched.
-- **Adequacy, fixed before GPU work:** at least 150 backward questions, at least 30 backward videos, and no video holding more than 10% of backward questions. Below this, the inventory is reported and the GPU stages refuse to run unless the owner accepts it (`TRACE_ACCEPT_INVENTORY=1`). An underpowered run is not evidence against transfer.
+- **Adequacy, fixed before GPU work:** at least 150 backward questions, at least 30 backward videos, and no video holding more than 10% of backward questions. Below this, the run stops after the inventory with a task/count/availability report (exit 3); there is no override. An underpowered run is not evidence against transfer.
 
 **Protocol:**
 - **Arms:** frozen S1 (pilot-005 B4) and S2 (`448adf1`) × FIFO/full. Exact fill, §14 budget and config.
@@ -581,10 +581,11 @@ Aggregates are labelled too. `cumulative_at_question` is an average of cumulativ
 - A failed threshold does not establish that Stage-2 gains can never transfer.
 - No retraining or scaling is authorized by this milestone.
 
-**Stages** (`scripts/run_ovo_transfer.sh`, pinned launcher `scripts/launch_ovo_transfer_a100.sh`):
-1. `inventory`: CPU only. Split-hash check, re-conversion check, manifest and inventory. Submitted before any GPU work.
-2. `flow`: S1/S2 FIFO on the 2 shortest + 2 longest streams. Checks coverage, no future frames and identical schedules, and estimates wall time.
-3. `full`: the four arms, the report and the decision.
+**Stages** (`scripts/run_ovo_transfer.sh`, ONE pinned launcher `scripts/launch_ovo_transfer_a100.sh`; it advances automatically when each predeclared check passes, per the owner's instruction of 2026-11-11, and re-running resumes):
+1. `prepare` (CPU): split-hash check; conversion of the complete official annotation (not filtered by media on disk, so missing media shows up); consistency with the §13 conversion; media check of every population video. Only missing or unreadable videos are extracted, as single members from archives already downloaded, into the run directory. Archives and original media are only read. Evaluation reads a symlink overlay (`media.json` records the source of every extracted video).
+2. `inventory` (CPU): v2 manifest, per-half counts, v1 comparison, exclusions per task. Stops with exit 3 if adequacy fails.
+3. `flow` (GPU): S1/S2 FIFO on the 2 shortest + 2 longest streams. Checks coverage, no future frames and identical schedules, and estimates wall time. Stops with exit 4 if it fails.
+4. `full` (GPU): the four arms, the report and the decision.
 
 Provenance (`inputs.json`): manifest and question hashes, the resolved config hash, the S1/S2 checkpoint identities (the Stage-2 completion record re-verified), and the hashes of the af2f961 dev baseline predictions.
 

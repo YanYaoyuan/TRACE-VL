@@ -1,58 +1,73 @@
 #!/usr/bin/env bash
-# Stage-2 transfer check on OVO-Bench (experiments.md §14.3; src/trace_vl/v3/ovo_transfer.py). EVALUATION ONLY.
-#   TRACE_STAGE=inventory  CPU only: verify the §13 split, re-convert the official annotation, build the
-#                          ovo-transfer-dev-v2 manifest (diagnostic hash half) and inventory, plus the v1 comparison. Submit inventory.json before any GPU work.
-#   TRACE_STAGE=flow       small GPU flow check: S1/S2 FIFO on the 2 shortest + 2 longest streams (coverage,
-#                          no future frames, identical schedules, wall-time estimate).
-#   TRACE_STAGE=full       the four predeclared arms (S1/S2 x FIFO/full) on every stream, then the report.
-# Inputs are only read: TRACE_DIAG_RUN (the 9653e2a temporal diagnostic), TRACE_PILOT_RUN (448adf1 Stage-2
-# checkpoint), TRACE_S1_CKPT (pilot-005 B4). Everything is written into TRACE_OUT. The frozen OVO final half is
-# never read except for the video-ID disjointness check.
+# Stage-2 transfer check on OVO-Bench (experiments.md §14.3; src/trace_vl/v3/ovo_transfer.py). EVALUATION ONLY:
+# frozen checkpoints, no training. ONE pass, advancing automatically when each predeclared check passes:
+#   1. prepare   (CPU) verify the §13 hash split, convert the complete official annotation, select every video of the
+#                ORIGINAL diagnostic hash half, check media; only missing/unreadable videos are extracted from the
+#                archives already downloaded (originals are only read); evaluation reads a symlink overlay.
+#   2. inventory (CPU) ovo-transfer-dev-v2 manifest, per-half task counts, v1 comparison. STOPS (exit 3) with a
+#                task/count/availability report if adequacy fails; there is no override.
+#   3. flow      (GPU) S1/S2 FIFO on the 2 shortest + 2 longest streams: coverage, no future frames, identical
+#                schedules, wall-time estimate. STOPS (exit 4) if it fails.
+#   4. full      (GPU) S1/S2 x FIFO/full on every stream, report and the predeclared decision.
+# Finished stages are kept and verified on re-run; finished evaluation shards resume. TRACE_STAGE=inventory stops
+# after step 2 (CPU only). The frozen final half is never evaluated (video IDs are used only for disjointness).
 set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
-: "${TRACE_STAGE:?}" "${TRACE_DIAG_RUN:?}" "${TRACE_PILOT_RUN:?}" "${TRACE_S1_CKPT:?}" "${TRACE_OUT:?}"
-export TRACE_GPUS="${TRACE_GPUS:-4}" TRACE_MODEL="${TRACE_MODEL:-}" TRACE_ACCEPT_INVENTORY="${TRACE_ACCEPT_INVENTORY:-0}"
-export TRACE_EVALREPAIR_RUN="${TRACE_EVALREPAIR_RUN:-}"
+: "${TRACE_DIAG_RUN:?}" "${TRACE_PILOT_RUN:?}" "${TRACE_S1_CKPT:?}" "${TRACE_OUT:?}"
+export TRACE_STAGE="${TRACE_STAGE:-all}" TRACE_GPUS="${TRACE_GPUS:-4}" TRACE_MODEL="${TRACE_MODEL:-}"
+export TRACE_EVALREPAIR_RUN="${TRACE_EVALREPAIR_RUN:-}" TRACE_OVO_ROOT="${TRACE_OVO_ROOT:-}"
+[[ "$TRACE_STAGE" == all || "$TRACE_STAGE" == inventory ]] || { echo "TRACE_STAGE must be all or inventory" >&2; exit 2; }
 uv_bin="${TRACE_UV_BIN:-uv}"
 py=("$uv_bin" run --locked --no-sync python)
 mkdir -p "$TRACE_OUT"
 exec 9>"$TRACE_OUT/.lock"
-flock -n 9 || { echo "Another OVO transfer stage is using $TRACE_OUT" >&2; exit 2; }
+flock -n 9 || { echo "Another OVO transfer run is using $TRACE_OUT" >&2; exit 2; }
 log() { echo "[$(date -Is)] $*"; }
 export TRACE_S2="$TRACE_PILOT_RUN/train" TRACE_S1="$TRACE_S1_CKPT"
 export TRACE_CFG="$TRACE_OUT/memory_pilot_b4_exactfill.yaml" TRACE_T="$TRACE_OUT/transfer"
 { echo "extends: $root/configs/v3/memory_pilot_b4_exactfill.yaml"
   [[ -n "$TRACE_MODEL" ]] && printf 'backbone:\n  name: %s\n  local_files_only: true\n' "$TRACE_MODEL"; true; } > "$TRACE_CFG"
 
-# ---------------------------------------------------------------------------------------------------- inventory
-if [[ "$TRACE_STAGE" == inventory ]]; then
-  log "[inventory 1/2] Verify the §13 split and re-convert the official OVO annotation (MC only)"
+# ---------------------------------------------------------------------------------------------------- 1-2 (CPU)
+if [[ ! -f "$TRACE_T/inventory.json" ]]; then
+  log "[1/4 prepare] Verify the §13 split, convert the complete official annotation, check and (only if needed) extract media"
   "${py[@]}" - <<'PY'
 import hashlib, json, os
 from pathlib import Path
 from trace_vl.v3.data import convert_ovo, read_jsonl
+from trace_vl.v3.ovo_transfer import ensure_media
+from trace_vl.v3.temporal import task_code, video_half
+from trace_vl.v3.data import OVO_MCQ_TASKS
 diag, out = Path(os.environ["TRACE_DIAG_RUN"]), Path(os.environ["TRACE_OUT"])
 sha = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()
 split = json.loads((diag / "split/manifest.json").read_text())
 assert sha(diag / "split/diagnostic.jsonl") == split["diagnostic_sha256"], "diagnostic.jsonl differs from its manifest"
 assert sha(diag / "split/final_frozen.jsonl") == split["final_frozen_sha256"], "final_frozen.jsonl differs from its manifest"
 conv = json.loads((diag / "conversion.json").read_text())
-report = convert_ovo(conv["annotation"], str(out / "ovo_mc.jsonl"), conv["video_root"], forward=False)
+# Complete annotation, NOT filtered by media on disk, so missing media is visible instead of silently dropped.
+report = convert_ovo(conv["annotation"], str(out / "ovo_mc.jsonl"), None, forward=False)
 mc = {r["id"]: r for r in read_jsonl(out / "ovo_mc.jsonl")}
 old = {r["id"]: r for r in read_jsonl(diag / "ovo_all.jsonl") if r.get("options") is not None}
-assert mc == old, f"re-conversion differs from the §13 conversion ({len(mc)} vs {len(old)} MC records)"
-diag_videos = {r["video"] for r in read_jsonl(diag / "split/diagnostic.jsonl")}
+assert set(old) <= set(mc) and all(mc[k] == old[k] for k in old), "conversion differs from the §13 conversion on shared records"
+seed, fraction = split["seed"], split["diagnostic_fraction"]
+sampled = {r["video"] for r in read_jsonl(diag / "split/diagnostic.jsonl")}
+assert len(sampled) == 200 and all(video_half(v, seed, fraction) == "diagnostic" for v in sampled)
+population = sorted({r["video"] for r in mc.values() if task_code(r) in OVO_MCQ_TASKS and video_half(r["video"], seed, fraction) == "diagnostic"})
+search = [p for p in {os.environ["TRACE_OVO_ROOT"], str(Path(conv["annotation"]).parent), conv["video_root"]} if p]
+media = ensure_media(population, conv["video_root"], sorted(search), out)
+(out / "media.json").write_text(json.dumps(media, indent=2) + "\n")
 record = {"diag_run": str(diag), "annotation": conv["annotation"], "annotation_sha256": sha(conv["annotation"]),
-          "video_root": conv["video_root"], "conversion": report, "ovo_mc_sha256": sha(out / "ovo_mc.jsonl"),
-          "split_manifest": split, "diagnostic_videos": len(diag_videos)}
+          "original_video_root": conv["video_root"], "video_root": media["overlay"], "conversion": report,
+          "conversion_vs_s13": {"s13_mc_records": len(old), "records": len(mc), "only_in_complete_conversion": len(set(mc) - set(old))},
+          "ovo_mc_sha256": sha(out / "ovo_mc.jsonl"), "split_manifest": split, "population_videos": len(population),
+          "media": {k: v for k, v in media.items() if k != "archives_scanned"} | {"archives_scanned": len(media["archives_scanned"])}}
 (out / "source.json").write_text(json.dumps(record, indent=2) + "\n")
 print(json.dumps({k: v for k, v in record.items() if k != "split_manifest"}, indent=2))
-assert len(diag_videos) == 200, f"expected the 200 §13 diagnostic videos, found {len(diag_videos)}"
 PY
-  log "[inventory 2/2] ovo-transfer-dev-v2 (every video of the §13 diagnostic hash half, questions <= 600 s), the v1 comparison and per-half task counts"
+  log "[2/4 inventory] ovo-transfer-dev-v2 (whole §13 diagnostic hash half, questions <= 600 s), v1 comparison, per-half task counts"
   "${py[@]}" - <<'PY'
-import json, os
+import json, os, shutil
 from pathlib import Path
 from trace_vl.v3.config import load_v3_config
 from trace_vl.v3.ovo_transfer import build_transfer, half_counts
@@ -63,44 +78,48 @@ seed, fraction = src["split_manifest"]["seed"], src["split_manifest"]["diagnosti
 common = dict(step_seconds=cfg.stream.step_seconds, gap=cfg.stream.frame_gap, max_seconds=cfg.stage2.max_seconds,
               max_query_seconds=cfg.stage2.max_seconds, seed=seed, fraction=fraction)
 args = (str(out / "ovo_mc.jsonl"), str(diag / "split/diagnostic.jsonl"), str(diag / "split/final_frozen.jsonl"), src["video_root"])
-inv = build_transfer(*args, os.environ["TRACE_T"], population="diagnostic-half", **common)
+staging = out / "transfer.staging"
+shutil.rmtree(staging, ignore_errors=True)
+inv = build_transfer(*args, str(staging), population="diagnostic-half", **common)
 old = build_transfer(*args, str(out / "transfer-v1-comparison"), population="sampled-200", **common)
 halves = half_counts(str(out / "ovo_mc.jsonl"), seed, fraction)
 (out / "half-counts.json").write_text(json.dumps(halves, indent=2) + "\n")
-
-def family(scope, tasks):
-    return {t: halves.get(scope, {}).get(t, {"questions": 0, "videos": 0}) for t in tasks}
-
-lines = ["OVO TRANSFER INVENTORY v2 (CPU only; no model run). Thresholds unchanged: >=150 backward q, >=30 backward videos, max share 10%",
-         f"MC conversion {src['conversion']}",
-         "Backward tasks per scope (questions / videos), before any eligibility filter:"]
-for scope in ("all", "diagnostic", "final"):
-    lines.append(f"  {scope}: {json.dumps(family(scope, ('EPM', 'ASI', 'HLD')))}")
-lines.append("Real-time per scope: " + json.dumps({sc: sum(v['questions'] for t, v in halves.get(sc, {}).items() if t not in ('EPM', 'ASI', 'HLD')) for sc in ('all', 'diagnostic', 'final')}))
-for name, x in (("v1 (200 sampled videos)", old), ("v2 (diagnostic hash half)", inv)):
+fam = lambda scope, tasks: {t: halves.get(scope, {}).get(t, {"questions": 0, "videos": 0}) for t in tasks}
+m = src["media"]
+lines = ["OVO TRANSFER INVENTORY v2 (CPU only). Thresholds unchanged: >=150 backward q, >=30 backward videos, max share 10%",
+         f"MC conversion (complete annotation) {src['conversion']} | vs §13 {src['conversion_vs_s13']}",
+         f"MEDIA population videos {m['videos']}: available {m['available_in_root']}, extracted {len(m['extracted'])}, "
+         f"still missing {len(m['still_missing'])} {m['still_missing'][:20]} (archives scanned {m['archives_scanned']})",
+         "Backward tasks per scope (questions / videos), before eligibility:"]
+lines += [f"  {sc}: {json.dumps(fam(sc, ('EPM', 'ASI', 'HLD')))}" for sc in ("all", "diagnostic", "final")]
+for name, x in (("v1 (200 sampled videos; comparison only)", old), ("v2 (diagnostic hash half)", inv)):
     b, r = x["backward"], x["realtime"]
     lines += [f"== {x['protocol']} {name}",
-              f"population videos {x['diagnostic_videos']} | of the 200 sampled: {x['sampled_200_videos_in_population']} | overlap with frozen final {x['overlap_with_frozen_final']} | hashing to final {x['diagnostic_videos_hashing_to_final']} | unreadable {x['videos_unreadable']}",
+              f"population videos {x['diagnostic_videos']} | sampled-200 included {x['sampled_200_videos_in_population']} | overlap frozen final {x['overlap_with_frozen_final']} | hashing to final {x['diagnostic_videos_hashing_to_final']} | unreadable {x['videos_unreadable']}",
               f"in scope {x['in_scope_questions']} {x['in_scope_per_task']}",
-              f"excluded {x['excluded']}",
+              f"excluded {x['excluded']}", f"excluded by task {x['excluded_by_task']}",
               f"eligible {x['eligible_questions']} q on {x['streams']} streams; stream seconds {x['stream_seconds']} total {x['stream_seconds_total']}",
               f"backward {b['questions']} q / {b['videos']} videos, max video share {b['max_video_share']}, effective videos {b['effective_videos']}, query {b['query_time_s']}",
               *[f"  {t}: {v}" for t, v in b["per_task"].items()],
-              f"realtime {r['questions']} q / {r['videos']} videos",
-              *[f"  {t}: {v}" for t, v in r["per_task"].items()],
+              f"realtime {r['questions']} q / {r['videos']} videos", *[f"  {t}: {v}" for t, v in r["per_task"].items()],
               f"ADEQUACY {json.dumps(x['adequacy'])}"]
-lines.append(f"GPU stages use {inv['protocol']} only (transfer/); v1 is kept for comparison and is not evaluated.")
 text = "\n".join(lines) + "\n"
 (out / "inventory-digest.txt").write_text(text)
 print(text)
+if not inv["adequacy"]["adequate"]:
+    (out / "STOPPED-inventory.txt").write_text(text)
+    raise SystemExit(3)
+shutil.rmtree(out / "transfer", ignore_errors=True)
+staging.replace(out / "transfer")  # only an adequate manifest becomes the evaluation manifest
 PY
-  log "Inventory done. Submit $TRACE_OUT/inventory-digest.txt, transfer/inventory.json, transfer-v1-comparison/inventory.json, half-counts.json and source.json; no GPU work yet."
-  exit 0
 fi
+"${py[@]}" -c "import json;a=json.load(open('$TRACE_T/inventory.json'))['adequacy'];assert a['adequate'],a" \
+  || { echo "inventory not adequate; see $TRACE_OUT/inventory-digest.txt" >&2; exit 3; }
+log "Inventory adequate: $TRACE_T"
+[[ "$TRACE_STAGE" == inventory ]] && { log "TRACE_STAGE=inventory: stopping before GPU work"; exit 0; }
 
-# ---------------------------------------------------------------------------------------------------- GPU stages
-[[ -f "$TRACE_T/inventory.json" ]] || { echo "Run TRACE_STAGE=inventory first" >&2; exit 2; }
-log "[0] Verify the inventory, the frozen checkpoints and record provenance"
+# ---------------------------------------------------------------------------------------------------- GPU
+log "[3/4 flow] Verify the manifest, the frozen checkpoints and provenance"
 "${py[@]}" - <<'PY'
 import hashlib, json, os
 from pathlib import Path
@@ -111,9 +130,7 @@ out, t, run = Path(os.environ["TRACE_OUT"]), Path(os.environ["TRACE_T"]), Path(o
 sha = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()
 inv = json.loads((t / "inventory.json").read_text())
 assert sha(t / "streams.jsonl") == inv["streams_sha256"] and sha(t / "questions.jsonl") == inv["questions_sha256"], "manifest changed"
-if not inv["adequacy"]["adequate"] and os.environ["TRACE_ACCEPT_INVENTORY"] != "1":
-    raise SystemExit(f"inventory not adequate {inv['adequacy']['problems']}: report it first; "
-                     "GPU work only with TRACE_ACCEPT_INVENTORY=1 after the owner accepts it")
+assert inv["adequacy"]["adequate"]
 identity = json.loads((run / "train-identity.expected.json").read_text())
 old_config = json.loads((run / "expected.json").read_text())["config"]
 ok, reason = training_complete(run / "train", old_config, identity["steps"], extra=identity, checkpoint_steps=STAGE2_CHECKPOINT_STEPS)
@@ -131,7 +148,6 @@ if os.environ["TRACE_EVALREPAIR_RUN"]:
     baseline = {"run": str(er), **{f"{a}_predictions_sha256": sha(er / "eval" / a / "predictions.jsonl")
                                    for a in ("s1_fifo", "s2_fifo", "s1_full", "s2_full") if (er / "eval" / a / "predictions.jsonl").is_file()}}
 record = {"protocol": inv["protocol"], "streams_sha256": inv["streams_sha256"], "questions_sha256": inv["questions_sha256"],
-          "inventory_adequate": inv["adequacy"]["adequate"], "accepted_inventory_override": os.environ["TRACE_ACCEPT_INVENTORY"] == "1",
           "config_sha256": hashlib.sha256(json.dumps(resolved, sort_keys=True).encode()).hexdigest(),
           "stage2": {"dir": str(run / "train"), "identity": identity, "modules_sha256": sha(run / "train/modules.pt")},
           "stage1": {"dir": os.environ["TRACE_S1"], "identity": init_identity(os.environ["TRACE_S1"])},
@@ -162,41 +178,33 @@ run_eval() {  # name, checkpoint dir, streams, output root, extra args...
   log "  $name done"
 }
 
-if [[ "$TRACE_STAGE" == flow ]]; then
-  log "[flow 1/2] S1/S2 FIFO on the 2 shortest + 2 longest transfer streams"
+if ! "${py[@]}" -c "import json,sys; sys.exit(0 if json.load(open('$TRACE_OUT/flow.json'))['passed'] else 1)" 2>/dev/null; then
+  log "[3/4 flow] S1/S2 FIFO on the 2 shortest + 2 longest transfer streams"
   "${py[@]}" -c "from trace_vl.v3.memory_pilot import precheck_streams; print(precheck_streams('$TRACE_T/streams.jsonl', '$TRACE_OUT/flow_streams.jsonl'))"
   run_eval s1_fifo "$TRACE_S1" "$TRACE_OUT/flow_streams.jsonl" "$TRACE_OUT/flow" --policy fifo
   run_eval s2_fifo "$TRACE_S2" "$TRACE_OUT/flow_streams.jsonl" "$TRACE_OUT/flow" --policy fifo
-  log "[flow 2/2] Coverage, no future frames, identical schedules, wall-time estimate"
-  "${py[@]}" - <<'PY'
+  "${py[@]}" - <<'PY' || { echo "flow check failed; see $TRACE_OUT/flow.json" >&2; exit 4; }
 import json, os
 from pathlib import Path
 from trace_vl.v3.ovo_transfer import flow_check
 out, t = Path(os.environ["TRACE_OUT"]), Path(os.environ["TRACE_T"])
 r = flow_check(out / "flow", out / "flow_streams.jsonl")
 inv = json.loads((t / "inventory.json").read_text())
-rate = max(v for v in r["wall_seconds_per_stream_second_per_gpu"].values() if v)
-gpus = int(os.environ["TRACE_GPUS"])
-r["estimate_hours_fifo_arm"] = round(rate * inv["stream_seconds_total"] / gpus / 3600, 2)
+rates = [v for v in r["wall_seconds_per_stream_second_per_gpu"].values() if v]
+r["estimate_hours_fifo_arm"] = round(max(rates) * inv["stream_seconds_total"] / int(os.environ["TRACE_GPUS"]) / 3600, 2) if rates else None
 r["estimate_note"] = "per FIFO arm on all GPUs; the two full-history arms are slower (KV grows with stream length)"
 (out / "flow.json").write_text(json.dumps(r, indent=2) + "\n")
 print(json.dumps(r, indent=2))
-if not r["passed"]:
-    raise SystemExit(f"flow check failed: {r['problems']}")
+raise SystemExit(0 if r["passed"] else 1)
 PY
-  log "Flow check passed. Submit flow.json and inputs.json; then TRACE_STAGE=full."
-  exit 0
 fi
+log "Flow check passed; continuing automatically to the full evaluation"
 
-[[ "$TRACE_STAGE" == full ]] || { echo "TRACE_STAGE must be inventory, flow or full" >&2; exit 2; }
-"${py[@]}" -c "import json,sys; sys.exit(0 if json.load(open('$TRACE_OUT/flow.json'))['passed'] else 1)" 2>/dev/null \
-  || { echo "Run TRACE_STAGE=flow first (it must pass)" >&2; exit 2; }
-log "[full 1/2] Four predeclared arms on every transfer stream (frozen checkpoints, exact fill)"
+log "[4/4 full] Four predeclared arms on every transfer stream (frozen checkpoints, exact fill)"
 run_eval s1_fifo "$TRACE_S1" "$TRACE_T/streams.jsonl" "$TRACE_OUT/eval" --policy fifo
 run_eval s2_fifo "$TRACE_S2" "$TRACE_T/streams.jsonl" "$TRACE_OUT/eval" --policy fifo
 run_eval s1_full "$TRACE_S1" "$TRACE_T/streams.jsonl" "$TRACE_OUT/eval" --policy full
 run_eval s2_full "$TRACE_S2" "$TRACE_T/streams.jsonl" "$TRACE_OUT/eval" --policy full
-log "[full 2/2] Report and the predeclared decision"
 "${py[@]}" - <<'PY'
 import json, os
 from pathlib import Path
