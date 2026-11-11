@@ -230,3 +230,37 @@ def test_flow_check_requires_a_clean_aba_isolation_result(tmp_path):
     write(0.5)
     bad = flow_check(tmp_path / "flow", tmp_path / "streams.jsonl")
     assert not bad["passed"] and any("A-B-A isolation failed" in p for p in bad["problems"])
+
+
+def test_exact_windows_from_the_manifest_grid_are_enforced(tmp_path):
+    """Tester follow-up on ebb9724: any 1..W length with matching S1/S2 values used to pass."""
+    from trace_vl.v3.recent_window import expected_windows
+
+    times, questions, due = _stream()
+    record = {"id": "s0", "video": "v0", "duration": 40.0, "split": "dev", "questions": questions}
+    write_jsonl(tmp_path / "streams.jsonl", [record])
+    grid = expected_windows(tmp_path / "streams.jsonl", 1.0, GAP, 600.0)
+    assert grid["q0"] == {"k": 2, "t_step": 2.25, "windows": {16: {"window_steps": 3, "first_step_t": 0.25},
+                                                               4: {"window_steps": 3, "first_step_t": 0.25}}}  # fmt: skip
+    assert grid["q2"]["windows"][16] == {"window_steps": 16, "first_step_t": 14.25}
+    assert grid["q2"]["windows"][4] == {"window_steps": 4, "first_step_t": 26.25}
+    qs = [{**q, "stream": "s0", "video": "v0", "task": "EPM"} for q in questions]
+
+    def rows(window, shorten=0):
+        out = []
+        for r in _run(times, due, window):
+            r = {**r, "stream": "s0"}
+            if shorten and r["id"] == "q2":  # the same wrong window in both checkpoints
+                r.update({"window_steps": r["window_steps"] - shorten, "session_steps": r["session_steps"] - shorten,
+                          "first_step_t": r["first_step_t"] + shorten})  # fmt: skip
+            out.append(r)
+        return out
+
+    good = {"s1_fresh16": rows(16), "s2_fresh16": rows(16), "s1_fresh4": rows(4), "s2_fresh4": rows(4)}
+    assert check_arms(good, qs, tuple(good), grid) == []
+    short = {"s1_fresh16": rows(16, shorten=5), "s2_fresh16": rows(16, shorten=5)}
+    assert check_arms(short, qs, tuple(short)) == []  # S1/S2 agree and 1 <= 11 <= 16: invisible without the grid
+    problems = check_arms(short, qs, tuple(short), grid)
+    assert any("expected 16 from 14.25" in p for p in problems)
+    shifted = {"s1_fresh16": [{**r, "t_step": r["t_step"] - 1.0} for r in rows(16)]}
+    assert any("answering step" in p for p in check_arms(shifted, qs, ("s1_fresh16",), grid))

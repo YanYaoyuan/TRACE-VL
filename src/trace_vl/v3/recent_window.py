@@ -190,8 +190,30 @@ def _load(root: Path, arm: str) -> list[dict] | None:
     return read_jsonl(path) if path.is_file() else None
 
 
-def check_arms(preds: dict[str, list[dict] | None], questions: list[dict], arms: tuple[str, ...]) -> list[str]:
-    """Coverage and protocol checks. `preds` holds the reused fifo arms and the new arms present in `arms`."""
+def expected_windows(streams_path: str | Path, step_seconds: float, gap: float, max_seconds: float) -> dict[str, dict]:
+    """From the manifest and the global step grid alone: question id -> the answering step k* (index and time) and,
+    per fresh window size, the exact number of steps and the first step time a fresh session must be fed."""
+    from .train_stage2 import chunk_plan, stream_times
+
+    out = {}
+    for record in read_jsonl(streams_path):
+        times = stream_times(record, step_seconds, gap, max_seconds)
+        if not times:
+            continue
+        for steps, qs in chunk_plan(times, record["questions"], len(times), gap):
+            for q in qs:
+                k = steps[-1]
+                out[q["id"]] = {"k": k, "t_step": float(times[k]),
+                                "windows": {w: {"window_steps": len(window_steps(k, w)), "first_step_t": float(times[window_steps(k, w)[0]])}
+                                            for w in FRESH_WINDOWS.values()}}  # fmt: skip
+    return out
+
+
+def check_arms(preds: dict[str, list[dict] | None], questions: list[dict], arms: tuple[str, ...],
+               grid: dict[str, dict] | None = None) -> list[str]:  # fmt: skip
+    """Coverage and protocol checks. `preds` holds the reused fifo arms and the new arms present in `arms`.
+    With `grid` (expected_windows), every row's answering step and every fresh row's exact window length and first
+    step are checked against the manifest and the global grid, not only for S1/S2 agreement."""
     expected = {q["id"]: q for q in questions}
     problems = []
     for arm in arms:
@@ -212,6 +234,17 @@ def check_arms(preds: dict[str, list[dict] | None], questions: list[dict], arms:
             if r.get("step_window_end") is None or r["step_window_end"] > q["time"] + 1e-6:
                 problems.append(f"{arm}: {r['id']} uses frames after the query time")
                 break
+            if grid is not None:
+                g = grid.get(r["id"])
+                if g is None or abs(r.get("t_step", -1.0) - g["t_step"]) > 1e-6:
+                    problems.append(f"{arm}: {r['id']} answering step {r.get('t_step')} is not the grid's {g and g['t_step']}")
+                    break
+                if fresh:
+                    want = g["windows"][FRESH_WINDOWS[arm.split("_", 1)[1]]]
+                    if r["window_steps"] != want["window_steps"] or abs(r["first_step_t"] - want["first_step_t"]) > 1e-6:
+                        problems.append(f"{arm}: {r['id']} window {r['window_steps']} steps from {r['first_step_t']}, "
+                                        f"expected {want['window_steps']} from {want['first_step_t']}")
+                        break
             if fresh:
                 w = FRESH_WINDOWS[arm.split("_", 1)[1]]
                 if r["evicted_tokens"] != 0 or r["kv_appended_tokens"] != r["kv_tokens"]:
@@ -283,15 +316,15 @@ def contrast(correct: dict[str, dict[str, int]], meta: dict[str, dict], weights:
 
 
 def recent_window_report(eval_root: str | Path, fifo_root: str | Path, questions_path: str | Path,
-                         samples: int = 4000, seed: int = 7) -> dict:  # fmt: skip
+                         samples: int = 4000, seed: int = 7, grid: dict[str, dict] | None = None) -> dict:  # fmt: skip
     questions = read_jsonl(questions_path)
     meta = {q["id"]: q for q in questions}
     arms = tuple(f"{c}_fifo" for c in CHECKPOINTS) + NEW_ARMS
     preds = {f"{c}_fifo": _load(Path(fifo_root), f"{c}_fifo") for c in CHECKPOINTS}
     preds.update({arm: _load(Path(eval_root), arm) for arm in NEW_ARMS})
-    problems = check_arms(preds, questions, arms)
+    problems = check_arms(preds, questions, arms, grid)
     out: dict = {"protocol": "ovo-transfer-dev-v2 / recent-window-control-v1", "questions": len(questions),
-                 "coverage_problems": problems, "scope": SCOPE,
+                 "coverage_problems": problems, "scope": SCOPE, "grid_checked": grid is not None,
                  "fresh4_note": "4 steps = 8 sampled frames over 4 s; not a Mage-VL / SimpleStream four-frame reproduction"}  # fmt: skip
     if problems:
         out["status"] = "invalid_coverage"
@@ -339,7 +372,7 @@ def recent_window_report(eval_root: str | Path, fifo_root: str | Path, questions
 
 
 def flow_check(eval_root: str | Path, streams_path: str | Path, fifo_flow_root: str | Path | None = None,
-               arms=("s1_fresh16", "s2_fresh16")) -> dict:  # fmt: skip
+               arms=("s1_fresh16", "s2_fresh16"), grid: dict[str, dict] | None = None) -> dict:  # fmt: skip
     """GPU flow check on a few streams: coverage, protocol fields, S1/S2 identical inputs, and the A-B-A isolation
     result (every checked question: same choice, option log-probabilities within ISOLATION_TOLERANCE)."""
     streams = read_jsonl(streams_path)
@@ -347,7 +380,7 @@ def flow_check(eval_root: str | Path, streams_path: str | Path, fifo_flow_root: 
     preds = {a: _load(Path(eval_root), a) for a in arms}
     if fifo_flow_root is not None:
         preds["s1_fifo"] = _load(Path(fifo_flow_root), "s1_fifo")
-    problems = check_arms(preds, questions, tuple(arms))
+    problems = check_arms(preds, questions, tuple(arms), grid)
     isolation = {}
     for arm in arms:
         rows = [r for r in preds.get(arm) or [] if "isolation_max_abs_diff" in r]

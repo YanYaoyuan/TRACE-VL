@@ -5,7 +5,8 @@
 #   1. verify  manifest hashes = the transfer run's, complete reused fifo predictions, frozen checkpoints, config
 #   2. flow    S1/S2 fresh16 on the transfer run's 4 flow streams with the A-B-A isolation check (stops, exit 4)
 #   3. six evaluations: {S1,S2} x {stream_window, fresh16, fresh4}
-#   4. report  coverage/protocol checks, diagnostic contrasts, the fifo-vs-fresh16 interaction
+#   4. report  coverage/protocol checks (exact windows from the manifest grid), diagnostic contrasts, the
+#              fifo-vs-fresh16 interaction; exit 5 if the final coverage is invalid
 # Finished evaluation shards resume on re-run. The §14.3 decision is not changed by anything here.
 set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -98,9 +99,12 @@ if ! "${py[@]}" -c "import json,sys; sys.exit(0 if json.load(open('$TRACE_OUT/fl
   "${py[@]}" - <<'PY' || { echo "flow check failed; see $TRACE_OUT/flow.json" >&2; exit 4; }
 import json, os
 from pathlib import Path
-from trace_vl.v3.recent_window import flow_check
+from trace_vl.v3.config import load_v3_config
+from trace_vl.v3.recent_window import expected_windows, flow_check
 out, tr = Path(os.environ["TRACE_OUT"]), Path(os.environ["TRACE_TRANSFER_RUN"])
-r = flow_check(out / "flow", out / "flow_streams.jsonl", fifo_flow_root=tr / "flow")
+cfg, _ = load_v3_config(os.environ["TRACE_CFG"])
+grid = expected_windows(out / "flow_streams.jsonl", cfg.stream.step_seconds, cfg.stream.frame_gap, cfg.stage2.max_seconds)
+r = flow_check(out / "flow", out / "flow_streams.jsonl", fifo_flow_root=tr / "flow", grid=grid)
 (out / "flow.json").write_text(json.dumps(r, indent=2) + "\n")
 print(json.dumps(r, indent=2))
 raise SystemExit(0 if r["passed"] else 1)
@@ -120,9 +124,12 @@ log "[4/4 report] Checks, diagnostic contrasts and the interaction"
 "${py[@]}" - <<'PY'
 import json, os
 from pathlib import Path
-from trace_vl.v3.recent_window import recent_window_report
+from trace_vl.v3.config import load_v3_config
+from trace_vl.v3.recent_window import expected_windows, recent_window_report
 out, tr = Path(os.environ["TRACE_OUT"]), Path(os.environ["TRACE_TRANSFER_RUN"])
-r = recent_window_report(out / "eval", tr / "eval", tr / "transfer" / "questions.jsonl")
+cfg, _ = load_v3_config(os.environ["TRACE_CFG"])
+grid = expected_windows(tr / "transfer" / "streams.jsonl", cfg.stream.step_seconds, cfg.stream.frame_gap, cfg.stage2.max_seconds)
+r = recent_window_report(out / "eval", tr / "eval", tr / "transfer" / "questions.jsonl", grid=grid)
 (out / "recent-window-report.json").write_text(json.dumps(r, indent=2) + "\n")
 lines = [f"RECENT-WINDOW CONTROL DIGEST ({r['protocol']}; evaluation only; status {r['status']})", f"SCOPE {r['scope']}", r["fresh4_note"]]
 if r["coverage_problems"]:
@@ -137,5 +144,7 @@ if "reading" in r:
 text = "\n".join(lines) + "\n"
 (out / "recent-window-digest.txt").write_text(text)
 print(text)
+if r["status"] != "complete":
+    raise SystemExit(5)  # invalid coverage: the report is written for inspection, but the run is NOT a valid result
 PY
-log "Completed: $TRACE_OUT/recent-window-digest.txt"
+log "Completed with valid coverage: $TRACE_OUT/recent-window-digest.txt"

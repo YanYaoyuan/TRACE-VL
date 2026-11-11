@@ -231,5 +231,7 @@ lines.append(f"DECISION {json.dumps(r['decision'])}")
 text = "\n".join(lines) + "\n"
 (out / "transfer-digest.txt").write_text(text)
 print(text)
+if r["decision"]["status"] == "invalid_coverage":
+    raise SystemExit(5)  # the report is written for inspection, but the run is NOT a valid result
 PY
-log "Completed: $TRACE_OUT/transfer-digest.txt"
+log "Completed with valid coverage: $TRACE_OUT/transfer-digest.txt"
