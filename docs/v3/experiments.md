@@ -588,4 +588,22 @@ Aggregates are labelled too. `cumulative_at_question` is an average of cumulativ
 
 Provenance (`inputs.json`): manifest and question hashes, the resolved config hash, the S1/S2 checkpoint identities (the Stage-2 completion record re-verified), and the hashes of the af2f961 dev baseline predictions.
 
+**14.3a Inventory v1 failed adequacy (A100, `e90d586`, CPU only; operator screenshot, 2026-11-11).**
+- **Conversion:** 1,468 MC records on 512 videos, none missing. 200 population videos, 0 overlap with the frozen final half, 0 unreadable.
+- **v1 population:** 386 in scope. Exclusions: 14 with query time > 600 s, 1 with no complete step before the query. 371 eligible on 147 streams.
+- **Backward: 51 questions (ASI only, 51 videos); EPM 0, HLD 0.** Real-time: 320 questions on 96 videos.
+- **Adequacy false** (51 < 150). No GPU stage was run.
+- **Cause (protocol, not model or data):** §13 `build_diagnostic` filtered to its temporal/static task categories (dropping EPM/HLD) *before* sampling 200 videos. Restricting v1 to those 200 IDs therefore could not recover EPM/HLD.
+
+**Revised population `ovo-transfer-dev-v2`:**
+- **Videos:** every video of the **original diagnostic hash half**, using the same seed and fraction read from the §13 split manifest and the same video-ID mapping.
+- **Questions:** all official MC questions on those videos.
+- **Exclusions:** every video hashing to the final half, including final-half videos absent from `final_frozen.jsonl`.
+- **Unchanged:** the 600 s cap, per-video query cutoff, endpoint, adequacy thresholds (150 / 30 / 10%) and the +2 pp / CI > 0 rule.
+- **Inventory stage reports:**
+  - EPM/ASI/HLD and real-time counts over the complete conversion and each hash half (`half-counts.json`);
+  - v1 next to v2 (`transfer-v1-comparison/` is kept and never evaluated).
+- **Adequacy is claimed only if the v2 inventory passes.** If the whole diagnostic half is still too small or lacks task coverage, that is reported first, and nothing is borrowed from the final half.
+- Earlier manifests and results are preserved.
+
 **Later (sketch, not proposed for running):** a training-free redundancy-aware selector is a cheap baseline against B4 + FIFO at exact equal budget. Its failure would reject only that selector. It would not rule out learned content-aware or task-relevance memory mechanisms in general.

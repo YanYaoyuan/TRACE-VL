@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stage-2 transfer check on OVO-Bench (experiments.md §14.3; src/trace_vl/v3/ovo_transfer.py). EVALUATION ONLY.
 #   TRACE_STAGE=inventory  CPU only: verify the §13 split, re-convert the official annotation, build the
-#                          ovo-transfer-dev-v1 manifest and inventory. Submit inventory.json before any GPU work.
+#                          ovo-transfer-dev-v2 manifest (diagnostic hash half) and inventory, plus the v1 comparison. Submit inventory.json before any GPU work.
 #   TRACE_STAGE=flow       small GPU flow check: S1/S2 FIFO on the 2 shortest + 2 longest streams (coverage,
 #                          no future frames, identical schedules, wall-time estimate).
 #   TRACE_STAGE=full       the four predeclared arms (S1/S2 x FIFO/full) on every stream, then the report.
@@ -50,34 +50,51 @@ record = {"diag_run": str(diag), "annotation": conv["annotation"], "annotation_s
 print(json.dumps({k: v for k, v in record.items() if k != "split_manifest"}, indent=2))
 assert len(diag_videos) == 200, f"expected the 200 §13 diagnostic videos, found {len(diag_videos)}"
 PY
-  log "[inventory 2/2] Build ovo-transfer-dev-v1 (questions <= 600 s on the 200 diagnostic videos) and the inventory"
+  log "[inventory 2/2] ovo-transfer-dev-v2 (every video of the §13 diagnostic hash half, questions <= 600 s), the v1 comparison and per-half task counts"
   "${py[@]}" - <<'PY'
 import json, os
 from pathlib import Path
 from trace_vl.v3.config import load_v3_config
-from trace_vl.v3.ovo_transfer import build_transfer
+from trace_vl.v3.ovo_transfer import build_transfer, half_counts
 out, diag = Path(os.environ["TRACE_OUT"]), Path(os.environ["TRACE_DIAG_RUN"])
 cfg, _ = load_v3_config(os.environ["TRACE_CFG"])
 src = json.loads((out / "source.json").read_text())
-inv = build_transfer(str(out / "ovo_mc.jsonl"), str(diag / "split/diagnostic.jsonl"), str(diag / "split/final_frozen.jsonl"),
-                     src["video_root"], os.environ["TRACE_T"], cfg.stream.step_seconds, cfg.stream.frame_gap,
-                     cfg.stage2.max_seconds, max_query_seconds=cfg.stage2.max_seconds)
-b, r = inv["backward"], inv["realtime"]
-lines = ["OVO TRANSFER INVENTORY (ovo-transfer-dev-v1; CPU only; no model run)",
-         f"diagnostic videos {inv['diagnostic_videos']} | overlap with frozen final {inv['overlap_with_frozen_final']} | unreadable {inv['videos_unreadable']}",
-         f"in scope {inv['in_scope_questions']} {inv['in_scope_per_task']}",
-         f"excluded {inv['excluded']}",
-         f"eligible {inv['eligible_questions']} questions on {inv['streams']} streams; stream seconds {inv['stream_seconds']} total {inv['stream_seconds_total']}",
-         f"backward {b['questions']} q / {b['videos']} videos, max video share {b['max_video_share']}, effective videos {b['effective_videos']}, query {b['query_time_s']}",
-         *[f"  {t}: {v}" for t, v in b["per_task"].items()],
-         f"realtime {r['questions']} q / {r['videos']} videos",
-         *[f"  {t}: {v}" for t, v in r["per_task"].items()],
-         f"ADEQUACY {json.dumps(inv['adequacy'])}"]
+seed, fraction = src["split_manifest"]["seed"], src["split_manifest"]["diagnostic_fraction"]
+common = dict(step_seconds=cfg.stream.step_seconds, gap=cfg.stream.frame_gap, max_seconds=cfg.stage2.max_seconds,
+              max_query_seconds=cfg.stage2.max_seconds, seed=seed, fraction=fraction)
+args = (str(out / "ovo_mc.jsonl"), str(diag / "split/diagnostic.jsonl"), str(diag / "split/final_frozen.jsonl"), src["video_root"])
+inv = build_transfer(*args, os.environ["TRACE_T"], population="diagnostic-half", **common)
+old = build_transfer(*args, str(out / "transfer-v1-comparison"), population="sampled-200", **common)
+halves = half_counts(str(out / "ovo_mc.jsonl"), seed, fraction)
+(out / "half-counts.json").write_text(json.dumps(halves, indent=2) + "\n")
+
+def family(scope, tasks):
+    return {t: halves.get(scope, {}).get(t, {"questions": 0, "videos": 0}) for t in tasks}
+
+lines = ["OVO TRANSFER INVENTORY v2 (CPU only; no model run). Thresholds unchanged: >=150 backward q, >=30 backward videos, max share 10%",
+         f"MC conversion {src['conversion']}",
+         "Backward tasks per scope (questions / videos), before any eligibility filter:"]
+for scope in ("all", "diagnostic", "final"):
+    lines.append(f"  {scope}: {json.dumps(family(scope, ('EPM', 'ASI', 'HLD')))}")
+lines.append("Real-time per scope: " + json.dumps({sc: sum(v['questions'] for t, v in halves.get(sc, {}).items() if t not in ('EPM', 'ASI', 'HLD')) for sc in ('all', 'diagnostic', 'final')}))
+for name, x in (("v1 (200 sampled videos)", old), ("v2 (diagnostic hash half)", inv)):
+    b, r = x["backward"], x["realtime"]
+    lines += [f"== {x['protocol']} {name}",
+              f"population videos {x['diagnostic_videos']} | of the 200 sampled: {x['sampled_200_videos_in_population']} | overlap with frozen final {x['overlap_with_frozen_final']} | hashing to final {x['diagnostic_videos_hashing_to_final']} | unreadable {x['videos_unreadable']}",
+              f"in scope {x['in_scope_questions']} {x['in_scope_per_task']}",
+              f"excluded {x['excluded']}",
+              f"eligible {x['eligible_questions']} q on {x['streams']} streams; stream seconds {x['stream_seconds']} total {x['stream_seconds_total']}",
+              f"backward {b['questions']} q / {b['videos']} videos, max video share {b['max_video_share']}, effective videos {b['effective_videos']}, query {b['query_time_s']}",
+              *[f"  {t}: {v}" for t, v in b["per_task"].items()],
+              f"realtime {r['questions']} q / {r['videos']} videos",
+              *[f"  {t}: {v}" for t, v in r["per_task"].items()],
+              f"ADEQUACY {json.dumps(x['adequacy'])}"]
+lines.append(f"GPU stages use {inv['protocol']} only (transfer/); v1 is kept for comparison and is not evaluated.")
 text = "\n".join(lines) + "\n"
 (out / "inventory-digest.txt").write_text(text)
 print(text)
 PY
-  log "Inventory done. Submit $TRACE_OUT/inventory-digest.txt, transfer/inventory.json and source.json; no GPU work yet."
+  log "Inventory done. Submit $TRACE_OUT/inventory-digest.txt, transfer/inventory.json, transfer-v1-comparison/inventory.json, half-counts.json and source.json; no GPU work yet."
   exit 0
 fi
 
@@ -188,7 +205,7 @@ out, t = Path(os.environ["TRACE_OUT"]), Path(os.environ["TRACE_T"])
 inv = json.loads((t / "inventory.json").read_text())
 r = transfer_report(out / "eval", t / "questions.jsonl", inventory=inv)
 (out / "transfer-report.json").write_text(json.dumps(r, indent=2) + "\n")
-lines = ["OVO TRANSFER DIGEST (ovo-transfer-dev-v1; external-dataset development evaluation; frozen checkpoints)"]
+lines = [f"OVO TRANSFER DIGEST ({r['protocol']}; external-dataset development evaluation; frozen checkpoints)"]
 if r["coverage_problems"]:
     lines.append(f"COVERAGE PROBLEMS {r['coverage_problems']}")
 for arm, acc in r.get("accuracy_pct", {}).items():

@@ -203,4 +203,32 @@ def test_questions_run_on_a_fork_and_leave_the_live_stream_unchanged():
 
 def test_inventory_is_json_serialisable(ovo):
     _, inv, _ = ovo
-    assert json.loads(json.dumps(inv))["protocol"] == "ovo-transfer-dev-v1"
+    assert json.loads(json.dumps(inv))["protocol"] == "ovo-transfer-dev-v2"
+
+
+def test_v2_uses_the_whole_diagnostic_hash_half_and_v1_only_the_sampled_videos(tmp_path):
+    """A100 inventory of e90d586: the 200 sampled §13 videos carried no EPM/HLD (filtered before sampling)."""
+    from trace_vl.v3.ovo_transfer import half_counts
+
+    diag, final = _videos("diagnostic", 3), _videos("final", 2)
+    write_jsonl(tmp_path / "diagnostic.jsonl", [{"id": "d0", "video": diag[0]}])  # the §13 sample: one video
+    write_jsonl(tmp_path / "final.jsonl", [{"id": "f0", "video": final[0]}])  # final[1] hashes final but is not listed
+    rows = [_mc("ovo-1", diag[0], "ASI", 30.0), _mc("ovo-2", diag[1], "EPM", 40.0), _mc("ovo-3", diag[2], "HLD", 50.0),
+            _mc("ovo-4", final[0], "EPM", 30.0), _mc("ovo-5", final[1], "HLD", 30.0)]  # fmt: skip
+    write_jsonl(tmp_path / "mc.jsonl", rows)
+    durations = {v: 100.0 for v in diag + final}
+    args = (str(tmp_path / "mc.jsonl"), str(tmp_path / "diagnostic.jsonl"), str(tmp_path / "final.jsonl"), str(tmp_path))
+    v2 = build_transfer(*args, str(tmp_path / "v2"), STEP, GAP, MAX, durations=durations)
+    v1 = build_transfer(*args, str(tmp_path / "v1"), STEP, GAP, MAX, durations=durations, population="sampled-200")
+    assert v2["protocol"] == "ovo-transfer-dev-v2" and v1["protocol"] == "ovo-transfer-dev-v1"
+    assert v2["diagnostic_videos"] == 3 and v2["sampled_200_videos_in_population"] == 1
+    assert {t: c["questions"] for t, c in v2["backward"]["per_task"].items()} == {"EPM": 1, "ASI": 1, "HLD": 1}
+    assert {t: c["questions"] for t, c in v1["backward"]["per_task"].items()} == {"EPM": 0, "ASI": 1, "HLD": 0}
+    videos = {q["video"] for q in read_jsonl(tmp_path / "v2" / "questions.jsonl")}
+    assert videos == set(diag) and not videos & set(final)  # final[1] excluded although absent from final_frozen
+    assert all(q["protocol"] == "ovo-transfer-dev-v2" for q in read_jsonl(tmp_path / "v2" / "questions.jsonl"))
+    halves = half_counts(str(tmp_path / "mc.jsonl"))
+    assert halves["all"]["EPM"] == {"questions": 2, "videos": 2} and halves["final"]["HLD"] == {"questions": 1, "videos": 1}
+    assert halves["diagnostic"]["ASI"] == {"questions": 1, "videos": 1}
+    with pytest.raises(ValueError, match="population"):
+        build_transfer(*args, str(tmp_path / "x"), STEP, GAP, MAX, durations=durations, population="final")

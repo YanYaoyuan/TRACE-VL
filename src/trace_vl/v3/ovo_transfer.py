@@ -2,14 +2,14 @@
 benchmark? Evaluation only, frozen checkpoints, no training.
 
 Population, fixed before any model is run:
-- Videos: exactly the 200 videos of the §13 temporal-diagnostic manifest (`split/diagnostic.jsonl` of the
-  `9653e2a` run). These videos already informed the decision to close the transition-token track, so this is an
+- Videos (v2): every video of the ORIGINAL §13 diagnostic hash half (seed 7, fraction 0.5). v1 used only the 200
+  videos of the §13 manifest (`split/diagnostic.jsonl` of the `9653e2a` run). Those 200 already informed the decision to close the transition-token track, so this is an
   **external-dataset development evaluation**, not a held-out confirmation. The frozen final half (hash split,
   `final_frozen.jsonl`) is never touched; disjointness is checked on video IDs.
 - Questions: ALL official multiple-choice questions on those videos from the official annotation via `convert_ovo`
   (backward EPM/ASI/HLD and real-time STU/OJR/ATR/ACR/OCR/FPD), with query time <= `max_query_seconds` (600 s,
   the Stage-2 maximum). This is a NEW, larger question population than the 475-question §13 manifest
-  (which held ASI/REC/SSR and real-time tasks, sampled per task) and is named `ovo-transfer-dev-v1`.
+  (which held ASI/REC/SSR and real-time tasks, sampled per task) and is named `ovo-transfer-dev-v2`.
 - Eligibility depends only on data and the stream protocol (query time, video readable, at least one complete
   step before the query time), never on model outputs; every exclusion is counted.
 
@@ -33,7 +33,11 @@ from pathlib import Path
 from .data import OVO_MCQ_TASKS, read_jsonl, write_jsonl
 from .temporal import task_code, video_half
 
-PROTOCOL = "ovo-transfer-dev-v1"
+PROTOCOL = "ovo-transfer-dev-v2"
+# v1 (e90d586): only the 200 videos sampled into the §13 manifest. §13 had dropped EPM/HLD before sampling, so v1 held
+# 51 backward questions (ASI only) and failed adequacy on the A100 inventory. v2: every video of the ORIGINAL
+# diagnostic hash half (same seed and fraction as the §13 split), all official MC questions on them.
+POPULATIONS = {"sampled-200": "ovo-transfer-dev-v1", "diagnostic-half": "ovo-transfer-dev-v2"}
 BACKWARD = ("EPM", "ASI", "HLD")
 REALTIME = ("STU", "OJR", "ATR", "ACR", "OCR", "FPD")
 ARMS = ("s1_fifo", "s2_fifo", "s1_full", "s2_full")
@@ -84,25 +88,52 @@ def _visible(query_time: float, step_seconds: float, gap: float, end: float, max
     return any(qs for _, qs in plan)
 
 
+def half_counts(mc_records: str, seed: int = 7, fraction: float = 0.5) -> dict:
+    """Questions and videos per MC task over the complete conversion and over each hash half (§13 seed/fraction)."""
+    out: dict = {}
+    for r in read_jsonl(mc_records):
+        code = task_code(r)
+        if code not in OVO_MCQ_TASKS:
+            continue
+        for scope in ("all", video_half(r["video"], seed, fraction)):
+            cell = out.setdefault(scope, {}).setdefault(code, {"questions": 0, "videos": set()})
+            cell["questions"] += 1
+            cell["videos"].add(r["video"])
+    return {scope: {t: {"questions": c["questions"], "videos": len(c["videos"])} for t, c in sorted(tasks.items())}
+            for scope, tasks in sorted(out.items())}  # fmt: skip
+
+
 def build_transfer(mc_records: str, diagnostic: str, final_frozen: str, video_root: str, out_dir: str,
                    step_seconds: float, gap: float, max_seconds: float, max_query_seconds: float = 600.0,
-                   durations: dict | None = None) -> dict:  # fmt: skip
+                   durations: dict | None = None, population: str = "diagnostic-half", seed: int = 7,
+                   fraction: float = 0.5) -> dict:  # fmt: skip
     """Inventory + `questions.jsonl` + `streams.jsonl` (split "dev") of the transfer population. CPU only.
 
+    population "diagnostic-half" (v2): every video of the §13 diagnostic hash half (`seed`, `fraction` from the §13
+    split manifest); "sampled-200" (v1): only the videos of `diagnostic` (kept for the old/new comparison).
+    Every video hashing to the final half is excluded, whether or not it appears in `final_frozen`.
     `durations` (video -> seconds or None) replaces probing, for tests."""
+    if population not in POPULATIONS:
+        raise ValueError(f"population must be one of {sorted(POPULATIONS)}")
+    protocol = POPULATIONS[population]
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     diag_rows, final_rows = read_jsonl(diagnostic), read_jsonl(final_frozen)
-    diag_videos = sorted({r["video"] for r in diag_rows})
+    sampled = sorted({r["video"] for r in diag_rows})
     final_videos = {r["video"] for r in final_rows}
+    mc_all = read_jsonl(mc_records)
+    if population == "sampled-200":
+        diag_videos = sampled
+    else:
+        diag_videos = sorted({r["video"] for r in mc_all if video_half(r["video"], seed, fraction) == "diagnostic"})
     overlap = sorted(set(diag_videos) & final_videos)
-    hashed_final = sorted(v for v in diag_videos if video_half(v) != "diagnostic")
-    if overlap or hashed_final:
+    hashed_final = sorted(v for v in diag_videos if video_half(v, seed, fraction) != "diagnostic")
+    if overlap or hashed_final or any(video_half(v, seed, fraction) != "diagnostic" for v in sampled):
         raise AssertionError(f"diagnostic videos overlap the frozen final half: {overlap[:5]} {hashed_final[:5]}")
 
     exclusions: Counter = Counter()
     seen_ids, kept = set(), []
-    in_scope = [r for r in read_jsonl(mc_records) if r["video"] in set(diag_videos) and task_code(r) in OVO_MCQ_TASKS]
+    in_scope = [r for r in mc_all if r["video"] in set(diag_videos) and task_code(r) in OVO_MCQ_TASKS]
     if durations is None:
         durations = {v: probe_duration(Path(video_root) / v) for v in diag_videos}
     for r in sorted(in_scope, key=lambda r: r["id"]):
@@ -137,8 +168,8 @@ def build_transfer(mc_records: str, diagnostic: str, final_frozen: str, video_ro
                "answer": int(r["answer"]), "task": task_code(r), "family": OVO_MCQ_TASKS[task_code(r)], "delay": 0.0}
               for r in rows]  # fmt: skip
         streams.append({"id": stream_id(video), "video": video, "duration": round(end, 3), "split": "dev",
-                        "source": "ovo-bench", "protocol": PROTOCOL, "questions": qs})  # fmt: skip
-        questions += [{**q, "stream": stream_id(video), "video": video} for q in qs]
+                        "source": "ovo-bench", "protocol": protocol, "questions": qs})  # fmt: skip
+        questions += [{**q, "stream": stream_id(video), "video": video, "protocol": protocol} for q in qs]
     write_jsonl(out / "streams.jsonl", streams)
     write_jsonl(out / "questions.jsonl", questions)
 
@@ -164,9 +195,14 @@ def build_transfer(mc_records: str, diagnostic: str, final_frozen: str, video_ro
         problems.append(f"one video holds {backward['max_video_share']:.1%} of backward questions (> {MAX_VIDEO_SHARE:.0%})")
     in_scope_tasks = Counter(task_code(r) for r in in_scope)
     inventory = {
-        "protocol": PROTOCOL,
-        "population": "all official MC questions on the 200 videos of the §13 diagnostic manifest; NOT the 475-question manifest",
-        "status_of_videos": "external-dataset development evaluation (videos informed the §13 transition decision)",
+        "protocol": protocol, "population_rule": population,
+        "population": ("all official MC questions on every video of the §13 diagnostic hash half" if population == "diagnostic-half"
+                       else "all official MC questions on the 200 videos of the §13 diagnostic manifest")
+                      + "; NOT the 475-question manifest",
+        "status_of_videos": "external-dataset development evaluation (the 200 sampled videos informed the §13 transition "
+                            "decision; the other diagnostic-half videos were never evaluated)",
+        "hash_split": {"seed": seed, "fraction": fraction},
+        "sampled_200_videos_in_population": len(set(sampled) & set(diag_videos)),
         "sources": {"mc_records": str(mc_records), "mc_records_sha256": _sha(mc_records),
                     "diagnostic": str(diagnostic), "diagnostic_sha256": _sha(diagnostic),
                     "final_frozen": str(final_frozen), "final_frozen_sha256": _sha(final_frozen), "video_root": str(video_root)},
@@ -242,7 +278,8 @@ def transfer_report(eval_root: str | Path, questions_path: str | Path, inventory
     meta = {q["id"]: q for q in questions}
     preds = {a: read_jsonl(root / a / "predictions.jsonl") for a in ARMS if (root / a / "predictions.jsonl").is_file()}
     problems = check_coverage(preds, questions)
-    out: dict = {"protocol": PROTOCOL, "questions": len(questions), "coverage_problems": problems}
+    out: dict = {"protocol": questions[0].get("protocol", PROTOCOL) if questions else PROTOCOL, "questions": len(questions),
+                 "coverage_problems": problems}
     if problems:
         out["decision"] = {"status": "invalid_coverage", "continue_stage2_scaling": False,
                            "meaning": "missing or invalid coverage: no conclusion about transfer"}  # fmt: skip
