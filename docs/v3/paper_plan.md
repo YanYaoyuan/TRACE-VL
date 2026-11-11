@@ -57,5 +57,7 @@ Progress against this plan is posted on issue #4 at each milestone.
 
 - On the external OVO development population (`ovo-transfer-dev-v2`, 688 q), S2-FIFO − S1-FIFO is **−4.92 pp [−9.62, −0.35]** on backward and −4.18 pp on real-time. The predeclared continuation rule fails, and the real-time no-harm check fails too.
 - **Consequence:** the current Stage-2 recipe is not a contribution and is not scaled. The working checkpoint for external evaluation reverts to **Stage 1 (B4) + FIFO** until a Stage-2 recipe is shown to transfer.
-- Of outcome C's three parts, only the **alert head** remains untested. The memory contribution has no positive evidence: TKM ties FIFO (§14.2), and Stage-2 training does not transfer (§14.3c).
-- This is pending the tester's independent recomputation from the raw bundle.
+- The memory contribution has no positive evidence: TKM ties FIFO (§14.2), and Stage-2 training does not transfer (§14.3c). The **alert head** is unvalidated: a possible direction, not an established contribution.
+- **Confirmed** by the tester's independent raw-file audit (issue #4, 2026-11-11): all 39 paired statistics reproduce, and KV matches per question between S1 and S2.
+- Scope: this rejects the age/surprise scorer and this Stage-2 recipe, not content-aware memory or long-stream training in general.
+- Next diagnostic (specified, not run): the recent-window control, experiments.md §14.4.

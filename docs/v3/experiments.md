@@ -615,7 +615,7 @@ Provenance (`inputs.json`): manifest and question hashes, the resolved config ha
   - `be379f7`: archives are deduplicated across overlapping search roots.
 - These fixes only matter when media must be extracted. They do not affect this run, whose media were all readable.
 
-**14.3c Transfer result (operator `cdbac0c`, all four arms complete; PRELIMINARY, transcribed by the tester from the operator's screenshot, 2026-11-11; raw report and predictions not yet independently recomputed).**
+**14.3c Transfer result (operator `cdbac0c`, all four arms complete; CONFIRMED by the tester's independent raw-file audit, issue #4, 2026-11-11).**
 
 Population `ovo-transfer-dev-v2`: 688 questions on 260 streams; the primary backward endpoint has 305 questions on 138 videos; the inventory was adequate.
 
@@ -635,9 +635,64 @@ Population `ovo-transfer-dev-v2`: 688 questions on 260 streams; the primary back
 - The +4.90 pp dev gain on stitched LLaVA streams (§14.2) did **not** transfer to this external development population under the declared FIFO endpoint. The current Stage-2 recipe is significantly worse than Stage 1 on backward, real-time and all questions.
 - The full-history backward estimate (+1.97, CI including 0) is not evidence of a gain.
 - Domain mismatch, forgetting and adaptation to the synthetic stitched-stream format are **hypotheses, not established causes**. This is not a blanket rejection of long-stream training.
-- Descriptive only, not tested: S1 FIFO (1.7k KV) is ahead of S1 full (9.7k KV) on backward here (51.1 vs 45.2). More history did not help the Stage-1 model on this population.
+- Descriptive only, not tested: S1 FIFO (1.7k KV) is ahead of S1 full (9.7k KV) on backward here (51.1 vs 45.2). FIFO vs full is **not** a no-memory ablation: FIFO still keeps history, and the backbone has recurrent state. These results cannot show that OVO backward tasks do not need memory (see §14.4).
 - Checkpoints, manifests and predictions are preserved. No retraining or scaling on the strength of the §14.2 dev gain. The population and thresholds are unchanged.
 - Not comparable to Mage-VL Table 7 (recent four frames at 1 fps, generated answers, category-macro averages over the full benchmark) — this is the development half, query ≤ 600 s, local option likelihood and question-weighted pooling.
-- Next: the tester independently recomputes coverage, identities, equal-budget statistics and paired results from the report bundle before this is final.
+- **Audit** (standalone NumPy/stdlib script, no TRACE-VL imports):
+  - All four arms cover the same 688 unique questions on 260 streams. All 39 reported paired statistics reproduce.
+  - Changed answers, S2-FIFO vs S1-FIFO: backward 29 correct→wrong and 14 wrong→correct (net −15/305); all questions 65 and 34 (net −31/688).
+  - **Retained KV tokens and KV bytes match per question between S1 and S2** under both policies, so there is no unequal-budget confound.
+  - Every video is in the diagnostic hash half. Logged window ends never exceed question time. Step schedules agree across arms.
+- **Audit limits:** checkpoint and video bytes were checked against recorded hashes, not rehashed. Causality was checked from logged timestamps, not pixels. One training seed. Per-task findings are exploratory.
+- **Scope:** this rejects the age/surprise retention scorer (§14.2, dev) and this Stage-2 recipe (here). It does not reject content-aware memory or other training recipes in general. The alert head is unvalidated: a possible direction, not an established contribution.
+
+### 14.4 Recent-window control (PROTOCOL SPECIFICATION ONLY; not implemented, not run; evaluation only)
+
+**Question.** How much of the OVO accuracy in §14.3c depends on persistent state (older KV memory and recurrent state), and does the S2 − S1 deficit remain when no persistent state exists? This is a diagnostic. It does not change the §14.3 decision or its rule.
+
+**Fixed inputs.** The frozen 688-question `ovo-transfer-dev-v2` manifest (hashes from the `cdbac0c` run), the same media overlay, the same frozen S1/S2 checkpoints and the same config. No training. The final half is untouched.
+
+**Arms (S1 and S2 each):**
+
+| Arm | LM KV at the question | Recurrent / adapter temporal state | Frames seen |
+|---|---|---|---|
+| `fifo` (existing, §14.3c) | recent 16 s + 1,024 older tokens | persistent from stream start | whole prefix |
+| `stream_window` (new) | recent 16 s only (`policy: window`) | persistent from stream start | whole prefix |
+| `fresh16` (new, **primary control**) | only the last 16 steps | **fresh for every question** | last 16 s only |
+| `fresh4` (new, secondary) | only the last 4 steps | fresh for every question | last 4 s only |
+
+**Fresh-state protocol (`fresh16`, `fresh4`).** For every question independently:
+1. Build a **new session**: empty LM KV apart from the standard prompt prefix; new recurrent state; new visual/adapter temporal caches (CST/TE); new transition tracker; new position counter. Nothing is shared between questions, including questions on the same video.
+2. **Causal frame sampling.** Take the stream's own step grid from the §14.3 run (step centres 0.25 + k s; two frames at t ± 0.25 s). Let k* be the last step whose window ends at or before the query time; this is the step the §14.3 run answered after. Feed steps k*−W+1 … k* (W = 16 or 4), or fewer if the stream is shorter. No frame after the query time. The first fed step is an I-step for the adapter by construction.
+3. Timestamps in the prompt keep their **absolute stream times** (the same text as in the stream run), so the only differences from `fifo` are the missing history and state.
+4. Ask with the same question text, options and likelihood scoring. No eviction occurs (`evicted_tokens = 0`).
+
+`fresh4` is 4 steps = 8 frames over 4 s at our 2-frame steps. It is close to, but **not**, SimpleStream's four frames at 1 fps, and it is not comparable to Mage-VL Table 7 (different population, scoring and aggregation).
+
+**Checks (any failure → `invalid_coverage`, no conclusion):**
+- Each arm has exactly the 688 manifest IDs once.
+- Per question: `t_step` and `step_window_end` equal the §14.3c rows; `window_steps` and `first_step_t` are identical between S1 and S2; KV tokens are equal between S1 and S2.
+- For fresh arms: `evicted_tokens = 0`, `kv_appended_tokens = kv_tokens`, and a per-question `session_steps = window_steps` (proves no carried state).
+
+**Predeclared comparisons** (video-cluster bootstrap, 4,000 draws, seed 7; backward pooled EPM/ASI/HLD question-weighted, plus per task, task-macro, real-time and all). All are diagnostic; none gates anything:
+1. **Reliance on persistent state, per checkpoint:** `fifo − fresh16`.
+   - CI lower bound > 0 on backward: persistent state helps on this population.
+   - CI containing 0: no detectable reliance here. This is not proof that memory is unnecessary.
+2. **Decomposition:** `fifo − stream_window` is the value of the 1,024 older KV tokens. `stream_window − fresh16` is the value of the recurrent/temporal state carried from before the window.
+3. **Where the S2 deficit lives:** `S2 − S1` under `fresh16`.
+   - Still negative with CI upper bound < 0: the deficit exists without any persistent state (per-window perception/answering), which points away from memory use.
+   - CI containing 0, while `fifo` shows −4.9: the deficit is tied to streaming state.
+   - Either reading remains one seed on one development population.
+4. `fresh4 − fresh16`, per checkpoint: descriptive only.
+
+**Cost.** Fresh arms run at most 16 steps per question (688 × 16 ≈ 11k steps per arm). The two `stream_window` arms cost about the same as the FIFO arms of §14.3c. Six evaluations in total; the existing four are reused, not rerun.
+
+**Expected artifacts** (new output directory; the `cdbac0c` run is only read):
+- `inputs.json`: manifest and question hashes (must equal the `cdbac0c` run's), config hash, S1/S2 identities, hashes of the reused §14.3c `fifo` predictions.
+- `eval/{s1,s2}_{stream_window,fresh16,fresh4}/predictions.jsonl` with `choice`, `correct`, `t_step`, `step_window_end`, `window_steps`, `first_step_t`, `session_steps`, `kv_tokens`, `evicted_tokens`.
+- `recent-window-report.json` and `recent-window-digest.txt`: accuracies per arm, the comparisons above, coverage problems, and the scope note.
+- The launcher log.
+
+**Implementation plan after the protocol is accepted:** a per-question fresh-session evaluator reusing the session and reader code; CPU tests for step selection (last W steps, short streams, no future frames), fresh-state isolation between questions with a fake backbone, coverage checks and the report; a small GPU flow check on 4 streams; one pinned launcher.
 
 **Later (sketch, not proposed for running):** a training-free redundancy-aware selector is a cheap baseline against B4 + FIFO at exact equal budget. Its failure would reject only that selector. It would not rule out learned content-aware or task-relevance memory mechanisms in general.
