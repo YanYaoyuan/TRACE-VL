@@ -607,4 +607,12 @@ Provenance (`inputs.json`): manifest and question hashes, the resolved config ha
 - **Adequacy is claimed only if the v2 inventory passes.** If the whole diagnostic half is still too small or lacks task coverage, that is reported first, and nothing is borrowed from the final half.
 - Earlier manifests and results are preserved.
 
+**14.3b v2 run in progress (operator, `cdbac0c`; tester report on PR #3, 2026-11-11).**
+- **Inventory passed adequacy:** 688 eligible questions on 260 streams, 305 backward questions on 138 videos.
+- **The GPU flow check passed.** The full four-arm evaluation is running unchanged.
+- **Media-recovery fixes** after `cdbac0c`:
+  - `a80f303`: multipart tar sets; ambiguous matches are reported, not picked.
+  - `be379f7`: archives are deduplicated across overlapping search roots.
+- These fixes only matter when media must be extracted. They do not affect this run, whose media were all readable.
+
 **Later (sketch, not proposed for running):** a training-free redundancy-aware selector is a cheap baseline against B4 + FIFO at exact equal budget. Its failure would reject only that selector. It would not rule out learned content-aware or task-relevance memory mechanisms in general.
