@@ -345,3 +345,19 @@ def test_ambiguous_matches_are_reported_not_picked(tmp_path):
     assert set(r["extracted"]) == {"src_videos/c.mp4"} and r["still_missing"] == []
     assert (tmp_path / "out/media/src_videos/c.mp4").read_bytes() == b"VIDEO-right"
     assert not (tmp_path / "out/media/src_videos/a.mp4").exists()
+
+
+def test_overlapping_search_roots_find_each_archive_once(tmp_path):
+    """Tester repro on a80f303: find_archives([parent, child]) saw ['aa', 'aa', 'ab', 'ab'] and skipped the set."""
+    from trace_vl.v3.ovo_transfer import ensure_media, find_archives
+
+    parent = tmp_path / "OVO_Bench"
+    child = parent / "downloads"
+    child.mkdir(parents=True)
+    _split(_tar_bytes({"src_videos/a.mp4": b"VIDEO-a" + b"x" * 3000}), child / "src_videos.tar", ["partaa", "partab"])
+    (child / "single.tar").write_bytes(_tar_bytes({"src_videos/b.mp4": b"VIDEO-b"}))
+    archives, skipped = find_archives([parent, child, child])
+    assert sorted(len(a["parts"]) for a in archives) == [1, 2] and skipped == []
+    r = ensure_media(["src_videos/a.mp4", "src_videos/b.mp4"], tmp_path / "v", [parent, child], tmp_path / "out", probe=_probe)
+    assert set(r["extracted"]) == {"src_videos/a.mp4", "src_videos/b.mp4"} and not r["ambiguous"]
+    assert len(r["archives_scanned"]) == 2 and r["archives_skipped"] == []

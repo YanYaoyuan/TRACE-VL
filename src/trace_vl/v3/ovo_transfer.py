@@ -106,7 +106,7 @@ class _Concatenated(io.RawIOBase):
 def find_archives(search_roots: list[str | Path]) -> tuple[list[dict], list[dict]]:
     """Downloaded archives under `search_roots`: single files and ordered multipart tar sets.
     Returns (archives, skipped); a multipart set with a gap in its part sequence is skipped and reported."""
-    singles, groups = set(), defaultdict(list)
+    singles, groups, seen = set(), defaultdict(list), set()
     for root in search_roots:
         root = Path(root)
         if not root.is_dir():
@@ -114,6 +114,10 @@ def find_archives(search_roots: list[str | Path]) -> tuple[list[dict], list[dict
         for path in root.rglob("*"):
             if not path.is_file():
                 continue
+            path = path.resolve()  # overlapping roots (parent + child, symlinks) must not list a file twice
+            if path in seen:
+                continue
+            seen.add(path)
             m = _PART.match(path.name)
             if m and m.group("base").lower().endswith(ARCHIVE_SUFFIXES):
                 groups[path.parent / m.group("base")].append((m.group("letters") or m.group("digits"), path))
