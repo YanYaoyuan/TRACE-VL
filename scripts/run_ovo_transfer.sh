@@ -62,6 +62,9 @@ record = {"diag_run": str(diag), "annotation": conv["annotation"], "annotation_s
           "conversion_vs_s13": {"s13_mc_records": len(old), "records": len(mc), "only_in_complete_conversion": len(set(mc) - set(old))},
           "ovo_mc_sha256": sha(out / "ovo_mc.jsonl"), "split_manifest": split, "population_videos": len(population),
           "media": {k: v for k, v in media.items() if k != "archives_scanned"} | {"archives_scanned": len(media["archives_scanned"])}}
+problems = len(media["still_missing"]) + len(media["ambiguous"]) + len(media["extracted_but_unreadable"])
+print(f"media: {media['available_in_root']} available, {len(media['extracted'])} extracted, {problems} unresolved "
+      "(their questions are counted as video_missing_or_unreadable exclusions in the inventory)")
 (out / "source.json").write_text(json.dumps(record, indent=2) + "\n")
 print(json.dumps({k: v for k, v in record.items() if k != "split_manifest"}, indent=2))
 PY
@@ -89,7 +92,8 @@ m = src["media"]
 lines = ["OVO TRANSFER INVENTORY v2 (CPU only). Thresholds unchanged: >=150 backward q, >=30 backward videos, max share 10%",
          f"MC conversion (complete annotation) {src['conversion']} | vs §13 {src['conversion_vs_s13']}",
          f"MEDIA population videos {m['videos']}: available {m['available_in_root']}, extracted {len(m['extracted'])}, "
-         f"still missing {len(m['still_missing'])} {m['still_missing'][:20]} (archives scanned {m['archives_scanned']})",
+         f"still missing {len(m['still_missing'])} {m['still_missing'][:20]}, ambiguous {len(m['ambiguous'])} {list(m['ambiguous'])[:20]}, "
+         f"extracted but unreadable {len(m['extracted_but_unreadable'])} (archives scanned {m['archives_scanned']}, skipped {m['archives_skipped']})",
          "Backward tasks per scope (questions / videos), before eligibility:"]
 lines += [f"  {sc}: {json.dumps(fam(sc, ('EPM', 'ASI', 'HLD')))}" for sc in ("all", "diagnostic", "final")]
 for name, x in (("v1 (200 sampled videos; comparison only)", old), ("v2 (diagnostic hash half)", inv)):

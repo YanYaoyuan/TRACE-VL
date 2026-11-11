@@ -25,8 +25,10 @@ than the window".
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import random
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -41,8 +43,8 @@ POPULATIONS = {"sampled-200": "ovo-transfer-dev-v1", "diagnostic-half": "ovo-tra
 BACKWARD = ("EPM", "ASI", "HLD")
 REALTIME = ("STU", "OJR", "ATR", "ACR", "OCR", "FPD")
 ARMS = ("s1_fifo", "s2_fifo", "s1_full", "s2_full")
-# Coverage adequacy, fixed before GPU work: below any of these, the inventory is reported and the GPU stages stop
-# unless the owner accepts it explicitly (an underpowered run is not evidence that the gain does not transfer).
+# Coverage adequacy, fixed before GPU work: below any of these, the run stops after the inventory with a
+# task/count/availability report; there is no override (an underpowered run is not evidence against transfer).
 MIN_BACKWARD_QUESTIONS = 150
 MIN_BACKWARD_VIDEOS = 30
 MAX_VIDEO_SHARE = 0.10
@@ -71,33 +73,102 @@ def probe_duration(path: Path) -> float | None:
 
 
 ARCHIVE_SUFFIXES = (".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
+# Split archives as downloaded, e.g. src_videos.tar.partaa, .partab, ... or name.tar.gz.000, .001, ...
+_PART = re.compile(r"^(?P<base>.+)\.(?:part(?P<letters>[a-z]{2,})|(?P<digits>\d{3}))$")
 
 
-def _archive_members(path: Path) -> list[str]:
+class _Concatenated(io.RawIOBase):
+    """Read-only sequential view of several files back to back (the parts of a split archive)."""
+
+    def __init__(self, paths: list[Path]):
+        self.paths, self.index, self.handle = list(paths), 0, None
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer) -> int:
+        while self.index < len(self.paths):
+            if self.handle is None:
+                self.handle = open(self.paths[self.index], "rb")  # noqa: SIM115 - closed below
+            n = self.handle.readinto(buffer)
+            if n:
+                return n
+            self.handle.close()
+            self.handle, self.index = None, self.index + 1
+        return 0
+
+    def close(self):
+        if self.handle is not None:
+            self.handle.close()
+        super().close()
+
+
+def find_archives(search_roots: list[str | Path]) -> tuple[list[dict], list[dict]]:
+    """Downloaded archives under `search_roots`: single files and ordered multipart tar sets.
+    Returns (archives, skipped); a multipart set with a gap in its part sequence is skipped and reported."""
+    singles, groups = set(), defaultdict(list)
+    for root in search_roots:
+        root = Path(root)
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            m = _PART.match(path.name)
+            if m and m.group("base").lower().endswith(ARCHIVE_SUFFIXES):
+                groups[path.parent / m.group("base")].append((m.group("letters") or m.group("digits"), path))
+            elif path.name.lower().endswith(ARCHIVE_SUFFIXES):
+                singles.add(path)
+    archives = [{"name": str(p), "parts": [p]} for p in sorted(singles)]
+    skipped = []
+    for base, parts in sorted(groups.items()):
+        parts.sort()
+        keys = [k for k, _ in parts]
+        if keys[0].isdigit():
+            expected = [f"{i:0{len(keys[0])}d}" for i in range(int(keys[0]), int(keys[0]) + len(keys))]
+            complete = keys == expected and int(keys[0]) in (0, 1)
+        else:
+            def seq(k):  # aa -> 0, ab -> 1, ..., ba -> 26
+                v = 0
+                for ch in k:
+                    v = v * 26 + ord(ch) - 97
+                return v
+            complete = [seq(k) for k in keys] == list(range(len(keys))) and len({len(k) for k in keys}) == 1
+        entry = {"name": f"{base} ({len(parts)} parts {keys[0]}..{keys[-1]})", "parts": [p for _, p in parts]}
+        if str(base).lower().endswith(".zip"):
+            skipped.append({**entry, "reason": "split zip is not supported"})
+        elif not complete:
+            skipped.append({**entry, "reason": f"part sequence has gaps: {keys}"})
+        else:
+            archives.append(entry)
+    return archives, skipped
+
+
+def _members(archive: dict):
+    """Yield (member name, open-member callable) streaming through the archive once; parts are only read."""
     import tarfile
     import zipfile
 
-    if path.name.endswith(".zip"):
-        with zipfile.ZipFile(path) as z:
-            return [m for m in z.namelist() if not m.endswith("/")]
-    with tarfile.open(path) as t:
-        return [m.name for m in t.getmembers() if m.isfile()]
+    parts = archive["parts"]
+    if len(parts) == 1 and parts[0].name.lower().endswith(".zip"):
+        with zipfile.ZipFile(parts[0]) as z:
+            for name in z.namelist():
+                if not name.endswith("/"):
+                    yield name, (lambda name=name: z.open(name))
+        return
+    with _Concatenated(parts) as raw, io.BufferedReader(raw, 1 << 20) as buf, tarfile.open(fileobj=buf, mode="r|*") as t:
+        for member in t:
+            if member.isfile():
+                yield member.name, (lambda member=member: t.extractfile(member))
 
 
-def _extract_member(archive: Path, member: str, target: Path):
-    import shutil
-    import tarfile
-    import zipfile
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_name(target.name + ".part")
-    if archive.name.endswith(".zip"):
-        with zipfile.ZipFile(archive) as z, z.open(member) as src, open(tmp, "wb") as dst:
-            shutil.copyfileobj(src, dst, 1 << 20)
-    else:
-        with tarfile.open(archive) as t, t.extractfile(member) as src, open(tmp, "wb") as dst:
-            shutil.copyfileobj(src, dst, 1 << 20)
-    tmp.replace(target)
+def _path_match(member: str, video: str) -> str | None:
+    """'path' if the member ends with the video's relative path (whole components), 'name' if only the file name
+    matches, else None."""
+    m, v = member.lstrip("./"), video.lstrip("./")
+    if m == v or m.endswith("/" + v):
+        return "path"
+    return "name" if Path(m).name == Path(v).name else None
 
 
 def ensure_media(videos: list[str], video_root: str | Path, search_roots: list[str | Path], out_root: str | Path,
@@ -105,13 +176,19 @@ def ensure_media(videos: list[str], video_root: str | Path, search_roots: list[s
     """Media for the population as a symlink overlay `out_root/media/<video>` (the evaluation video root).
 
     A video readable under `video_root` is linked in place. Only a missing or unreadable video is looked up in the
-    archives already downloaded under `search_roots` (member path ending in the video's relative path, else the same
-    file name) and that single member is extracted into `out_root/media-extracted/`. Archives and the original
-    media are only read. Nothing is extracted when every video is available."""
+    archives already downloaded under `search_roots` (single .zip/.tar* files and ordered multipart tar sets such as
+    src_videos.tar.partaa, .partab, ...), streaming each archive once. A member whose path ends with the video's
+    relative path (whole components) wins; two such members in one archive are AMBIGUOUS. Only if no archive has a
+    path match is a same-file-name member used, and only if it is the single one across all archives; otherwise
+    AMBIGUOUS. Nothing is extracted for an ambiguous video; it is reported. Chosen members are extracted into
+    `out_root/media-extracted/`. Archives, their parts and the original media are only read. Nothing is opened
+    when every video is available."""
+    import shutil
+
     probe = probe or probe_duration
     out = Path(out_root)
     overlay, extracted_root = out / "media", out / "media-extracted"
-    available, missing, extracted = [], [], {}
+    available, missing, extracted, ambiguous, unreadable = [], [], {}, {}, {}
 
     def link(video: str, source: Path):
         dest = overlay / video
@@ -130,35 +207,66 @@ def ensure_media(videos: list[str], video_root: str | Path, search_roots: list[s
             extracted[v] = "previously extracted"
         else:
             missing.append(v)
-    archives = []
+    archives, skipped = ([], [])
+
+    def accept(v: str, staged: Path, source: str) -> bool:
+        target = extracted_root / v
+        target.parent.mkdir(parents=True, exist_ok=True)
+        staged.replace(target)
+        if probe(target) is None:
+            unreadable[v] = source
+            return False
+        link(v, target)
+        extracted[v] = source
+        unreadable.pop(v, None)
+        return True
+
     if missing:
-        for root in search_roots:
-            root = Path(root)
-            if root.is_dir():
-                archives += sorted(p for p in root.rglob("*") if p.is_file() and p.name.lower().endswith(ARCHIVE_SUFFIXES))
-        archives = sorted(set(archives))
+        archives, skipped = find_archives(search_roots)
         wanted = set(missing)
+        staging = extracted_root / ".staging"
+        shutil.rmtree(staging, ignore_errors=True)
+        staging.mkdir(parents=True)
+        by_name: dict = defaultdict(list)  # name-only candidates over ALL archives: used only if unique and no path match
+        counter = 0
         for archive in archives:
             if not wanted:
                 break
+            by_path: dict = defaultdict(list)
             try:
-                members = _archive_members(archive)
-            except Exception:  # noqa: BLE001 - an unreadable archive is reported, not fatal
+                for name, opener in _members(archive):
+                    for v in wanted:
+                        kind = _path_match(name, v)
+                        if kind is None:
+                            continue
+                        counter += 1
+                        target = staging / str(counter)
+                        with opener() as src_f, open(target, "wb") as dst:
+                            shutil.copyfileobj(src_f, dst, 1 << 20)
+                        (by_path[v] if kind == "path" else by_name[v]).append((f"{archive['name']}::{name}", target))
+            except Exception as error:  # noqa: BLE001 - a damaged archive is reported, not fatal
+                skipped.append({"name": archive["name"], "reason": f"unreadable: {error}"})
                 continue
-            for v in sorted(wanted):
-                hit = next((m for m in members if m.endswith(v)), None) or next(
-                    (m for m in members if Path(m).name == Path(v).name), None)
-                if hit is None:
-                    continue
-                _extract_member(archive, hit, extracted_root / v)
-                if probe(extracted_root / v) is not None:
-                    link(v, extracted_root / v)
-                    extracted[v] = f"{archive}::{hit}"
+            for v, candidates in by_path.items():
+                if len(candidates) > 1:
+                    ambiguous[v] = {"kind": "path", "candidates": [n for n, _ in candidates]}
+                    wanted.discard(v)  # never pick one of several silently
+                elif accept(v, candidates[0][1], candidates[0][0]):
                     wanted.discard(v)
+        for v in sorted(wanted):
+            candidates = by_name.get(v, [])
+            if len(candidates) > 1:
+                ambiguous[v] = {"kind": "file name only", "candidates": [n for n, _ in candidates]}
+                wanted.discard(v)
+            elif len(candidates) == 1 and accept(v, candidates[0][1], candidates[0][0] + " (file-name match)"):
+                wanted.discard(v)
+        shutil.rmtree(staging, ignore_errors=True)
         missing = sorted(wanted)
     return {"videos": len(videos), "available_in_root": len(available), "extracted": extracted,
-            "still_missing": missing, "archives_scanned": [str(a) for a in archives], "overlay": str(overlay),
-            "video_root": str(video_root)}  # fmt: skip
+            "ambiguous": ambiguous, "extracted_but_unreadable": unreadable, "still_missing": missing,
+            "archives_scanned": [a["name"] for a in archives], "archives_skipped": [
+                {"name": a["name"], "reason": a["reason"]} for a in skipped],
+            "overlay": str(overlay), "video_root": str(video_root)}  # fmt: skip
 
 
 def _quantiles(values: list[float]) -> dict:

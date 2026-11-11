@@ -283,3 +283,65 @@ def test_exclusions_are_reported_per_task(ovo):
     _, inv, _ = ovo
     assert inv["excluded_by_task"]["EPM"] == {"query_time_above_600s": 1}
     assert inv["excluded_by_task"]["STU"] == {"no_complete_step_before_query": 1}
+
+
+def _tar_bytes(members: dict, gz: bool = False) -> bytes:
+    import io as _io
+    import tarfile
+
+    buf = _io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz" if gz else "w") as t:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            t.addfile(info, _io.BytesIO(data))
+    return buf.getvalue()
+
+
+def _split(data: bytes, base, names):
+    size = len(data) // len(names) + 1
+    for i, name in enumerate(names):
+        (base.parent / f"{base.name}.{name}").write_bytes(data[i * size:(i + 1) * size])
+
+
+def test_multipart_tar_parts_are_streamed_in_order_and_left_untouched(tmp_path):
+    """The operator's download is src_videos.tar.partaa, .partab, ... (tester repro on cdbac0c: archives_scanned=[])."""
+    from trace_vl.v3.ovo_transfer import ensure_media, find_archives
+
+    downloads = tmp_path / "OVO_Bench"
+    downloads.mkdir()
+    data = _tar_bytes({"src_videos/a.mp4": b"VIDEO-a" + b"x" * 3000, "src_videos/b.mp4": b"VIDEO-b" + b"y" * 3000})
+    _split(data, downloads / "src_videos.tar", ["partaa", "partab", "partac"])
+    gz = _tar_bytes({"clips/src_videos/c.mp4": b"VIDEO-c"}, gz=True)
+    _split(gz, downloads / "more.tar.gz", ["000", "001"])
+    _split(data, downloads / "broken.tar", ["partaa", "partac"])  # gap: reported, not read
+    before = {p.name: p.read_bytes() for p in downloads.iterdir()}
+    archives, skipped = find_archives([downloads])
+    assert [len(a["parts"]) for a in archives] == [2, 3]
+    assert len(skipped) == 1 and "gaps" in skipped[0]["reason"]
+    r = ensure_media(["src_videos/a.mp4", "src_videos/b.mp4", "src_videos/c.mp4"], tmp_path / "videos", [downloads],
+                     tmp_path / "out", probe=_probe)  # fmt: skip
+    assert set(r["extracted"]) == {"src_videos/a.mp4", "src_videos/b.mp4", "src_videos/c.mp4"} and not r["still_missing"]
+    assert "src_videos.tar (3 parts aa..ac)::src_videos/a.mp4" in r["extracted"]["src_videos/a.mp4"]
+    assert (tmp_path / "out/media/src_videos/b.mp4").read_bytes() == b"VIDEO-b" + b"y" * 3000
+    assert len(r["archives_scanned"]) == 2 and r["archives_skipped"][0]["reason"].startswith("part sequence has gaps")
+    assert {p.name: p.read_bytes() for p in downloads.iterdir()} == before
+    assert not (tmp_path / "out/media-extracted/.staging").exists()
+
+
+def test_ambiguous_matches_are_reported_not_picked(tmp_path):
+    from trace_vl.v3.ovo_transfer import ensure_media
+
+    d = tmp_path / "dl"
+    d.mkdir()
+    (d / "a.tar").write_bytes(_tar_bytes({"x/a.mp4": b"VIDEO-1", "y/a.mp4": b"VIDEO-2",  # same file name twice
+                                          "p/src_videos/b.mp4": b"VIDEO-3", "q/src_videos/b.mp4": b"VIDEO-4",  # same path twice
+                                          "other/c.mp4": b"VIDEO-wrong"}))  # fmt: skip
+    (d / "b.tar").write_bytes(_tar_bytes({"src_videos/c.mp4": b"VIDEO-right"}))  # a path match beats a name match
+    r = ensure_media(["src_videos/a.mp4", "src_videos/b.mp4", "src_videos/c.mp4"], tmp_path / "v", [d], tmp_path / "out",
+                     probe=_probe)  # fmt: skip
+    assert r["ambiguous"]["src_videos/a.mp4"]["kind"] == "file name only"
+    assert r["ambiguous"]["src_videos/b.mp4"]["kind"] == "path" and len(r["ambiguous"]["src_videos/b.mp4"]["candidates"]) == 2
+    assert set(r["extracted"]) == {"src_videos/c.mp4"} and r["still_missing"] == []
+    assert (tmp_path / "out/media/src_videos/c.mp4").read_bytes() == b"VIDEO-right"
+    assert not (tmp_path / "out/media/src_videos/a.mp4").exists()
