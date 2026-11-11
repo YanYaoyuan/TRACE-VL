@@ -707,4 +707,86 @@ Population `ovo-transfer-dev-v2`: 688 questions on 260 streams; the primary back
 
 **Original implementation plan (superseded by the above):** a per-question fresh-session evaluator reusing the session and reader code; CPU tests for step selection (last W steps, short streams, no future frames), fresh-state isolation between questions with a fake backbone, coverage checks and the report; a small GPU flow check on 4 streams; one pinned launcher.
 
+**14.4a Recent-window result (operator run at `ebb9724`, six new arms, report `status: complete`, GPU flow check passed, 2026-11-11).**
+
+**Evidence status.** The FIFO rows were independently audited (§14.3c). The six new arms are transcribed by the tester from the operator's digest screenshots and checked against integer counts (305 / 383 / 688). Their raw predictions have **not yet been independently recomputed**.
+
+| Arm | Backward | Real-time | All |
+|---|---:|---:|---:|
+| S1 FIFO | 51.148 | 62.924 | 57.703 |
+| S2 FIFO | 46.230 | 58.747 | 53.198 |
+| S1 stream_window | 50.164 | 63.185 | 57.413 |
+| S2 stream_window | 44.590 | 59.530 | 52.907 |
+| S1 fresh16 | 48.525 | 59.008 | 54.360 |
+| S2 fresh16 | 43.607 | 55.091 | 50.000 |
+| S1 fresh4 | 46.557 | 64.491 | 56.541 |
+| S2 fresh4 | 41.311 | 62.141 | 52.907 |
+
+| Contrast (pp, video-cluster 95% CI) | Value |
+|---|---|
+| S2 − S1 backward, FIFO | −4.918 [−9.615, −0.346] |
+| S2 − S1 backward, stream_window | −5.574 [−10.140, −1.333] |
+| S2 − S1 backward, fresh16 | −4.918 [−8.571, −1.399] |
+| S2 − S1 backward, fresh4 | −5.246 [−9.434, −1.274] |
+| Interaction (S2 − S1)_FIFO − (S2 − S1)_fresh16, backward | 0.000 [−4.950, +4.651] |
+| FIFO − fresh16 backward, S1 / S2 | +2.623 [−1.294, +6.897] / +2.623 [−1.972, +7.463] |
+| FIFO − fresh16 all questions, S1 / S2 | +3.343 [+0.573, +6.219] / +3.198 [+0.301, +6.241] |
+| FIFO − stream_window backward, S1 / S2 | +0.984 [−2.632, +4.732] / +1.639 [−1.111, +4.561] |
+| fresh4 − fresh16 real-time, S1 / S2 | +5.483 [+1.449, +9.399] / +7.050 [+3.416, +10.667] |
+
+**Bounded readings:**
+- **The S2 deficit persists with fresh per-question state**, in every control. An explanation based only on persistent state or eviction is inadequate.
+  - This does not identify the responsible weights, establish forgetting, or prove equal effects: the interaction interval is wide.
+- **History is not shown to be useless.** FIFO beats fresh16 on all questions for both checkpoints. On backward questions the estimate is positive but uncertain.
+- **No demonstrated benefit of the 1,024 older KV tokens** over the recent window on this population (FIFO − stream_window backward CIs contain 0).
+- **A shorter window helps real-time questions** (fresh4 over fresh16). This is a task/context-length trade-off worth describing, not a selector contribution.
+- Position reset, first-step I scheduling, token counts and processing trajectory remain confounds between the controls.
+- No setting is promoted to a paper contribution after inspecting these development results. The reference stays S1 + B4 + FIFO. The final half stays frozen.
+
+### 14.5 Bounded conclusions across the series (2026-11-11)
+
+Scope for every line: this implementation and recipe, one seed, repeated use of development data.
+
+1. **Pilot-003** (100 updates, matched budget): transition/after 85.45 vs B4 88.11 (transition − B4 −2.66 pp). Before/delta showed no detectable gain over after-only.
+2. **Pilot-004** (fresh 1,000-update recipe): transition 87.91, after 89.14, B4 89.96. Longer training raised absolute accuracy but did not establish architectural superiority. The schedule also changed, so this is not a continuation of pilot-003.
+3. **Pilot-005** (grid gist, retrained matched control): transition 88.12, after 88.73, B4 90.37. Repairing the gist did not rescue the transition claim.
+4. **Temporal diagnostic:** transition and B4 tied on temporal questions (47.30), and transition was 8.75 pp worse on static. The positive interaction came from static damage. Stopping the transition track was appropriate.
+5. **Memory pilot:** the first full run was invalid (2.14% budget spread against a 2% bound). Exact fill removed the confound. Learned age/surprise retention tied FIFO (−0.175 pp on delayed questions), with high overlap with FIFO and strong score/recency correlation. It was not a semantic content-aware scorer.
+6. **Stage 2:** +4.904 pp [2.456, 7.304] on stitched-stream development questions under FIFO, but −4.918 pp on the external OVO development check. This supports recipe-specific adaptation, not a transferable memory contribution. Domain mismatch and forgetting remain hypotheses.
+7. **Fresh-state controls:** the OVO regression survives without carried state.
+
+**Consequence:** no more spending on longer training of the unchanged Stage-2 recipe, or on eviction-only changes, as the proposed cure.
+
+### 14.6 Smallest next experiment (PROPOSAL; nothing implemented or run; no training)
+
+**Question.** Is the S2 − S1 regression on OVO associated with the LM adaptation (LoRA), with the visual/adapter modules, or only with their combination?
+
+**Step A: CPU-only checkpoint difference (minutes, no GPU, no evaluation).** Compare the frozen S1 and S2 checkpoints.
+- **Modules:** per top-level module group, report the number of tensors, how many differ, relative L2 change ‖S2 − S1‖ / ‖S1‖ and max absolute change. The alert head was frozen in Stage 2 and must be bit-identical; the report confirms it.
+- **LoRA:** per layer and per target matrix, report the change in the effective update ΔW = B·A (relative Frobenius norm), plus identical rank, alpha and target sets.
+- **Compatibility gate for step B:** identical module architecture and config, identical LoRA configuration, and both components actually changed. If one component is unchanged, the swap is degenerate. Step A alone then answers the question and step B is not run.
+
+**Step B: evaluation-only 2×2 component swap** on the frozen 688-question manifest, run only if step A's gate passes.
+
+| | S1 modules | S2 modules |
+|---|---|---|
+| **S1 LoRA** | S1 (existing) | new: `l1m2` |
+| **S2 LoRA** | new: `l2m1` | S2 (existing) |
+
+- **Conditions:** `fifo` (the declared primary endpoint) and `fresh16` (cheap, and the deficit persists there). That is four new evaluations; the four diagonal arms are reused, not rerun.
+- **Checks:** the same coverage, causal-window, equal-KV and exact-grid checks as §14.4. `inputs.json` records which LoRA and which modules file each arm loaded, by hash.
+- **Predeclared statistics** (video-cluster bootstrap, 4,000 draws, seed 7; backward pooled primary, with real-time and all reported):
+  - LoRA main effect: ½[(l2m1 − S1) + (S2 − l1m2)];
+  - modules main effect: ½[(l1m2 − S1) + (S2 − l2m1)];
+  - LoRA × modules interaction: (S2 − l2m1) − (l1m2 − S1).
+
+  Each is one statistic on the same bootstrap samples.
+- **Reading, fixed beforehand:**
+  - A main effect whose CI excludes 0 says the regression is associated with that component.
+  - An interaction whose CI excludes 0 says the components are co-adapted. In that case the main effects are not separately interpretable.
+  - If no CI excludes 0, the result is "not localized at this sample size".
+- **Scope:** mixed components can break co-adaptation, so this is a diagnostic, not a causal attribution. It changes no decision and promotes no setting.
+
+**Not proposed now:** any training. Before a future training run, one hypothesis and one validation gate must be written down. Examples are matched-compute short-clip continuation vs streaming training, or retention of short-clip ability during Stage-2 adaptation. Only one change at a time.
+
 **Later (sketch, not proposed for running):** a training-free redundancy-aware selector is a cheap baseline against B4 + FIFO at exact equal budget. Its failure would reject only that selector. It would not rule out learned content-aware or task-relevance memory mechanisms in general.

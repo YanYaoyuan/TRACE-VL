@@ -61,3 +61,12 @@ Progress against this plan is posted on issue #4 at each milestone.
 - **Confirmed** by the tester's independent raw-file audit (issue #4, 2026-11-11): all 39 paired statistics reproduce, and KV matches per question between S1 and S2.
 - Scope: this rejects the age/surprise scorer and this Stage-2 recipe, not content-aware memory or long-stream training in general.
 - Next diagnostic (specified, not run): the recent-window control, experiments.md §14.4.
+
+## Status update 2026-11-11 (evening): recent-window control (experiments.md §14.4a–§14.6)
+
+- The Stage-2 regression on OVO **persists with fresh per-question state** (fresh16: −4.92 pp [−8.57, −1.40] on backward; interaction with FIFO 0.00 [−4.95, +4.65]). Carried state or eviction alone does not explain it. The new arms are screenshot-based until the raw files are recomputed.
+- **No paper contribution is established yet.** The transition track is closed. Learned age/surprise retention ties FIFO. Stage-2 training does not transfer.
+- **Reference system:** S1 + B4 + FIFO. No setting is promoted after inspecting development results. The OVO final half stays frozen.
+- **Alerting** is an unvalidated, product-relevant direction. A credible study needs timestamped events, false alarms per camera-hour, event recall and detection delay at matched compute. An alert head with clip accuracy is not enough.
+- **Next (proposed, evaluation only):** a CPU checkpoint difference, then a 2×2 LoRA × modules swap (§14.6). Any later training needs one hypothesis and one validation gate written down first.
+- **Schedule risk:** the paper-plan milestones assumed a memory or Stage-2 contribution by now. The plan needs a new central claim before the milestone dates mean anything.
