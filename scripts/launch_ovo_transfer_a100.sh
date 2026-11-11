@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # OVO-Bench Stage-2 transfer check (experiments.md §14.3). EVALUATION ONLY: frozen checkpoints, no training.
-# Code e90d586 (exact snapshot) in a NEW output directory; the temporal-diagnostic, memory-pilot, evalrepair and
+# Code 774be51 (exact snapshot) in a NEW output directory; the temporal-diagnostic, memory-pilot, evalrepair and
 # pilot-005 runs are only read. Run the stages in order, each after the previous one has been reviewed:
 #   TRACE_STAGE=inventory bash launch_ovo_transfer_a100.sh   (CPU only, a few minutes; no GPU needed)
 #   TRACE_STAGE=flow      bash launch_ovo_transfer_a100.sh   (4 GPUs; S1/S2 FIFO on 4 streams; time estimate)
@@ -13,7 +13,7 @@ export TRACE_PILOT_RUN="${TRACE_PILOT_RUN:-/nas-data/vlm/yyy/tracevl-runs/memory
 export TRACE_S1_CKPT="${TRACE_S1_CKPT:-/nas-data/vlm/yyy/tracevl-runs/pilot005-6a46fb5-001/train/b4}"
 export TRACE_EVALREPAIR_RUN="${TRACE_EVALREPAIR_RUN:-/nas-data/vlm/yyy/tracevl-runs/memory-evalrepair-af2f961-001}"
 export TRACE_MODEL="${TRACE_MODEL:-/nas-data/vlm/models/qwen3.5_2b}"
-export TRACE_OUT="${TRACE_OUT:-/nas-data/vlm/yyy/tracevl-runs/ovo-transfer-e90d586-001}"
+export TRACE_OUT="${TRACE_OUT:-/nas-data/vlm/yyy/tracevl-runs/ovo-transfer-774be51-001}"
 export TRACE_ACCEPT_INVENTORY="${TRACE_ACCEPT_INVENTORY:-0}"  # 1 only after the owner accepts an inadequate inventory
 export TRACE_MIN_FREE_GB="${TRACE_MIN_FREE_GB:-30}"
 export TRACE_GPUS=4 CUDA_VISIBLE_DEVICES=0,1,2,3
@@ -21,7 +21,7 @@ export TRACE_UV_BIN="${TRACE_UV_BIN:-uv}"
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$TRACE_REPO/.venv}"
 export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TRACE_WANDB=0
-rev=e90d586d2098f5014e1214c289dd1378b3e78651
+rev=774be51d58663f6b2f6a04b9cdd0ed1af5ad5d5c
 mkdir -p "$TRACE_OUT"
 exec 8>"$TRACE_OUT/.launcher.lock"
 flock -n 8 || { echo 'This launcher is already running.' >&2; exit 2; }
@@ -62,7 +62,7 @@ if os.environ['TRACE_STAGE'] != 'inventory':
         if free / 1e9 < float(os.environ['TRACE_MIN_FREE_GB']):
             low.append(f'GPU {i}: {free / 1e9:.1f} GB free of {total / 1e9:.1f}')
     assert not low, 'Free GPU memory below TRACE_MIN_FREE_GB; stop other jobs first: ' + '; '.join(low)
-print('Code e90d586 (evaluation only); stage', os.environ['TRACE_STAGE'])
+print('Code 774be51 (evaluation only); stage', os.environ['TRACE_STAGE'])
 PY
 
 "$TRACE_UV_BIN" run --locked --no-sync python -c 'import pytest' 2>/dev/null \
@@ -72,7 +72,7 @@ CUDA_VISIBLE_DEVICES= "$TRACE_UV_BIN" run --locked --no-sync python -m pytest -q
 
 bash scripts/run_ovo_transfer.sh
 case "$TRACE_STAGE" in
-  inventory) echo "Submit from $TRACE_OUT: inventory-digest.txt, transfer/inventory.json, source.json and the launcher log." ;;
+  inventory) echo "Submit from $TRACE_OUT: inventory-digest.txt, half-counts.json, transfer/inventory.json, transfer-v1-comparison/inventory.json, source.json and the launcher log." ;;
   flow) echo "Submit from $TRACE_OUT: flow.json, inputs.json, flow/*/predictions.jsonl and the launcher log." ;;
   full) echo "Submit from $TRACE_OUT: transfer-digest.txt, transfer-report.json, inputs.json, eval/*/predictions.jsonl, transfer/inventory.json and the launcher log." ;;
 esac
