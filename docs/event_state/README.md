@@ -77,7 +77,7 @@ nohup setsid env TRACE_DATA_WORKERS=32 TRACE_ARCHIVE_WORKERS=8 bash /tmp/launch_
 tail -f event-state.log
 ```
 
-默认 run 根目录为 `/nas-data/vlm/yyy/tracevl-runs/event-state-fd11ff0-001`。数据、模型和排重 benchmark 根目录见上述说明；必要时用 `TRACE_JOY`、`TRACE_MEDIA`、`TRACE_EXTRA_MEDIA`、`TRACE_MODEL` 指向已有文件。没有 4B 模型时下载配置中固定 revision，下载失败后可重跑，已完成文件复用；已有 2B checkpoint 不能冒充 4B。
+默认 run 根目录为 `/nas-data/vlm/yyy/tracevl-runs/event-state-948ca88-001`。数据、模型和排重 benchmark 根目录见上述说明；必要时用 `TRACE_JOY`、`TRACE_MEDIA`、`TRACE_EXTRA_MEDIA`、`TRACE_MODEL` 指向已有文件。没有 4B 模型时下载配置中固定 revision，下载失败后可重跑，已完成文件复用；已有 2B checkpoint 不能冒充 4B。
 
 `TRACE_PARALLEL_ARMS=1` 串行，默认 4 卡并行队列。`progress.json` 与 `logs/*.log` 查看阶段和各组进度。`launcher.log` 保存在实验目录。正常结束打印 `VERIFIED` 和 `REPORT BUNDLE`，提交 `reports.tar.gz` 即可检查数据审计、配置、训练曲线、校准、开发集结果和失败案例。
 
