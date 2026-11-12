@@ -8,7 +8,77 @@
 - No new data downloads (data on the A100 host only).
 - Holidays are budgeted as about one week of reduced throughput in late December.
 
-## Milestones and gates
+## Current plan (rewritten 2026-11-12; supersedes the milestone table below)
+
+**Direction (owner, 2026-11-11).** No negative-results paper. The goal is a new, validated method for real-time video understanding on property cameras, in particular proactive alerts. The earlier experiments (experiments.md §14.5) stay as internal evidence and later ablations.
+
+**What is established and what is not.**
+- No positive contribution is established yet.
+- Closed for this recipe: transition tokens; learned age/surprise retention (ties FIFO); the Stage-2 recipe (does not transfer to OVO, and the deficit persists with fresh per-question state).
+- Reference systems: S1 + B4 + FIFO for the earlier track. The new track uses the original Qwen3.5-4B, frozen. The matched original-Qwen vs S1 control (`f9b9a8d`) has no reported result yet.
+
+**Why alerts, and how narrow the opening is** (design_review_2026-11.md).
+- MOSS-VL already trains "standing instruction, fire once when the condition is met" at 11B with public weights. JoyAI and Mage-VL train per-second speak/silent decisions.
+- What the papers read so far do not report: false triggers per hour on long, mostly-normal footage, and detection delay at a fixed false-trigger rate. MOSS-VL loses on the anomaly-detection subset it reports.
+- Our angle is a small model (2B–4B) on fixed cameras with long quiet stretches, judged by deployment metrics. It is not a general proactive model.
+
+### Experiment sequence
+
+| Step | What | Status | Decides |
+|---|---|---|---|
+| **P0** | Response-timing pilot: frozen Qwen3.5-4B, five gate heads (clock, frame, GRU, temporal, event-state), JoyAI response timestamps (`docs/event_state/README.md`) | Implemented by the tester; A100 report pending | Whether any head uses vision beyond a clock; which head P1 uses |
+| **P1 step 1** | 100-sample annotation feasibility check on UCA: rewrite sentences into observable rules, prefix-verify `evidence_ready`, 30 double-annotated (`docs/event_state/causal_label_protocol.md` §10a) | **Tools implemented (`8475bd7`), CPU only; local test and host paths pending** | Whether evidence times can be labelled reliably, how far they are from the raw UCA times and in which direction, and the cost per item |
+| **P1 step 2** | Smoke run: arms A / B / T, one seed, flow checks only | Not started | Nothing about accuracy; only that the pipeline is causal and counts correctly |
+| **P1 step 3** | Main run: A raw times, B evidence times, C no full negative streams, T time-only; same samples, head, features and BCE loss; 3 seeds | Not started; runs only after steps 1–2 and the P0 report | Whether evidence-time labels improve response timing and beat the time-only baseline |
+| Later | Focal vs BCE loss; a second head on the key A/B contrast; sequence-level delay/false-alarm objective (design review H-C); more data | Only if P1 shows a stable gain | — |
+
+### Decisions already fixed for P1
+
+- **One question:** with backbone, features, head and budget fixed, does replacing raw action times with verified evidence times improve response timing?
+- **Target:** the model predicts an evidence state for a rule (READY / NOT_READY). First alert, de-duplication and release are one shared external policy for every arm.
+- **UNKNOWN** is an annotation and evaluation mask in this round, not an output class.
+- **Labels:** `event_start`, `evidence_ready` (confirmed on a clip that ends at the candidate time), `valid_end` (blank when unclear; none for historical-fact rules), uncertain intervals, evidence note, negative type.
+- **Samples:** A and B use the identical sample set. Anything B drops after verification is dropped from A too, and reported.
+- **Annotation effort:** 100 stratified items first. Calibration and test boundaries are human prefix-verified; training candidates are model-proposed and human-audited, and are not called verified labels if quality is insufficient.
+- **Rules:** UCA rewrites are the main line; a few hand-written state rules are a separate trial, reported separately.
+- **Negatives:** verified per rule (never / not yet / near miss). Normal video is not assumed negative. 30% negative trajectories is a fixed starting value.
+- **Splits:** by source video, 70 / 15 / 15 (train / calibration / internal test). The official UCF-Crime test list is locked and reported separately at the end.
+- **Thresholds:** chosen on calibration only, at ≤ 1 false trigger per rule-stream-hour.
+- **Metrics:** event recall within 1 / 3 / 5 / 10 s of `evidence_ready`, early-trigger rate, false triggers per rule-stream-hour, delay (median, p95), miss rate, duplicate rate, PR-AUC on valid frames, UNKNOWN share. Un-debounced score metrics are reported next to the policy metrics.
+- **Outcomes:** stable gain → re-check with a second head, then consider more data. No gain with narrow intervals → pause and examine labels, frozen features and the task. Wide intervals → "not enough samples", not "does not work".
+
+### Immediate actions
+
+| Who | Action |
+|---|---|
+| Owner / tester | Run `uv run pytest -q tests/test_event_state_annotation.py` locally |
+| Owner / operator | Give the host paths of the UCA JSON files, the official `Anomaly_Test.txt` and the raw UCF-Crime videos |
+| Annotators | P1 step 1: rewrite rules, prefix-verify, fill the sheets; deliver the rule list, verification records and `feasibility-report.json` |
+| Operator | Finish the P0 A100 run and send its report bundle |
+| Assistant | After the step-1 report and the P0 report: lock the P1 protocol, then implement the data adapter, label modes, shared alert policy, metrics, probes and a pinned launcher |
+
+### Not allowed without a new decision
+
+- New backbone training, Stage-2 scaling, or the 2×2 component-swap evaluations.
+- Evaluating the OVO final half, or using OVO, StreamingBench or the official UCF-Crime test list for training or threshold selection.
+- Promoting a setting to a paper claim after looking at development results.
+
+### Schedule
+
+The ICCV 2027 target and the 2027-02-12 internal freeze are unchanged as dates, but **the milestone table below no longer describes the work**. New milestone dates are set after P1 step 1, when the annotation cost per item is known. Before that, any date would be a guess.
+
+### Risks specific to this plan
+
+| Risk | Consequence | Mitigation |
+|---|---|---|
+| Evidence times are close to the raw UCA times | The A/B contrast carries little information | Step 1 reports size and direction first; priority then moves to negatives and `valid_end` |
+| UCA sentences are long and interpretive | Many items are excluded or need heavy rewriting | Exclusion share and reasons are reported; cost per item is measured in step 1 |
+| Annotation cost | Training labels cannot all be human-verified | Model-proposed labels with an audited error rate; small human-verified training set first |
+| Only a few hours of normal footage, one dataset | False-trigger rates below about 0.25 per hour cannot be measured; no cross-dataset claim | State the limit in every report; cross-dataset check only after a positive P1 |
+| MOSS-VL and JoyAI already cover proactive alerting as a task | Novelty must come from the small-model, deployment-metric setting | Include MOSS-VL-Realtime as a reference row; do not claim the task |
+| Frozen 4B features may not carry the signal | Every arm is weak | P0 and the time-only arm show this early |
+
+## Milestones and gates (superseded on 2026-11-12; kept for the record)
 
 | # | Dates (2026–27) | Work | Gate / output |
 |---|---|---|---|
