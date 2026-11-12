@@ -35,6 +35,14 @@
 
 UCA/CUVA、CCTV-Anomaly、finevideo 暂不直接混进该损失：它们的标签语义需要独立适配。OVO、StreamingBench、Video-MME 在此只作训练排重，不运行它们的评测，也不加入训练。后续官方评测仍用原有独立启动器。
 
+## CPU 准备吞吐与进度
+
+逐帧核验使用有上限的多进程池，每个视频的解码器只用一个线程，逐帧处理而不将整段视频装入内存。默认取 CPU 配额、可用内存与 16 的较小值；资源充足的 A100 主机可设 `TRACE_DATA_WORKERS=32`。这只控制数据核验并发，不改变样本选择、划分、模型或训练参数。内存占用低本身不代表瓶颈。
+
+目录扫描先筛选文件后缀，减少 NAS 元数据查询；归档匹配按文件名索引候选，不再为每个归档成员遍历全部待找视频。tar/分卷的流式读取仍按顺序进行，NAS 吞吐可能限制提速，增加进程并不保证线性加速。
+
+准备阶段每 10 秒输出 `DATA PROGRESS`，包含当前阶段、文件/归档或已核验视频数，并写入 `data/preparation-progress.json`。阶段区分 benchmark 库存、媒体索引、原片解析、归档处理和全视频核验。每个已完成视频立即保存核验记录；同版本中断后重跑仍核对内容 SHA256，再跳过已完成的逐帧解码。更换代码版本使用新的数据目录，旧记录保留。
+
 ## 训练与资源
 
 单种子 7；每组最多 5 次数据遍历 / 2000 更新，先到为止。每个独立实验 microbatch=16（不累积梯度），AdamW lr=2e-4、wd=.01、梯度裁剪 1、5% warmup + cosine。选择最后 checkpoint，不挑开发集最高点。原模型权重另约 9.3 GB；特征缓存约 1.18 GB/视频小时（2560 维、64 token/s、bf16），额外解压空间由实际原片决定。
@@ -49,7 +57,7 @@ UCA/CUVA、CCTV-Anomaly、finevideo 暂不直接混进该损失：它们的标�
 
 新状态模块另有 `zero_video` 和 `shuffled_query` 两项诊断。必须结合 clock 基线、数据等待时间分布判断是否只是计时捷径；不允许看到高命中率就自动扩大训练。
 
-主要输出：`data/data-audit.json`、`data/manifest.jsonl`、`protocol.json`、`model-identity.json`、`features/profile-*.json`、`train/*/metrics.jsonl`、`eval/*/predictions.jsonl`、`report.json`、`REPORT.md`、`training-curves.svg`、`reports.tar.gz`。汇总包不含权重、视频和特征缓存。
+主要输出：`data/preparation-progress.json`、`data/data-audit.json`、`data/manifest.jsonl`、`protocol.json`、`model-identity.json`、`features/profile-*.json`、`train/*/metrics.jsonl`、`eval/*/predictions.jsonl`、`report.json`、`REPORT.md`、`training-curves.svg`、`reports.tar.gz`。汇总包不含权重、视频和特征缓存。
 
 入口：`scripts/launch_event_state_a100.sh`。本地验证记录见 `validation.md`。尚无这套新模块的 A100 精度结果。
 

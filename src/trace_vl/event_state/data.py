@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import re
 import shutil
 import zipfile
@@ -92,16 +93,22 @@ def collect_ids(obj):
     return found
 
 
-def benchmark_inventory(roots, required=True):
+def benchmark_inventory(roots, required=True, progress=None):
     blocked, report = set(), []
     for root in map(Path, roots):
+        if progress:
+            progress.update('benchmark-inventory', root=str(root))
         ids, files, errors, archives = set(), [], [], []
         if not root.is_dir():
             errors.append('directory missing')
         else:
-            for p in sorted(root.rglob('*')):
+            for p in sorted(Path(base)/name for base, _, names in os.walk(root) for name in names):
+                if p.suffix.lower() not in VIDEO_EXT | {'.zip', '.json', '.jsonl', '.csv', '.parquet'}:
+                    continue
                 if not p.is_file():
                     continue
+                if progress:
+                    progress.update(current_file=str(p), ids=len(ids), annotations=len(files), archives=len(archives))
                 if p.suffix.lower() in VIDEO_EXT:
                     ids.add(video_id(p.name))
                 elif p.suffix.lower() == '.zip':
@@ -157,13 +164,19 @@ def benchmark_inventory(roots, required=True):
     return blocked, report
 
 
-def media_index(roots):
+def media_index(roots, progress=None):
     index = defaultdict(set)
+    scanned = 0
     for root in map(Path, roots):
         if not root.is_dir():
             continue
-        for p in root.rglob('*'):
-            if p.is_file() and p.suffix.lower() in VIDEO_EXT:
+        if progress:
+            progress.update('media-file-index', root=str(root))
+        for p in (Path(base)/name for base, _, names in os.walk(root) for name in names):
+            scanned += 1
+            if progress and scanned % 1000 == 0:
+                progress.update(entries=scanned, video_names=len(index))
+            if p.suffix.lower() in VIDEO_EXT and p.is_file():
                 index[p.name].add(str(p.resolve()))
     return index
 
@@ -171,7 +184,10 @@ def media_index(roots):
 def verify_video(path):
     """Decode every frame once; record sha plus count/metadata discrepancy. No silent short clip."""
     import cv2
-    cap = cv2.VideoCapture(str(path))
+    if hasattr(cv2, 'CAP_PROP_N_THREADS'):
+        cap = cv2.VideoCapture(str(path), cv2.CAP_FFMPEG, [cv2.CAP_PROP_N_THREADS, 1])
+    else:
+        cap = cv2.VideoCapture(str(path))
     try:
         expected, fps = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), cap.get(cv2.CAP_PROP_FPS)
         if not cap.isOpened() or not math.isfinite(fps) or fps <= 0:
@@ -194,13 +210,23 @@ def verify_video(path):
 
 
 def prepare(annotation, media_roots, out, cfg, code):
+    from .preparation import Progress, worker_count
+    workers = worker_count()
+    with Progress(out, workers) as progress:
+        return _prepare(annotation, media_roots, out, cfg, code, workers, progress)
+
+
+def _prepare(annotation, media_roots, out, cfg, code, workers, progress):
     from trace_vl.v3.ovo_transfer import ensure_media
+
+    from .preparation import verify_many
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    blocked, bench = benchmark_inventory(cfg['benchmark_roots'], cfg['require_benchmark_inventory'])
+    blocked, bench = benchmark_inventory(cfg['benchmark_roots'], cfg['require_benchmark_inventory'], progress)
     identity = {'annotation': sha(annotation), 'settings': cfg, 'code': code,
                 'benchmark_inventory': bench, 'media_roots': list(map(str, media_roots))}
     bind(out/'identity.json', identity)
+    progress.update('annotation-conversion', annotation=str(annotation))
     rows, rejected = joy_records(read_json(annotation), cfg)
     by_video = defaultdict(list)
     for r in rows:
@@ -209,12 +235,14 @@ def prepare(annotation, media_roots, out, cfg, code):
         else:
             by_video[r['video_name']].append(r)
     # Fixed hash order. Selection is made before model execution; no accuracy-based refill.
-    index = media_index(media_roots)
+    index = media_index(media_roots, progress)
     names = sorted(by_video, key=lambda s: (s not in index, digest([cfg['seed'], s])))[:cfg['max_videos']]
     originals = out/'original-links'
     originals.mkdir(exist_ok=True)
     duplicates = {}
+    progress.update('resolve-originals', selected=len(names))
     for name in names:
+        progress.update(current_video=name)
         paths = sorted(index.get(name, []))
         if len(paths) > 1:
             hashes = {sha(p) for p in paths}
@@ -229,31 +257,25 @@ def prepare(annotation, media_roots, out, cfg, code):
     allowed = [n for n in names if n not in duplicates]
     if shutil.disk_usage(out).free < cfg['reserve_gb']*1e9:
         raise ValueError('Insufficient free space before extraction')
-    media = ensure_media(allowed, str(originals), list(map(str, media_roots)), str(out))
-    kept, errors, verified = [], {}, {}
+    progress.update('media-probe-and-extraction', selected=len(allowed))
+    media = ensure_media(allowed, str(originals), list(map(str, media_roots)), str(out),
+                         progress=lambda **values: progress.update(**values))
+    kept = []
     previous = read_json(out/'data-audit.json').get('verified', {}) if (out/'data-audit.json').is_file() else {}
+    verified, errors = verify_many(allowed, out, previous, workers, progress)
+    progress.update('assemble-manifest', verified=len(verified), decode_errors=len(errors))
+    # Worker completion order must not change the source selection or manifest order.
     for name in allowed:
-        p = out/'media'/name
-        if not p.is_file():
+        if name not in verified:
             continue
-        try:
-            old = previous.get(name, {})
-            stat = p.stat()
-            if (old.get('size'), old.get('mtime_ns')) == (stat.st_size, stat.st_mtime_ns):
-                # Full content hash still checked on resume; skip repeated video decoding only.
-                v = old if old.get('sha256') == sha(p) else verify_video(p)
-            else:
-                v = verify_video(p)
-            verified[name] = v
-            for r in sorted(by_video[name], key=lambda x: x['id'])[:cfg['max_conditions_per_video']]:
-                if r['ticks'][-1] > v['last_frame_s']:
-                    rejected['response_or_followup_outside_media'] = rejected.get(
-                        'response_or_followup_outside_media', 0)+1
-                    continue
-                kept.append({**r, 'media_path': str(p.resolve()), 'media_sha256': v['sha256'],
-                             'fps': v['fps'], 'annotation_sha256': identity['annotation']})
-        except Exception as e:
-            errors[name] = str(e)
+        p, v = out/'media'/name, verified[name]
+        for r in sorted(by_video[name], key=lambda x: x['id'])[:cfg['max_conditions_per_video']]:
+            if r['ticks'][-1] > v['last_frame_s']:
+                rejected['response_or_followup_outside_media'] = rejected.get(
+                    'response_or_followup_outside_media', 0)+1
+                continue
+            kept.append({**r, 'media_path': str(p.resolve()), 'media_sha256': v['sha256'],
+                         'fps': v['fps'], 'annotation_sha256': identity['annotation']})
     # A normalized source ID must not map to two different underlying videos.
     source_hashes = defaultdict(set)
     for r in kept:

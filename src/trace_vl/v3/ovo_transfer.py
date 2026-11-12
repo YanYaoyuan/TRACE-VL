@@ -106,12 +106,18 @@ class _Concatenated(io.RawIOBase):
 def find_archives(search_roots: list[str | Path]) -> tuple[list[dict], list[dict]]:
     """Downloaded archives under `search_roots`: single files and ordered multipart tar sets.
     Returns (archives, skipped); a multipart set with a gap in its part sequence is skipped and reported."""
+    import os
+
     singles, groups, seen = set(), defaultdict(list), set()
     for root in search_roots:
         root = Path(root)
         if not root.is_dir():
             continue
-        for path in root.rglob("*"):
+        for path in (Path(base)/name for base, _, names in os.walk(root) for name in names):
+            candidate = _PART.match(path.name)
+            if not (path.name.lower().endswith(ARCHIVE_SUFFIXES) or
+                    (candidate and candidate.group("base").lower().endswith(ARCHIVE_SUFFIXES))):
+                continue
             if not path.is_file():
                 continue
             path = path.resolve()  # overlapping roots (parent + child, symlinks) must not list a file twice
@@ -176,7 +182,7 @@ def _path_match(member: str, video: str) -> str | None:
 
 
 def ensure_media(videos: list[str], video_root: str | Path, search_roots: list[str | Path], out_root: str | Path,
-                 probe=None) -> dict:  # fmt: skip
+                 probe=None, progress=None) -> dict:  # fmt: skip
     """Media for the population as a symlink overlay `out_root/media/<video>` (the evaluation video root).
 
     A video readable under `video_root` is linked in place. Only a missing or unreadable video is looked up in the
@@ -201,7 +207,9 @@ def ensure_media(videos: list[str], video_root: str | Path, search_roots: list[s
             dest.unlink()
         dest.symlink_to(source.resolve())
 
-    for v in videos:
+    for i, v in enumerate(videos):
+        if progress:
+            progress(current_video=v, probed=i, total=len(videos), missing=len(missing))
         src = Path(video_root) / v
         if src.is_file() and probe(src) is not None:
             link(v, src)
@@ -228,18 +236,28 @@ def ensure_media(videos: list[str], video_root: str | Path, search_roots: list[s
     if missing:
         archives, skipped = find_archives(search_roots)
         wanted = set(missing)
+        wanted_by_name = defaultdict(list)
+        for v in missing:
+            wanted_by_name[Path(v).name].append(v)
         staging = extracted_root / ".staging"
         shutil.rmtree(staging, ignore_errors=True)
         staging.mkdir(parents=True)
         by_name: dict = defaultdict(list)  # name-only candidates over ALL archives: used only if unique and no path match
         counter = 0
-        for archive in archives:
+        for archive_index, archive in enumerate(archives):
+            if progress:
+                progress(archive=archive['name'], archive_index=archive_index+1,
+                         archives_total=len(archives), missing=len(wanted), members_scanned=0)
             if not wanted:
                 break
             by_path: dict = defaultdict(list)
             try:
-                for name, opener in _members(archive):
-                    for v in wanted:
+                for member_index, (name, opener) in enumerate(_members(archive)):
+                    if progress and member_index % 1000 == 0:
+                        progress(members_scanned=member_index, current_member=name)
+                    for v in wanted_by_name.get(Path(name).name, ()):
+                        if v not in wanted:
+                            continue
                         kind = _path_match(name, v)
                         if kind is None:
                             continue

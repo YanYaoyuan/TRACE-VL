@@ -307,3 +307,50 @@ def test_question_only_csv_and_empty_zip_not_mistaken_for_complete_inventory(tmp
         z.writestr('README.txt', b'no media')
     with pytest.raises(ValueError, match='0 IDs'):
         benchmark_inventory([str(tmp_path)], True)
+
+
+def test_parallel_decode_same_results_and_per_video_resume(tmp_path):
+    from trace_vl.event_state.preparation import Progress, verify_many
+    names = ['a.avi', 'b.avi', 'broken.avi']
+    make_video(tmp_path/'media'/'a.avi')
+    make_video(tmp_path/'media'/'b.avi')
+    (tmp_path/'media'/'broken.avi').write_bytes(b'broken video')
+    with Progress(tmp_path, 1) as progress:
+        serial, errors = verify_many(names, tmp_path, {}, 1, progress)
+    assert set(errors) == {'broken.avi'}
+    receipts = list((tmp_path/'verification').glob('*.json'))
+    assert len(receipts) == 2
+    for p in receipts:
+        p.unlink()
+    with Progress(tmp_path, 2) as progress:
+        parallel, errors2 = verify_many(names, tmp_path, {}, 2, progress)
+    assert parallel == serial and set(errors2) == set(errors)
+    with Progress(tmp_path, 2) as progress:
+        again, _ = verify_many(names[:2], tmp_path, {}, 2, progress)
+        assert progress.state['cached'] == 2
+    assert again == serial
+    assert read_json(tmp_path/'preparation-progress.json')['status'] == 'complete'
+
+
+def test_archive_matching_ignores_unrelated_basenames(tmp_path, monkeypatch):
+    import io
+
+    from trace_vl.v3 import ovo_transfer as module
+    archive = tmp_path/'videos.tar'
+    with tarfile.open(archive, 'w') as tar:
+        for name in [f'unrelated_{i}.mp4' for i in range(100)] + ['x/a.mp4', 'x/b.mp4']:
+            info = tarfile.TarInfo(name)
+            info.size = 1
+            tar.addfile(info, io.BytesIO(b'x'))
+    calls = []
+    original = module._path_match
+
+    def counted(member, video):
+        calls.append((member, video))
+        return original(member, video)
+
+    monkeypatch.setattr(module, '_path_match', counted)
+    result = module.ensure_media(['a.mp4', 'b.mp4'], tmp_path/'originals', [tmp_path], tmp_path/'out',
+                                 probe=lambda p: 1 if p.is_file() else None)
+    assert not result['still_missing']
+    assert len(calls) == 2
