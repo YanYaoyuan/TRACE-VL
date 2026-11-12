@@ -178,8 +178,11 @@ def all_stages(args, cfg):
             if (p.is_file() and p.suffix in {'.json', '.jsonl', '.md', '.svg', '.log', '.txt'}
                     and 'source' not in p.relative_to(out).parts):
                 tar.add(p, arcname=str(p.relative_to(out)), recursive=False)
-        for n in ('manifest.jsonl', 'data-audit.json', 'identity.json', 'preparation-progress.json', 'reused-preparation.json'):
+        for n in ('manifest.jsonl', 'data-audit.json', 'identity.json', 'preparation-progress.json',
+                  'selection.json', 'archive-inventory.json'):
             tar.add(data/n, arcname='data/'+n)
+        if (data/'reused-preparation.json').is_file():
+            tar.add(data/'reused-preparation.json', arcname='data/reused-preparation.json')
     bundle.with_suffix('.tmp').replace(bundle)
     print(f'REPORT BUNDLE: {bundle}', flush=True)
 

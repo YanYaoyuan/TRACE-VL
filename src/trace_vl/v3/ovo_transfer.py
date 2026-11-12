@@ -185,7 +185,7 @@ def _path_match(member: str, video: str) -> str | None:
 
 
 def ensure_media(videos: list[str], video_root: str | Path, search_roots: list[str | Path], out_root: str | Path,
-                 probe=None, progress=None, archive_workers=1) -> dict:  # fmt: skip
+                 probe=None, progress=None, archive_workers=1, archive_catalog=None) -> dict:  # fmt: skip
     """Media for the population as a symlink overlay `out_root/media/<video>` (the evaluation video root).
 
     A video readable under `video_root` is linked in place. Only a missing or unreadable video is looked up in the
@@ -237,7 +237,10 @@ def ensure_media(videos: list[str], video_root: str | Path, search_roots: list[s
         return True
 
     if missing:
-        archives, skipped = find_archives(search_roots)
+        # Optional complete inventory filtered to ALL archives containing the
+        # requested names. The event-state caller resolves ambiguity globally
+        # before using this fast path. Other callers retain the original search.
+        archives, skipped = find_archives(search_roots) if archive_catalog is None else (archive_catalog, [])
         wanted = set(missing)
         from contextlib import closing
 

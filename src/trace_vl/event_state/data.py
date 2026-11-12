@@ -219,6 +219,7 @@ def prepare(annotation, media_roots, out, cfg, code):
 def _prepare(annotation, media_roots, out, cfg, code, workers, progress):
     from trace_vl.v3.ovo_transfer import ensure_media
 
+    from .media_inventory import choose_available, default_cache, inventory_archives, signature
     from .preparation import reuse_extracted, verify_many
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -234,9 +235,34 @@ def _prepare(annotation, media_roots, out, cfg, code, workers, progress):
             rejected['benchmark_overlap'] = rejected.get('benchmark_overlap', 0)+1
         else:
             by_video[r['video_name']].append(r)
-    # Fixed hash order. Selection is made before model execution; no accuracy-based refill.
+    # JoyAI references multiple datasets: first intersect with actual downloaded
+    # originals/archive members, THEN select by the existing seed and hash.
     index = media_index(media_roots, progress)
-    names = sorted(by_video, key=lambda s: (s not in index, digest([cfg['seed'], s])))[:cfg['max_videos']]
+    archive_workers = int(os.environ.get('TRACE_ARCHIVE_WORKERS', min(workers, 8)))
+    if not 1 <= archive_workers <= 32:
+        raise ValueError('TRACE_ARCHIVE_WORKERS must be between 1 and 32')
+    catalog, members, inventory = [], {}, {'archives': [], 'errors': [], 'skipped': [], 'cache_hits': 0}
+    if any(not index.get(name) for name in by_video):
+        catalog, members, inventory = inventory_archives(media_roots, default_cache(out), archive_workers, progress)
+    write_json(out/'archive-inventory.json', inventory)
+    if inventory['errors'] or inventory['skipped']:
+        raise ValueError('Archive inventory incomplete; inspect archive-inventory.json. No GPU work started.')
+    names, selection = choose_available(by_video, index, members, cfg)
+    selection['source_video_counts'] = {
+        group: dict(Counter(source for name in group_names for source in {r['source'] for r in by_video[name]}))
+        for group, group_names in [('eligible', by_video), ('selected', names),
+                                   ('unavailable', selection['unavailable_names'])]}
+    # Persist population before decode. Changes to media availability require a
+    # new run, rather than silently replacing its training or validation examples.
+    bind(out/'selection.json', selection)
+    selected_archives = {m['archive'] for n in names for m in members.get(n, [])}
+    catalog = [a for a in catalog if a['name'] in selected_archives]
+    selected_signatures = {a['name']: signature(a) for a in catalog}
+    expected_signatures = {a['name']: a['parts'] for a in inventory['archives']}
+    if any(s != expected_signatures[n] for n, s in selected_signatures.items()):
+        raise ValueError('Archives changed after inventory. No GPU work started.')
+    print('DATA SELECTION', {k: selection[k] for k in ('eligible_videos', 'available_videos', 'selected_videos')},
+          'selected archives:', len(catalog), flush=True)
     originals = out/'original-links'
     originals.mkdir(exist_ok=True)
     duplicates = {}
@@ -257,14 +283,14 @@ def _prepare(annotation, media_roots, out, cfg, code, workers, progress):
     allowed = [n for n in names if n not in duplicates]
     if shutil.disk_usage(out).free < cfg['reserve_gb']*1e9:
         raise ValueError('Insufficient free space before extraction')
-    archive_workers = int(os.environ.get('TRACE_ARCHIVE_WORKERS', min(workers, 8)))
-    if not 1 <= archive_workers <= 32:
-        raise ValueError('TRACE_ARCHIVE_WORKERS must be between 1 and 32')
     progress.update('reuse-extracted-media', selected=len(allowed))
     reuse_extracted(out, identity, allowed)
     progress.update('media-probe-and-extraction', selected=len(allowed), archive_workers=archive_workers)
     media = ensure_media(allowed, str(originals), list(map(str, media_roots)), str(out),
-                         progress=lambda **values: progress.update(**values), archive_workers=archive_workers)
+                         progress=lambda **values: progress.update(**values), archive_workers=archive_workers,
+                         archive_catalog=catalog)
+    if any(signature(a) != selected_signatures[a['name']] for a in catalog):
+        raise ValueError('Selected archives changed during preparation. No GPU work started.')
     kept = []
     previous = read_json(out/'data-audit.json').get('verified', {}) if (out/'data-audit.json').is_file() else {}
     verified, errors = verify_many(allowed, out, previous, workers, progress)
@@ -303,7 +329,9 @@ def _prepare(annotation, media_roots, out, cfg, code, workers, progress):
     waits = Counter(round(r['response_s']-r['query_s'], 1) for r in kept)
     report = {'counts': counts, 'rejected': rejected, 'media': media, 'ambiguous_originals': duplicates,
               'decode_errors': errors, 'verified': verified, 'cross_split_duplicate_hashes': sorted(conflicting), 'ambiguous_source_ids': sorted(ambiguous_ids),
-              'source_counts': dict(Counter(r['source'] for r in kept)), 'wait_seconds_histogram': dict(waits), 'selection': 'existing originals first, then fixed hash order',
+              'source_counts': dict(Counter(r['source'] for r in kept)), 'wait_seconds_histogram': dict(waits),
+              'selection': selection['rule'], 'selection_report': 'selection.json',
+              'archive_inventory_report': 'archive-inventory.json',
               'largest_wait_bin_fraction': max(waits.values(), default=0)/max(1, len(kept)), 'benchmark_inventory': bench,
               'overlap_check_scope': 'metadata IDs and exact content within selected data; not perceptual dedup',
               'problems': problems, 'ready': not problems}
