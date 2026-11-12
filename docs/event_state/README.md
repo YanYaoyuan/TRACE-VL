@@ -52,3 +52,21 @@ UCA/CUVA、CCTV-Anomaly、finevideo 暂不直接混进该损失：它们的标�
 主要输出：`data/data-audit.json`、`data/manifest.jsonl`、`protocol.json`、`model-identity.json`、`features/profile-*.json`、`train/*/metrics.jsonl`、`eval/*/predictions.jsonl`、`report.json`、`REPORT.md`、`training-curves.svg`、`reports.tar.gz`。汇总包不含权重、视频和特征缓存。
 
 入口：`scripts/launch_event_state_a100.sh`。本地验证记录见 `validation.md`。尚无这套新模块的 A100 精度结果。
+
+## A100 一次启动
+
+在 `/data/yyy/TRACE-VL` 获取 PR #3 的分支，从该分支提取启动器到 `/tmp`。启动器内部固定代码提交，并从 Git 对象生成独立 source 快照；不要求切换或清理当前工作目录。
+
+```bash
+cd /data/yyy/TRACE-VL
+git fetch origin design/v3-transition-streaming
+git show origin/design/v3-transition-streaming:scripts/launch_event_state_a100.sh > /tmp/launch_event_state_a100.sh
+nohup setsid bash /tmp/launch_event_state_a100.sh </dev/null > event-state.log 2>&1 &
+tail -f event-state.log
+```
+
+默认 run 根目录为 `/nas-data/vlm/yyy/tracevl-runs/event-state-cb6eb83-001`。数据、模型和排重 benchmark 根目录见上述说明；必要时用 `TRACE_JOY`、`TRACE_MEDIA`、`TRACE_EXTRA_MEDIA`、`TRACE_MODEL` 指向已有文件。没有 4B 模型时下载配置中固定 revision，下载失败后可重跑，已完成文件复用；已有 2B checkpoint 不能冒充 4B。
+
+`TRACE_PARALLEL_ARMS=1` 串行，默认 4 卡并行队列。`progress.json` 与 `logs/*.log` 查看阶段和各组进度。`launcher.log` 保存在实验目录。正常结束打印 `VERIFIED` 和 `REPORT BUNDLE`，提交 `reports.tar.gz` 即可检查数据审计、配置、训练曲线、校准、开发集结果和失败案例。
+
+再次运行同一条启动命令会核验身份后恢复，已有完成记录会验证后跳过。不要一边运行一边修改其脚本/source/config；另一个配置使用新的 `TRACE_OUT`。
