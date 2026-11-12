@@ -6,14 +6,15 @@ export TRACE_REPO="${TRACE_REPO:-/data/yyy/TRACE-VL}"
 export TRACE_UV_BIN="${TRACE_UV_BIN:-uv}"
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$TRACE_REPO/.venv}"
 # Pinned tested code; local development can set TRACE_REV=working.
-rev="${TRACE_REV:-bce1a843134d649afa595aa8ffe3f7578952513e}"
+rev="${TRACE_REV:-fd11ff0001bb6ca9a55bbdbdc9cb4f871a92c106}"
 export TRACE_OUT="${TRACE_OUT:-/nas-data/vlm/yyy/tracevl-runs/event-state-${rev:0:7}-001}"
 export TRACE_DATA="${TRACE_DATA:-/nas-data/vlm/yyy/tracevl-data/event-state-v1}"
 export TRACE_MODEL="${TRACE_MODEL:-/nas-data/vlm/models/qwen3.5_4b}"
 export TRACE_JOY="${TRACE_JOY:-/nas-data/vlm/data/JoyAI-VL-Interaction/event_grounding/event_grounding.json}"
 export TRACE_MEDIA="${TRACE_MEDIA:-/nas-data/vlm/llava}"
 export TRACE_DEVICES="${TRACE_DEVICES:-0,1,2,3}"
-# Optional TRACE_DATA_WORKERS controls full-decode CPU workers (e.g. 32 on the A100 host).
+# CPU controls: TRACE_DATA_WORKERS=32 for full decode, TRACE_ARCHIVE_WORKERS=8 for archive reads.
+# Optional TRACE_REUSE_PREPARATION points to a stopped previous run/data; inputs are verified before reuse.
 export TRACE_PARALLEL_ARMS="${TRACE_PARALLEL_ARMS:-4}"
 export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
 export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
@@ -46,7 +47,7 @@ fi
 export PYTHONPATH="$source_dir/src"
 cd "$source_dir"
 "$TRACE_UV_BIN" run --locked --no-sync python -c 'import torch, transformers, cv2, pytest, pyarrow; print("Environment imports OK")'
-"$TRACE_UV_BIN" run --locked --no-sync python -m pytest -q tests/test_event_state.py
+env -u TRACE_REUSE_PREPARATION "$TRACE_UV_BIN" run --locked --no-sync python -m pytest -q tests/test_event_state.py
 [[ -f "$TRACE_JOY" ]] || { echo "Missing official JoyAI annotation: $TRACE_JOY. Set TRACE_JOY to its existing path." >&2; exit 2; }
 config="${TRACE_CONFIG:-$source_dir/configs/event_state/pilot.json}"
 args=(--config "$config" --out "$TRACE_OUT" --code "$code" --model "$TRACE_MODEL"
