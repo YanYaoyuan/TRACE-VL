@@ -1,0 +1,267 @@
+"""JoyAI response-time adapter, selected extraction, immutable media audit.
+
+Annotation response times are NOT earliest-knowable event times. Only a single
+request / single response record is supported in this initial pilot. Original
+archives and benchmark media are never modified.
+"""
+from __future__ import annotations
+
+import csv
+import math
+import re
+import shutil
+from collections import Counter, defaultdict
+from pathlib import Path
+
+from .common import bind, digest, read_json, sha, write_json, write_rows
+
+VIDEO_EXT = {'.mp4', '.avi', '.mkv', '.webm', '.mov'}
+
+
+def video_id(value):
+    value = str(value).replace('\\', '/').split('?')[0].rstrip('/')
+    name = Path(value).name
+    if Path(name).suffix.lower() in VIDEO_EXT:
+        name = Path(name).stem
+    return name[2:] if name.startswith('v_') else name
+
+
+def split_for(key, seed):
+    n = int(digest([seed, key])[:8], 16) / 2**32
+    return 'train' if n < .75 else 'calibration' if n < .85 else 'dev'
+
+
+def joy_records(raw, cfg):
+    rows, rejected = [], Counter()
+    seen = set()
+    for record in raw:
+        try:
+            if record.get('task_type') != 'event_grounding':
+                rejected['other_task'] += 1
+                continue
+            questions, responses = record['question'], record['response']
+            if len(questions) != 1 or len(responses) != 1:
+                rejected['multiple_turns'] += 1
+                continue
+            name = record['video_name']
+            if Path(name).name != name or Path(name).suffix.lower() not in VIDEO_EXT:
+                raise ValueError('unsafe or unsupported video name')
+            start, target = float(questions[0]['time']), float(responses[0]['time'])
+            text = questions[0]['content'].strip()
+            if not text or not all(map(math.isfinite, [start, target])) or start < 0 or target <= start:
+                raise ValueError('invalid times or question')
+            if target-start > cfg['max_wait'] or target+3 > cfg['max_duration']:
+                rejected['outside_pilot_horizon'] += 1
+                continue
+            # Whole integer seconds; both t-.5 and t frames must be available.
+            ticks = list(range(max(1, math.ceil(start+.5)), math.ceil(target)+4))
+            if not ticks or sum(t < target for t in ticks) < 1:
+                rejected['no_wait_supervision'] += 1
+                continue
+            key = video_id(name)
+            row = {'id': digest([name, start, target, text])[:24], 'video_name': name,
+                   'source_video_id': key, 'source': record.get('source', 'unspecified'),
+                   'split': split_for(key, cfg['seed']), 'condition': text, 'query_s': start,
+                   'response_s': target, 'ticks': ticks, 'label_type': 'annotated_response_readiness',
+                   'semantics': 'wait before annotated response; ready for at most three seconds after; '
+                                'not physical event onset/end or exhaustively labelled surveillance'}
+            if row['id'] in seen:
+                rejected['duplicate_condition'] += 1
+                continue
+            seen.add(row['id'])
+            rows.append(row)
+        except (KeyError, TypeError, ValueError, IndexError):
+            rejected['malformed'] += 1
+    return rows, dict(rejected)
+
+
+def collect_ids(obj):
+    found = set()
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(value, (str, int)) and (key.lower() in {
+                'video', 'video_name', 'video_id', 'video_path', 'youtube_id', 'youtube_url',
+                'url', 'videoid', 'vid', 'original_video_id'}):
+                m = re.search(r'(?:v=|youtu.be/)([A-Za-z0-9_-]{11})', str(value))
+                found.add(m.group(1) if m else video_id(value))
+            found.update(collect_ids(value))
+    elif isinstance(obj, list):
+        for v in obj:
+            found.update(collect_ids(v))
+    return found
+
+
+def benchmark_inventory(roots, required=True):
+    blocked, report = set(), []
+    for root in map(Path, roots):
+        ids, files, errors = set(), [], []
+        if not root.is_dir():
+            errors.append('directory missing')
+        else:
+            for p in sorted(root.rglob('*')):
+                if not p.is_file():
+                    continue
+                if p.suffix.lower() in VIDEO_EXT:
+                    ids.add(video_id(p.name))
+                elif p.suffix.lower() in {'.json', '.jsonl', '.csv', '.parquet'}:
+                    try:
+                        if p.suffix == '.parquet':
+                            import pyarrow.parquet as pq
+                            table = pq.ParquetFile(p)
+                            cols = [n for n in table.schema.names if n.lower() in {
+                                'video', 'video_name', 'video_id', 'video_path', 'youtube_id',
+                                'youtube_url', 'url', 'videoid', 'vid'}]
+                            # Never load video bytes into RAM.
+                            for batch in table.iter_batches(columns=cols, batch_size=1024):
+                                ids.update(collect_ids(batch.to_pylist()))
+                        elif p.suffix == '.csv':
+                            with open(p) as f:
+                                ids.update(collect_ids(list(csv.DictReader(f))))
+                        elif p.suffix == '.jsonl':
+                            import json
+                            with open(p) as f:
+                                for line in f:
+                                    if line.strip():
+                                        ids.update(collect_ids(json.loads(line)))
+                        else:
+                            ids.update(collect_ids(read_json(p)))
+                        files.append({'path': str(p), 'sha256': sha(p)})
+                    except Exception as e:
+                        errors.append(f'{p}: {e}')
+        report.append({'root': str(root), 'ids': len(ids), 'files': files, 'errors': errors})
+        blocked.update(ids)
+        if required and (not files or not ids or errors):
+            raise ValueError(f'Benchmark exclusion inventory incomplete for {root}: {errors[:3]}, '
+                             f'{len(files)} annotations, {len(ids)} IDs. No training started.')
+    return blocked, report
+
+
+def media_index(roots):
+    index = defaultdict(set)
+    for root in map(Path, roots):
+        if not root.is_dir():
+            continue
+        for p in root.rglob('*'):
+            if p.is_file() and p.suffix.lower() in VIDEO_EXT:
+                index[p.name].add(str(p.resolve()))
+    return index
+
+
+def verify_video(path):
+    """Decode every frame once; record sha plus count/metadata discrepancy. No silent short clip."""
+    import cv2
+    cap = cv2.VideoCapture(str(path))
+    try:
+        expected, fps = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), cap.get(cv2.CAP_PROP_FPS)
+        if not cap.isOpened() or not math.isfinite(fps) or fps <= 0:
+            raise ValueError('unreadable metadata')
+        count = 0
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            if frame is None or frame.size == 0:
+                raise ValueError('empty decoded frame')
+            count += 1
+        if count < 2 or (expected > 0 and count < expected-1):
+            raise ValueError(f'truncated decode: {count} / {expected}')
+        return {'sha256': sha(path), 'frames': count, 'fps': fps,
+                'last_frame_s': (count-1)/fps, 'verification': 'full_decode_and_content_sha256',
+                'size': Path(path).stat().st_size, 'mtime_ns': Path(path).stat().st_mtime_ns}
+    finally:
+        cap.release()
+
+
+def prepare(annotation, media_roots, out, cfg, code):
+    from trace_vl.v3.ovo_transfer import ensure_media
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    blocked, bench = benchmark_inventory(cfg['benchmark_roots'], cfg['require_benchmark_inventory'])
+    identity = {'annotation': sha(annotation), 'settings': cfg, 'code': code,
+                'benchmark_inventory': bench, 'media_roots': list(map(str, media_roots))}
+    bind(out/'identity.json', identity)
+    rows, rejected = joy_records(read_json(annotation), cfg)
+    by_video = defaultdict(list)
+    for r in rows:
+        if r['source_video_id'] in blocked:
+            rejected['benchmark_overlap'] = rejected.get('benchmark_overlap', 0)+1
+        else:
+            by_video[r['video_name']].append(r)
+    # Fixed hash order. Selection is made before model execution; no accuracy-based refill.
+    index = media_index(media_roots)
+    names = sorted(by_video, key=lambda s: (s not in index, digest([cfg['seed'], s])))[:cfg['max_videos']]
+    originals = out/'original-links'
+    originals.mkdir(exist_ok=True)
+    duplicates = {}
+    for name in names:
+        paths = sorted(index.get(name, []))
+        if len(paths) > 1:
+            hashes = {sha(p) for p in paths}
+            if len(hashes) > 1:
+                duplicates[name] = paths
+                continue
+        if paths:
+            dest = originals/name
+            if dest.is_symlink():
+                dest.unlink()
+            dest.symlink_to(paths[0])
+    allowed = [n for n in names if n not in duplicates]
+    if shutil.disk_usage(out).free < cfg['reserve_gb']*1e9:
+        raise ValueError('Insufficient free space before extraction')
+    media = ensure_media(allowed, str(originals), list(map(str, media_roots)), str(out))
+    kept, errors, verified = [], {}, {}
+    previous = read_json(out/'data-audit.json').get('verified', {}) if (out/'data-audit.json').is_file() else {}
+    for name in allowed:
+        p = out/'media'/name
+        if not p.is_file():
+            continue
+        try:
+            old = previous.get(name, {})
+            stat = p.stat()
+            if (old.get('size'), old.get('mtime_ns')) == (stat.st_size, stat.st_mtime_ns):
+                # Full content hash still checked on resume; skip repeated video decoding only.
+                v = old if old.get('sha256') == sha(p) else verify_video(p)
+            else:
+                v = verify_video(p)
+            verified[name] = v
+            for r in sorted(by_video[name], key=lambda x: x['id'])[:cfg['max_conditions_per_video']]:
+                if r['ticks'][-1] > v['last_frame_s']:
+                    rejected['response_or_followup_outside_media'] = rejected.get(
+                        'response_or_followup_outside_media', 0)+1
+                    continue
+                kept.append({**r, 'media_path': str(p.resolve()), 'media_sha256': v['sha256'],
+                             'fps': v['fps'], 'annotation_sha256': identity['annotation']})
+        except Exception as e:
+            errors[name] = str(e)
+    # A normalized source ID must not map to two different underlying videos.
+    source_hashes = defaultdict(set)
+    for r in kept:
+        source_hashes[r['source_video_id']].add(r['media_sha256'])
+    ambiguous_ids = {k for k, v in source_hashes.items() if len(v) > 1}
+    kept = [r for r in kept if r['source_video_id'] not in ambiguous_ids]
+    # Content duplicates cannot be split across train / calibration / dev.
+    content_splits = defaultdict(set)
+    for r in kept:
+        content_splits[r['media_sha256']].add(r['split'])
+    conflicting = {k for k, v in content_splits.items() if len(v) > 1}
+    kept = [r for r in kept if r['media_sha256'] not in conflicting]
+    counts = {s: {'videos': len({r['source_video_id'] for r in kept if r['split'] == s}),
+                  'conditions': sum(r['split'] == s for r in kept)} for s in cfg['min_videos']}
+    problems = []
+    for s, c in counts.items():
+        for kind, limits in [('videos', cfg['min_videos']), ('conditions', cfg['min_conditions'])]:
+            if c[kind] < limits[s]:
+                problems.append(f'{s} {kind}: {c[kind]} < {limits[s]}')
+    waits = Counter(round(r['response_s']-r['query_s'], 1) for r in kept)
+    report = {'counts': counts, 'rejected': rejected, 'media': media, 'ambiguous_originals': duplicates,
+              'decode_errors': errors, 'verified': verified, 'cross_split_duplicate_hashes': sorted(conflicting), 'ambiguous_source_ids': sorted(ambiguous_ids),
+              'source_counts': dict(Counter(r['source'] for r in kept)), 'wait_seconds_histogram': dict(waits), 'selection': 'existing originals first, then fixed hash order',
+              'largest_wait_bin_fraction': max(waits.values(), default=0)/max(1, len(kept)), 'benchmark_inventory': bench,
+              'overlap_check_scope': 'metadata IDs and exact content within selected data; not perceptual dedup',
+              'problems': problems, 'ready': not problems}
+    write_rows(out/'manifest.jsonl', kept)
+    write_json(out/'data-audit.json', report)
+    print('DATA AUDIT', counts, 'problems:', problems, flush=True)
+    if problems:
+        raise ValueError('Data gate failed; inspect data-audit.json. No GPU work started.')
+    return kept
