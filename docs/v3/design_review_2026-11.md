@@ -185,3 +185,49 @@ The pilot (`docs/event_state/README.md`) freezes the original Qwen3.5-4B and tra
 H-A (rule-conditioned evidence state) overlaps the pilot's event-state arm: both keep a query-conditioned recurrent state. The pilot is the better test of it, because it has a parameter-matched temporal Transformer control. H-A adds nothing new until that result is in. H-B's CPU check on the existing 688-question predictions is independent of all of this.
 
 Also unknown to me: the result of the matched original-Qwen vs S1 B4/FIFO control (`f9b9a8d`). If original Qwen3.5 matches or beats S1 + B4 + FIFO on the OVO population, then "S1 + B4 + FIFO is the reference" in this review should read "original Qwen3.5 is the reference", and the pilot's choice of backbone is already consistent with that.
+
+## 8. Addendum 2026-11-12: MOSS-VL (full text read, [arXiv 2608.15045](https://arxiv.org/abs/2608.15045); code and weights Apache-2.0)
+
+Added at the owner's request. This is the clearest experimental template among the papers read, and it changes two points above.
+
+**What it is.**
+- **Size:** 11.3B parameters (8.2B Qwen3-8B language backbone, 2.3B gated cross-attention stack, 0.8B vision encoder).
+- **Architecture:** visual tokens never enter the decoded sequence. Twelve zero-initialized gated cross-attention layers read an append-only visual KV cache, and each frame is preceded by an absolute timestamp in text.
+- **Response decision:** ordinary next-token prediction. `<|silence|>` means keep watching and `<|response|>` means speak; there is no separate head.
+- **Training:** four pre-training stages (about 1.26 trillion tokens), SFT (102.8B tokens), then **Realtime-SFT** (0.56M samples, 34.8B tokens, under 3% of the total). No RL.
+- **Loss:** next-token cross-entropy, with the two state tokens reweighted by a focal factor (γ = 2) and inverse-frequency class coefficients computed over the global batch. The assistant's turn-final end token is masked. That masking alone raised emission frequency by 39% in their controlled comparison.
+
+**Realtime-SFT data.**
+- 2.2M supervised emission decisions; 58.7% are self-timed.
+- In 5.1% of samples the target event never occurs and the correct behaviour is silence throughout.
+- Roles include **standing instructions that must fire exactly once when their condition is met**, and resident questions whose answers update.
+- Labels come from densely time-anchored captions mined for state transitions. Each reply is assigned the moment its evidence becomes visible and the moment it stops being valid, verified frame by frame.
+
+**Results** (their evaluation; baselines from official reports).
+
+| Benchmark | MOSS-VL-Realtime | Best baseline |
+|---|---|---|
+| OVO-Bench average | 70.2 | AURA 65.3 |
+| OVO-Bench forward active responding | 62.1 | 55.8 |
+| OVO-Bench backward tracing | 72.6 | 60.4 |
+| OVO-Bench real-time perception | 75.9 | AURA 79.8 |
+| OmniMMI Proactive Alerting | 66.0 | 37.5 |
+| StreamingBench Proactive Output | 60.0 | 53.2 |
+| ProactiveVideoQA average | 47.2 | 42.7 |
+| ProactiveVideoQA video anomaly detection | 35.3 | MMDuet+rm 42.5 |
+
+Latency is measured, not estimated: SGLang on one H200, same Qwen3-8B backbone as the Qwen3-VL-8B comparison, five cold starts per point.
+
+**Why its experiments read clearly.**
+1. A capability ladder (L1 offline → L5 perceive while generating) states exactly what is claimed and what is only shown by demo.
+2. Results are reported per subset, and the paper says where it loses (real-time perception, contextual QA, anomaly detection).
+3. The efficiency comparison holds the language backbone fixed, so it isolates one design choice.
+4. One table gives tokens, samples and trainable parts per stage.
+5. Limitations are stated: no L5 benchmark exists; no thinking mode.
+
+**What changes in this review.**
+- **§2 finding 5 narrows.** "Standing instruction, fire once when the condition is met" is already a trained behaviour with public weights and a strong Proactive Alerting score. Rule-conditioned proactive alerting as a *task* is not open. What is still not reported is false alarms per camera-hour and delay on long, mostly-normal footage, and MOSS-VL is weakest on the anomaly-detection subset (35.3).
+- **H-A weakens further.** MOSS-VL's standing instructions and resident questions cover "evidence accumulates for a standing rule" with a full model, not a head.
+- **H-C needs MOSS-VL as a baseline.** Its focal + inverse-frequency token loss is the strongest per-step objective published, so it replaces plain class-balanced BCE as the loss to beat. MOSS-VL-Realtime itself (Apache-2.0, 11B) should be a reference row in any alert experiment, with its size stated.
+- **Label recipe to borrow.** Its two timestamps per reply (evidence becomes visible; reply stops being valid) are the onset/offset labels the P0 pilot lacks. Its 5.1% "event never occurs" samples are the negative streams.
+- **Our remaining angle is narrow.** It is small-model, fixed-camera, long-quiet-stream alerting under deployment metrics, at a size (2B–4B) where an 11B model with 1.3 trillion training tokens cannot be run per camera. It is not a general proactive model.
