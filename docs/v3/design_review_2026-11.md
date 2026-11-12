@@ -2,6 +2,8 @@
 
 Requested on issue #4 (owner direction, 2026-11-11). This is a design proposal backed by reading, not a promise that the method works. No training or GPU evaluation is launched by this document. **S1 + B4 + FIFO stays the reference system.** The failed experiments (experiments.md §14.5) stay as internal evidence and later ablations.
 
+> **Read §7 first.** This review was drafted before I had seen the P0 response-timing pilot (`src/trace_vl/event_state/`, commits `cb6eb83`–`58d6d81`) that was pushed to this branch on 2026-11-12. §1–§6 are unchanged from that draft and assume the frozen S1 + B4 2B backbone. §7 reconciles the recommendation with the pilot.
+
 ## 0. How each source was checked
 
 | Level | Meaning |
@@ -159,3 +161,27 @@ Nothing here retrains the backbone. A later backbone-training step would need it
 - **StreamingEval** (ACL Findings 2026) and the JoyAI paper's last 40k characters (appendix, hardware for the latency claim) were not read.
 - **Online action detection** and **early event detection** literature was not surveyed; it is where learned stopping rules with delay objectives are most likely to exist already.
 - **CCTV-Anomaly annotations:** whether they carry timestamps is unchecked.
+
+## 7. Relation to the P0 response-timing pilot already on this branch
+
+The pilot (`docs/event_state/README.md`) freezes the original Qwen3.5-4B and trains five response-timing heads on shared causal features: clock-only, frame, GRU, causal temporal Transformer and a recurrent event-state head. Supervision is WAIT before a JoyAI response timestamp and READY for up to 3 s after it. I had not seen it when writing §3–§5. The comparison:
+
+| Aspect | P0 pilot (on the branch) | H-C in this review | Consequence |
+|---|---|---|---|
+| **Backbone** | Original Qwen3.5-4B, frozen | S1 + B4 2B, frozen | H-C does not depend on the backbone. It should use the pilot's backbone and cached features, not a second extraction. |
+| **What is varied** | The head **architecture** (five arms), one loss | The **training objective** (sequence-level delay / false-alarm loss vs per-step loss), one architecture | The two are complementary. H-C is one extra arm per architecture on the same cache. |
+| **Loss** | Class-balanced per-step BCE (`timing_loss`) | Soft expected delay + false-alarm term on an accumulated statistic | The pilot's loss is baseline B1 of §3 H-C. |
+| **Labels** | JoyAI single-request response times. Not event onset or end; no exhaustive normal periods | Event intervals plus normal video (UCA, UCF-Crime) | The pilot states it cannot report false alarms per camera-hour. H-C's data supplies exactly the labels that are missing, and needs the "separate adaptation" the README mentions. |
+| **Shortcut control** | Clock-only arm; zero-video and shuffled-query probes | Not in my draft | **Adopt for H-C.** Anomaly datasets have position priors too (events at typical offsets), so a clock-only arm and the two probes belong in every alert experiment. |
+| **Threshold selection** | Calibration split only (≤ 5% early responses) | "Development only" | Adopt the pilot's train / calibration / dev split and choose thresholds on calibration only. |
+| **Metric** | On-time rate within 3 s, early rate, miss rate, matched delay | Event recall at a fixed false-alarm rate per camera-hour, delay | Different quantities; both are needed. The pilot's "early response" rate is per request, not per camera-hour. |
+
+**Revised recommendation.** Do not open a second track. Wait for the pilot's A100 report, then:
+
+1. **If the pilot shows the heads use vision** (they beat clock-only, and the zero-video and shuffled-query probes drop): add **one arm that changes only the loss** to the best architecture, on the same cached features, with the same split and threshold rule. Success is judged on the pilot's own metrics first: a lower miss rate at the same ≤ 5% early rate, with a source-video bootstrap CI excluding 0. That is a few GPU-hours and needs no new data.
+2. **Only if that helps**, build the event-interval data adapter (UCA / UCF-Crime with normal footage) and run §3 H-C's deployment-metric experiment on it.
+3. **If the pilot's heads do not beat clock-only**, the frozen features or the JoyAI labels do not carry the signal. Then no loss change will help, and the next step is the label question (event intervals instead of response times), not a new head.
+
+H-A (rule-conditioned evidence state) overlaps the pilot's event-state arm: both keep a query-conditioned recurrent state. The pilot is the better test of it, because it has a parameter-matched temporal Transformer control. H-A adds nothing new until that result is in. H-B's CPU check on the existing 688-question predictions is independent of all of this.
+
+Also unknown to me: the result of the matched original-Qwen vs S1 B4/FIFO control (`f9b9a8d`). If original Qwen3.5 matches or beats S1 + B4 + FIFO on the OVO population, then "S1 + B4 + FIFO is the reference" in this review should read "original Qwen3.5 is the reference", and the pilot's choice of backbone is already consistent with that.
