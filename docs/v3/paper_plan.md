@@ -70,3 +70,9 @@ Progress against this plan is posted on issue #4 at each milestone.
 - **Alerting** is an unvalidated, product-relevant direction. A credible study needs timestamped events, false alarms per camera-hour, event recall and detection delay at matched compute. An alert head with clip accuracy is not enough.
 - **Next (proposed, evaluation only):** a CPU checkpoint difference, then a 2×2 LoRA × modules swap (§14.6). Any later training needs one hypothesis and one validation gate written down first.
 - **Schedule risk:** the paper-plan milestones assumed a memory or Stage-2 contribution by now. The plan needs a new central claim before the milestone dates mean anything.
+
+## Status update 2026-11-12: owner direction and design review
+
+- **Owner direction (issue #4, 2026-11-11):** no negative-results paper. The goal is a new, validated method for real-time video understanding, in particular property-camera monitoring and proactive alerts. The failed experiments stay as internal evidence and later ablations.
+- **Design review:** `docs/v3/design_review_2026-11.md` compares prior methods and proposes three hypotheses. It recommends **H-C, alert timing as a learned sequential evidence test**, on the frozen S1 + B4 backbone, measured by event recall at a fixed false-alarm rate per camera-hour and by detection delay.
+- Nothing is launched until the review is accepted. The milestone dates in this file are suspended until then.
