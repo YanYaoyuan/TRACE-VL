@@ -354,3 +354,101 @@ def test_archive_matching_ignores_unrelated_basenames(tmp_path, monkeypatch):
                                  probe=lambda p: 1 if p.is_file() else None)
     assert not result['still_missing']
     assert len(calls) == 2
+
+
+def test_archive_parallel_preserves_order_ambiguity_and_contents(tmp_path):
+    import io
+    import zipfile
+
+    from trace_vl.v3.ovo_transfer import ensure_media
+    downloads = tmp_path/'downloads'
+    downloads.mkdir()
+    with tarfile.open(downloads/'a.tar.gz', 'w:gz') as tar:
+        for name, content in [('src/a.mp4', b'first'), ('x/z.mp4', b'ambiguous-1'),
+                              ('src/dup.mp4', b'one'), ('src/dup.mp4', b'two')]:
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            tar.addfile(info, io.BytesIO(content))
+    with zipfile.ZipFile(downloads/'b.zip', 'w') as z:
+        z.writestr('src/a.mp4', b'later-must-not-win')
+        z.writestr('src/b.mp4', b'B')
+        z.writestr('other/z.mp4', b'ambiguous-2')
+        z.writestr('other/c.mp4', b'fallback')
+    videos = ['src/a.mp4', 'src/b.mp4', 'src/c.mp4', 'src/z.mp4', 'src/dup.mp4', 'src/missing.mp4']
+    results = []
+    for workers in (1, 4):
+        out = tmp_path/f'out-{workers}'
+        r = ensure_media(videos, tmp_path/'originals', [downloads], out,
+                         probe=lambda p: 1, archive_workers=workers)
+        results.append({k: v for k, v in r.items() if k not in ('overlay',)})
+        assert (out/'media/src/a.mp4').read_bytes() == b'first'
+        assert (out/'media/src/c.mp4').read_bytes() == b'fallback'
+        assert not (out/'media/src/z.mp4').exists()
+        assert not (out/'media/src/dup.mp4').exists()
+    assert results[0] == results[1]
+
+
+def test_archive_readers_overlap_but_commit_in_order(tmp_path, monkeypatch):
+    import io
+    import threading
+
+    from trace_vl.v3 import ovo_transfer as module
+    second_started = threading.Event()
+    first_finished = threading.Event()
+    downloads = tmp_path/'downloads'
+    downloads.mkdir()
+    for name in ('a.tar', 'b.tar'):
+        (downloads/name).touch()
+
+    def members(archive):
+        if Path(archive['name']).name == 'a.tar':
+            assert second_started.wait(5), 'archive readers did not overlap'
+            yield 'a.mp4', lambda: io.BytesIO(b'first')
+            first_finished.set()
+        else:
+            second_started.set()
+            yield 'a.mp4', lambda: io.BytesIO(b'later')
+
+    monkeypatch.setattr(module, '_members', members)
+    result = module.ensure_media(['a.mp4'], tmp_path/'originals', [downloads], tmp_path/'out',
+                                 probe=lambda p: 1, archive_workers=2)
+    assert first_finished.is_set() and not result['still_missing']
+    assert (tmp_path/'out/media/a.mp4').read_bytes() == b'first'
+
+
+def test_failed_archive_cannot_supply_partial_name_candidate(tmp_path, monkeypatch):
+    import io
+
+    from trace_vl.v3 import ovo_transfer as module
+    downloads = tmp_path/'downloads'
+    downloads.mkdir()
+    (downloads/'broken.tar').touch()
+
+    def members(archive):
+        yield 'other/a.mp4', lambda: io.BytesIO(b'partial')
+        raise OSError('truncated archive')
+
+    monkeypatch.setattr(module, '_members', members)
+    result = module.ensure_media(['src/a.mp4'], tmp_path/'originals', [downloads], tmp_path/'out',
+                                 probe=lambda p: 1, archive_workers=2)
+    assert result['still_missing'] == ['src/a.mp4']
+    assert not result['extracted'] and result['archives_skipped']
+
+
+def test_reuse_extracted_media_requires_matching_inputs_and_keeps_selection(tmp_path, monkeypatch):
+    from trace_vl.event_state.preparation import reuse_extracted
+    old, new = tmp_path/'old', tmp_path/'new'
+    (old/'media-extracted').mkdir(parents=True)
+    (old/'media-extracted/a.mp4').write_bytes(b'accepted-video')
+    (old/'media-extracted/unselected.mp4').write_bytes(b'do-not-add')
+    identity = {'code': 'new-code', 'annotation': 'same-hash', 'settings': {'seed': 7}}
+    write_json(old/'identity.json', {**identity, 'code': 'old-code'})
+    monkeypatch.setenv('TRACE_REUSE_PREPARATION', str(old))
+    reuse_extracted(new, identity, ['a.mp4', 'missing.mp4'])
+    assert (new/'media-extracted/a.mp4').read_bytes() == b'accepted-video'
+    assert not (new/'media-extracted/unselected.mp4').exists()
+    assert read_json(new/'reused-preparation.json')['count'] == 1
+    assert (old/'media-extracted/a.mp4').read_bytes() == b'accepted-video'
+    with pytest.raises(ValueError, match='different inputs'):
+        reuse_extracted(tmp_path/'bad', {**identity, 'annotation': 'changed-hash'}, ['a.mp4'])
+    assert not (tmp_path/'bad/media-extracted/a.mp4').exists()

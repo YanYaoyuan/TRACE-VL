@@ -80,14 +80,17 @@ _PART = re.compile(r"^(?P<base>.+)\.(?:part(?P<letters>[a-z]{2,})|(?P<digits>\d{
 class _Concatenated(io.RawIOBase):
     """Read-only sequential view of several files back to back (the parts of a split archive)."""
 
-    def __init__(self, paths: list[Path]):
+    def __init__(self, paths: list[Path], stop=None):
         self.paths, self.index, self.handle = list(paths), 0, None
+        self.stop = stop
 
     def readable(self):
         return True
 
     def readinto(self, buffer) -> int:
         while self.index < len(self.paths):
+            if self.stop is not None and self.stop.is_set():
+                raise InterruptedError("archive scan cancelled")
             if self.handle is None:
                 self.handle = open(self.paths[self.index], "rb")  # noqa: SIM115 - closed below
             n = self.handle.readinto(buffer)
@@ -166,7 +169,7 @@ def _members(archive: dict):
                 if not name.endswith("/"):
                     yield name, (lambda name=name: z.open(name))
         return
-    with _Concatenated(parts) as raw, io.BufferedReader(raw, 1 << 20) as buf, tarfile.open(fileobj=buf, mode="r|*") as t:
+    with _Concatenated(parts, stop=archive.get("_stop")) as raw, io.BufferedReader(raw, 1 << 20) as buf, tarfile.open(fileobj=buf, mode="r|*") as t:
         for member in t:
             if member.isfile():
                 yield member.name, (lambda member=member: t.extractfile(member))
@@ -182,7 +185,7 @@ def _path_match(member: str, video: str) -> str | None:
 
 
 def ensure_media(videos: list[str], video_root: str | Path, search_roots: list[str | Path], out_root: str | Path,
-                 probe=None, progress=None) -> dict:  # fmt: skip
+                 probe=None, progress=None, archive_workers=1) -> dict:  # fmt: skip
     """Media for the population as a symlink overlay `out_root/media/<video>` (the evaluation video root).
 
     A video readable under `video_root` is linked in place. Only a missing or unreadable video is looked up in the
@@ -236,45 +239,30 @@ def ensure_media(videos: list[str], video_root: str | Path, search_roots: list[s
     if missing:
         archives, skipped = find_archives(search_roots)
         wanted = set(missing)
-        wanted_by_name = defaultdict(list)
-        for v in missing:
-            wanted_by_name[Path(v).name].append(v)
+        from contextlib import closing
+
+        from .archive_scan import scan_archives
         staging = extracted_root / ".staging"
         shutil.rmtree(staging, ignore_errors=True)
         staging.mkdir(parents=True)
-        by_name: dict = defaultdict(list)  # name-only candidates over ALL archives: used only if unique and no path match
-        counter = 0
-        for archive_index, archive in enumerate(archives):
-            if progress:
-                progress(archive=archive['name'], archive_index=archive_index+1,
-                         archives_total=len(archives), missing=len(wanted), members_scanned=0)
-            if not wanted:
-                break
-            by_path: dict = defaultdict(list)
-            try:
-                for member_index, (name, opener) in enumerate(_members(archive)):
-                    if progress and member_index % 1000 == 0:
-                        progress(members_scanned=member_index, current_member=name)
-                    for v in wanted_by_name.get(Path(name).name, ()):
-                        if v not in wanted:
-                            continue
-                        kind = _path_match(name, v)
-                        if kind is None:
-                            continue
-                        counter += 1
-                        target = staging / str(counter)
-                        with opener() as src_f, open(target, "wb") as dst:
-                            shutil.copyfileobj(src_f, dst, 1 << 20)
-                        (by_path[v] if kind == "path" else by_name[v]).append((f"{archive['name']}::{name}", target))
-            except Exception as error:  # noqa: BLE001 - a damaged archive is reported, not fatal
-                skipped.append({"name": archive["name"], "reason": f"unreadable: {error}"})
-                continue
-            for v, candidates in by_path.items():
-                if len(candidates) > 1:
-                    ambiguous[v] = {"kind": "path", "candidates": [n for n, _ in candidates]}
-                    wanted.discard(v)  # never pick one of several silently
-                elif accept(v, candidates[0][1], candidates[0][0]):
-                    wanted.discard(v)
+        by_name: dict = defaultdict(list)
+        # Consume in archive order even if a later reader finishes first.
+        with closing(scan_archives(archives, wanted, staging, archive_workers, progress)) as scans:
+            for archive, by_path, names, error in scans:
+                if error:
+                    skipped.append({"name": archive["name"], "reason": error})
+                    continue
+                for v, candidates in names.items():
+                    if v in wanted:
+                        by_name[v].extend(candidates)
+                for v, candidates in by_path.items():
+                    if v not in wanted:
+                        continue
+                    if len(candidates) > 1:
+                        ambiguous[v] = {"kind": "path", "candidates": [n for n, _ in candidates]}
+                        wanted.discard(v)  # never pick one of several silently
+                    elif accept(v, candidates[0][1], candidates[0][0]):
+                        wanted.discard(v)
         for v in sorted(wanted):
             candidates = by_name.get(v, [])
             if len(candidates) > 1:

@@ -119,3 +119,41 @@ def verify_many(names, root, previous, workers, progress):
                 consume(result)
     progress.emit()
     return verified, errors
+
+
+def reuse_extracted(root, identity, names):
+    """Opt-in reuse of accepted media only, never old manifests/features/results.
+
+    The old job must be stopped first. Inputs must match except for code revision;
+    all reused files go through the new run's full decode and SHA verification.
+    Reuse does not add filenames to the selection pool or change their order.
+    """
+    import shutil
+
+    previous = os.environ.get('TRACE_REUSE_PREPARATION')
+    if not previous:
+        return
+    previous, root = Path(previous).resolve(), Path(root).resolve()
+    if previous == root:
+        raise ValueError('Reuse preparation must be a separate previous directory')
+    old = read_json(previous/'identity.json')
+    if {k: v for k, v in old.items() if k != 'code'} != {k: v for k, v in identity.items() if k != 'code'}:
+        raise ValueError('Previous preparation has different inputs/settings; refusing media reuse')
+    reused = []
+    for name in names:
+        source, dest = previous/'media-extracted'/name, root/'media-extracted'/name
+        if not source.is_file() or source.is_symlink() or dest.exists():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        temp = dest.with_name(dest.name+'.reuse.tmp')
+        if temp.exists():
+            temp.unlink()
+        try:
+            os.link(source, temp)
+        except OSError:
+            shutil.copy2(source, temp)
+        temp.replace(dest)
+        reused.append(name)
+    write_json(root/'reused-preparation.json', {'source': str(previous), 'source_code': old['code'],
+               'files': reused, 'count': len(reused), 'note': 'Media only; full verification still required.'})
+    print(f'DATA REUSE: {len(reused)} extracted files; selection unchanged; full verification still required.', flush=True)

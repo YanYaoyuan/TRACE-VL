@@ -219,7 +219,7 @@ def prepare(annotation, media_roots, out, cfg, code):
 def _prepare(annotation, media_roots, out, cfg, code, workers, progress):
     from trace_vl.v3.ovo_transfer import ensure_media
 
-    from .preparation import verify_many
+    from .preparation import reuse_extracted, verify_many
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     blocked, bench = benchmark_inventory(cfg['benchmark_roots'], cfg['require_benchmark_inventory'], progress)
@@ -257,9 +257,14 @@ def _prepare(annotation, media_roots, out, cfg, code, workers, progress):
     allowed = [n for n in names if n not in duplicates]
     if shutil.disk_usage(out).free < cfg['reserve_gb']*1e9:
         raise ValueError('Insufficient free space before extraction')
-    progress.update('media-probe-and-extraction', selected=len(allowed))
+    archive_workers = int(os.environ.get('TRACE_ARCHIVE_WORKERS', min(workers, 8)))
+    if not 1 <= archive_workers <= 32:
+        raise ValueError('TRACE_ARCHIVE_WORKERS must be between 1 and 32')
+    progress.update('reuse-extracted-media', selected=len(allowed))
+    reuse_extracted(out, identity, allowed)
+    progress.update('media-probe-and-extraction', selected=len(allowed), archive_workers=archive_workers)
     media = ensure_media(allowed, str(originals), list(map(str, media_roots)), str(out),
-                         progress=lambda **values: progress.update(**values))
+                         progress=lambda **values: progress.update(**values), archive_workers=archive_workers)
     kept = []
     previous = read_json(out/'data-audit.json').get('verified', {}) if (out/'data-audit.json').is_file() else {}
     verified, errors = verify_many(allowed, out, previous, workers, progress)

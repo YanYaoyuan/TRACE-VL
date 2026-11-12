@@ -39,9 +39,9 @@ UCA/CUVA、CCTV-Anomaly、finevideo 暂不直接混进该损失：它们的标�
 
 逐帧核验使用有上限的多进程池，每个视频的解码器只用一个线程，逐帧处理而不将整段视频装入内存。默认取 CPU 配额、可用内存与 16 的较小值；资源充足的 A100 主机可设 `TRACE_DATA_WORKERS=32`。这只控制数据核验并发，不改变样本选择、划分、模型或训练参数。内存占用低本身不代表瓶颈。
 
-目录扫描先筛选文件后缀，减少 NAS 元数据查询；归档匹配按文件名索引候选，不再为每个归档成员遍历全部待找视频。tar/分卷的流式读取仍按顺序进行，NAS 吞吐可能限制提速，增加进程并不保证线性加速。
+目录扫描先筛选文件后缀，减少 NAS 元数据查询；归档匹配按文件名索引候选，不再为每个归档成员遍历全部待找视频。独立归档默认最多 8 路并行读取，可用 `TRACE_ARCHIVE_WORKERS` 调整（1–32）；每组 tar/分卷内部仍按顺序读取。并行结果按原来的归档顺序接纳，避免读取速度影响文件选择；重名歧义仍阻断。NAS 吞吐可能限制提速，增加并发并不保证线性加速。
 
-准备阶段每 10 秒输出 `DATA PROGRESS`，包含当前阶段、文件/归档或已核验视频数，并写入 `data/preparation-progress.json`。阶段区分 benchmark 库存、媒体索引、原片解析、归档处理和全视频核验。每个已完成视频立即保存核验记录；同版本中断后重跑仍核对内容 SHA256，再跳过已完成的逐帧解码。更换代码版本使用新的数据目录，旧记录保留。
+准备阶段每 10 秒输出 `DATA PROGRESS`，包含当前阶段、文件/归档或已核验视频数，并写入 `data/preparation-progress.json`。阶段区分 benchmark 库存、媒体索引、原片解析、归档处理和全视频核验。归档阶段另报 `archive_workers`、`archives_finished` 及 `archives_active`（各包成员数和当前文件）；`TRACE_DATA_WORKERS` 控制的是后续解码核验，不代表解压并发。每个已完成视频立即保存核验记录；同版本中断后重跑仍核对内容 SHA256，再跳过已完成的逐帧解码。更换代码版本使用新的数据目录，旧记录保留。若旧任务停在数据准备阶段，停止它后可设 `TRACE_REUSE_PREPARATION=/旧run/data`，只复用已接纳的解压视频。程序要求标注、配置、benchmark 库存及媒体根目录完全一致，沿用新运行独立选出的名单，重做全解码与 SHA；不复用旧 manifest、特征或实验结果，来源记录在 `reused-preparation.json`。
 
 ## 训练与资源
 
@@ -69,7 +69,7 @@ UCA/CUVA、CCTV-Anomaly、finevideo 暂不直接混进该损失：它们的标�
 cd /data/yyy/TRACE-VL
 git fetch origin design/v3-transition-streaming
 git show origin/design/v3-transition-streaming:scripts/launch_event_state_a100.sh > /tmp/launch_event_state_a100.sh
-nohup setsid env TRACE_DATA_WORKERS=32 bash /tmp/launch_event_state_a100.sh </dev/null > event-state.log 2>&1 &
+nohup setsid env TRACE_DATA_WORKERS=32 TRACE_ARCHIVE_WORKERS=8 bash /tmp/launch_event_state_a100.sh </dev/null > event-state.log 2>&1 &
 tail -f event-state.log
 ```
 
