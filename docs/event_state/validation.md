@@ -25,3 +25,11 @@
 P0 条件响应时机试验：五组同源数据和特征、独立阈值校准、最终 checkpoint、源视频聚类区间、失败案例和运行报告。数据不足或 benchmark 排重失败时在训练前停止。没有自动扩大模型/数据规模，没有在 OVO 的最终测试集上训练或调参。
 
 A100 的真实吞吐、显存与效果尚待正式运行。长流事件解除、组合规则泛化、完整正常时段的 FAPH，以及多路摄像头系统不属于本次已完成的实现。
+
+## StreamingBench 压缩包库存修复
+
+A100 在训练前报“6 annotations, 0 IDs”。本地读取官方六个 CSV 重现：这些文件确实没有视频 ID/路径列；Proactive_Output_50 的题号也不是视频号。现在直接从用户已有 ZIP 中读取媒体文件名，只读中央目录，不解压 benchmark，不修改分组/损失或关闭排重。CSV 支持 UTF-8 BOM。损坏 ZIP、只有题号且没有媒体的目录仍拒绝训练。
+
+新增三个回归：无视频列的 CSV + 嵌套 ZIP 正常识别且禁止读取视频正文；损坏 ZIP 即使已有部分 ID 仍阻断；空 ZIP + 题号不算排重完整。新模块 29 项测试通过，与 OVO 转换/归档测试合计 44 项全部通过。官方六个 CSV 加人工 ZIP 布局的复现检查通过；未访问 A100 原始压缩包，故不宣称已验证其完整性。
+
+格式来源：[官方六个 CSV](https://huggingface.co/datasets/mjuicem/StreamingBench/tree/main/StreamingBench)，[官方媒体整理脚本](https://github.com/THUNLP-MT/StreamingBench/blob/main/src/data/move_video.py)。本次排重仍限于标注/媒体文件名，不代表跨名称或重新编码视频的感知去重。

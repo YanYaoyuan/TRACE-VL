@@ -267,3 +267,43 @@ def test_completed_features_do_not_reload_model_or_replace_profile(tmp_path, mon
     monkeypatch.setattr(backbone, 'Backbone', forbidden)
     encode_shard([row], 'unused', tmp_path, {})
     assert read_json(tmp_path/'profile-0.json') == {'seconds': 123}
+
+
+def test_streamingbench_csv_and_packed_videos_without_extraction(tmp_path, monkeypatch):
+    import zipfile
+    # Official CSV schema: the question ID is NOT a source-video ID.
+    (tmp_path/'Proactive_Output_50.csv').write_text(
+        '\ufeffquestion_id,task_type,question,time_stamp\n'
+        'Proactive Output_50_1,Proactive Output,when ready,00:00:03\n')
+    with zipfile.ZipFile(tmp_path/'Proactive Output_1-25.zip', 'w') as z:
+        z.writestr('Proactive Output/sample_21/v_abcdefghijk.mp4', b'not decoded by inventory')
+        z.writestr('Proactive Output/sample_22/another.mp4', b'not decoded by inventory')
+        z.writestr('__MACOSX/._ignored.mp4', b'ignored')
+        z.writestr('notes.txt', b'not media')
+
+    def no_member_reads(*args, **kwargs):
+        raise AssertionError('Inventory must not decompress video members')
+
+    monkeypatch.setattr(zipfile.ZipFile, 'open', no_member_reads)
+    ids, reports = benchmark_inventory([str(tmp_path)], True)
+    assert ids == {'abcdefghijk', 'another'}
+    assert reports[0]['archives'][0]['video_members'] == 2
+    assert reports[0]['archives'][0]['mode'] == 'central_directory_only'
+    assert not list(tmp_path.rglob('*.mp4'))
+    assert reports == benchmark_inventory([str(tmp_path)], True)[1]
+
+
+def test_benchmark_corrupt_zip_still_blocks_even_with_annotation_ids(tmp_path):
+    write_json(tmp_path/'annotation.json', [{'video_id': 'known'}])
+    (tmp_path/'incomplete.zip').write_bytes(b'partial download')
+    with pytest.raises(ValueError, match='ZIP directory unreadable'):
+        benchmark_inventory([str(tmp_path)], True)
+
+
+def test_question_only_csv_and_empty_zip_not_mistaken_for_complete_inventory(tmp_path):
+    import zipfile
+    (tmp_path/'questions.csv').write_text('question_id\nProactive Output_50_1\n')
+    with zipfile.ZipFile(tmp_path/'empty.zip', 'w') as z:
+        z.writestr('README.txt', b'no media')
+    with pytest.raises(ValueError, match='0 IDs'):
+        benchmark_inventory([str(tmp_path)], True)

@@ -10,6 +10,7 @@ import csv
 import math
 import re
 import shutil
+import zipfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -94,7 +95,7 @@ def collect_ids(obj):
 def benchmark_inventory(roots, required=True):
     blocked, report = set(), []
     for root in map(Path, roots):
-        ids, files, errors = set(), [], []
+        ids, files, errors, archives = set(), [], [], []
         if not root.is_dir():
             errors.append('directory missing')
         else:
@@ -103,6 +104,23 @@ def benchmark_inventory(roots, required=True):
                     continue
                 if p.suffix.lower() in VIDEO_EXT:
                     ids.add(video_id(p.name))
+                elif p.suffix.lower() == '.zip':
+                    # StreamingBench's official CSVs have question_id, not video IDs.
+                    # Read actual media names from the ZIP central directory; never
+                    # decompress benchmark videos or infer video IDs from question IDs.
+                    try:
+                        with zipfile.ZipFile(p) as z:
+                            members = sorted((m.filename, m.file_size, m.CRC) for m in z.infolist()
+                                             if not m.is_dir() and Path(m.filename).suffix.lower() in VIDEO_EXT
+                                             and '__MACOSX' not in Path(m.filename).parts
+                                             and not Path(m.filename).name.startswith('._'))
+                        archive_ids = {video_id(name) for name, _, _ in members}
+                        ids.update(archive_ids)
+                        archives.append({'path': str(p), 'bytes': p.stat().st_size,
+                                         'video_members': len(members), 'ids': len(archive_ids),
+                                         'directory_sha256': digest(members), 'mode': 'central_directory_only'})
+                    except (OSError, zipfile.BadZipFile, RuntimeError) as e:
+                        errors.append(f'{p}: ZIP directory unreadable: {e}')
                 elif p.suffix.lower() in {'.json', '.jsonl', '.csv', '.parquet'}:
                     try:
                         if p.suffix == '.parquet':
@@ -115,7 +133,7 @@ def benchmark_inventory(roots, required=True):
                             for batch in table.iter_batches(columns=cols, batch_size=1024):
                                 ids.update(collect_ids(batch.to_pylist()))
                         elif p.suffix == '.csv':
-                            with open(p) as f:
+                            with open(p, encoding='utf-8-sig', newline='') as f:
                                 ids.update(collect_ids(list(csv.DictReader(f))))
                         elif p.suffix == '.jsonl':
                             import json
@@ -128,11 +146,14 @@ def benchmark_inventory(roots, required=True):
                         files.append({'path': str(p), 'sha256': sha(p)})
                     except Exception as e:
                         errors.append(f'{p}: {e}')
-        report.append({'root': str(root), 'ids': len(ids), 'files': files, 'errors': errors})
+        report.append({'root': str(root), 'ids': len(ids), 'files': files, 'archives': archives,
+                       'errors': errors, 'scope': 'normalized annotation/media filenames; '
+                       'not cross-name perceptual deduplication or a full ZIP CRC/decode check'})
         blocked.update(ids)
         if required and (not files or not ids or errors):
             raise ValueError(f'Benchmark exclusion inventory incomplete for {root}: {errors[:3]}, '
-                             f'{len(files)} annotations, {len(ids)} IDs. No training started.')
+                             f'{len(files)} annotations, {len(archives)} ZIP directories, '
+                             f'{len(ids)} IDs. No training started.')
     return blocked, report
 
 

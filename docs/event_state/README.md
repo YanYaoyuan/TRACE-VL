@@ -25,7 +25,7 @@
 默认标注为已有 `JoyAI-VL-Interaction/event_grounding/event_grounding.json`，原视频从 `/nas-data/vlm/llava` 搜索。可以通过 `TRACE_EXTRA_MEDIA` 添加第二个原片/压缩包目录。
 
 1. 从原始视频 ID 固定哈希划分 train/calibration/dev（75/10/15），在构造条件轨迹前划分。
-2. 扫描 OVO、StreamingBench、Video-MME、NExT-QA 标注和媒体 ID，剔除重叠视频。缺失标注或解析失败会在使用 GPU 前报错；不悄悄跳过 benchmark 排重。此检查不是跨数据集感知去重。
+2. 扫描 OVO、StreamingBench、Video-MME、NExT-QA 标注和媒体 ID，剔除重叠视频。对仍在 ZIP 内的视频只读中央目录中的真实文件名，不解压视频；StreamingBench 的官方 CSV 只有题号，没有源视频 ID，不能把题号当作视频号。缺失标注或解析失败会在使用 GPU 前报错；不悄悄跳过 benchmark 排重。此检查不是跨数据集感知去重。
 3. 同一视频最多 8 条条件，优先复用已在磁盘上的原片，再按固定哈希选择归档候选，上限 1000 个原视频。原片同名但内容不一致时不猜测；跨划分完全相同内容剔除。
 4. 只从现有 ZIP/tar/分卷包解压所需视频，保留原包。对选中的视频逐帧解码并计算 SHA256，检查标注时间是否在视频内。
 5. 写到固定根目录 `/nas-data/vlm/yyy/tracevl-data/event-state-v1/<代码版本>-<配置哈希>/`。run/data 为指向该目录的链接；源文件不移动。
