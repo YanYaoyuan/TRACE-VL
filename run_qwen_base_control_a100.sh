@@ -4,8 +4,8 @@
 set -Eeuo pipefail
 export TRACE_REPO="${TRACE_REPO:-/data/yyy/TRACE-VL}"
 export TRACE_PREVIOUS="${TRACE_PREVIOUS:-/nas-data/vlm/yyy/tracevl-runs/ovo-transfer-cdbac0c-001}"
-export TRACE_OUT="${TRACE_OUT:-/nas-data/vlm/yyy/tracevl-runs/qwen-base-control-001}"
-export TRACE_SOURCE_REV=ebb9724c291bb3e7d2fda8092ba8f2bb07425058
+export TRACE_OUT="${TRACE_OUT:-/nas-data/vlm/yyy/tracevl-runs/qwen-base-control-e262092-001}"
+export TRACE_SOURCE_REV=e2620921f6f1f196b47f23a6ee08e8b14a4b15d6
 export TRACE_GPUS="${TRACE_GPUS:-4}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3}"
 export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
@@ -13,6 +13,7 @@ export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TRACE_WANDB=0 WANDB_MODE=offline
 py="${TRACE_PYTHON:-$TRACE_REPO/.venv/bin/python}"
 [[ -x "$py" ]] || { echo "Missing Python environment: $py" >&2; exit 2; }
 mkdir -p "$TRACE_OUT"
+printf 'Source: %s\nOutput: %s\n' "$TRACE_SOURCE_REV" "$TRACE_OUT"
 exec 9>"$TRACE_OUT/.launcher.lock"
 flock -n 9 || { echo "This experiment is already running" >&2; exit 2; }
 cd "$TRACE_REPO"
@@ -341,7 +342,19 @@ for stage in flow eval; do
         > "$TRACE_OUT/$stage-$arm-shard$i.log" 2>&1 &
       pids+=("$!")
     done
-    for pid in "${pids[@]}"; do wait "$pid"; done
+    for i in "${!pids[@]}"; do
+      if wait "${pids[$i]}"; then
+        :
+      else
+        status=$?
+        printf 'FAILED: %s %s shard %s (exit %s). Shard log tails follow.\n' "$stage" "$arm" "$i" "$status" >&2
+        for log in "$TRACE_OUT/$stage-$arm-"shard*.log; do
+          printf '\n%s\n' "$log" >&2
+          tail -n 30 "$log" >&2 || true
+        done
+        exit "$status"
+      fi
+    done
     pids=()
     # Assembly only: all streams must already be complete; the evaluator verifies its unit records.
     "$py" "$TRACE_OUT/qwen_base_control.py" eval --out "$TRACE_OUT" --stage "$stage" --arm "$arm"
