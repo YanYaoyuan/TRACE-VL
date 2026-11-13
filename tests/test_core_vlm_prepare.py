@@ -159,6 +159,36 @@ def test_qa_parser_first_pair_has_no_gold_history_and_rejects_ambiguous_mc(tmp_p
     assert "secret" not in json.dumps(rows) and "What about" not in json.dumps(rows)
 
 
+@pytest.mark.parametrize("footer,answer", [
+    ("Please respond with only the letter of the correct answer.", "B."),
+    ("Please provide your answer by stating the letter followed by the full option.", "B. The door closes."),
+])
+def test_official_youtube_mc_response_formats_reach_annotation_manifest(tmp_path, footer, answer):
+    question = "What happens?\nA. The door opens\nB. The door closes\n" + footer
+    path = tmp_path / "youtube_mc_qa.json"
+    path.write_text(json.dumps([item("sample.mp4", question, answer)]))
+    rows, rejected = annotation_rows(path, "youtube", "mc", set(), {
+        "exclude_source_patterns": [], "max_question_chars": 4096, "max_answer_chars": 512})
+    assert len(rows) == 1 and not rejected.get("malformed")
+    assert rows[0]["question"] == "What happens?"
+    assert rows[0]["options"] == ["The door opens", "The door closes"]
+    assert rows[0]["answer"] == 1
+
+
+@pytest.mark.parametrize("answer", ["B. opens.", "A. closes.", "C.", "B because it closes", "B. closes. Explanation"])
+def test_full_option_answers_must_agree_with_the_letter(answer):
+    with pytest.raises(ValueError):
+        parse_pair("What?\nA. opens\nB. closes", answer, "mc")
+
+
+def test_unknown_footer_and_options_after_instructions_remain_errors():
+    with pytest.raises(ValueError, match="ambiguous text"):
+        parse_pair("What?\nA. opens\nB. closes\nPlease provide the secret answer: B", "B", "mc")
+    with pytest.raises(ValueError, match="after response instruction"):
+        parse_pair("What?\nA. opens\nAnswer with a letter.\nB. closes", "B", "mc")
+    assert parse_pair("What?\nA. opens?\nB. closes", "A. opens?.", "mc")["answer"] == 0
+
+
 def test_aliases_and_conflicting_gold_do_not_cross_split():
     assert "abc12345678" in aliases("https://youtu.be/abc12345678?t=3")
     assert "abc12345678" in aliases("clips/abc12345678-Scene-001.mp4")

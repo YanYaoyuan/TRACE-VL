@@ -28,6 +28,10 @@ from .data import sha256
 from .qa import question_and_answer
 
 VERIFICATION = "full-ffmpeg-decode-and-PTS-v1"
+MC_RESPONSE_INSTRUCTIONS = {
+    "Please respond with only the letter of the correct answer.",
+    "Please provide your answer by stating the letter followed by the full option.",
+}
 
 
 def digest(value):
@@ -75,21 +79,36 @@ def parse_pair(question, answer, kind):
     if kind == "oe":
         row = {"question": question, "answer_text": answer}
     elif kind == "mc":
-        lines, options = [], []
+        lines, options, instruction_seen = [], [], False
         for line in question.splitlines():
             match = re.fullmatch(r"\s*([A-Z])[.)]\s*(.+?)\s*", line)
             if match:
+                if instruction_seen:
+                    raise ValueError("MC option after response instruction")
                 if ord(match[1]) - 65 != len(options):
                     raise ValueError("nonconsecutive MC options")
                 options.append(match[2])
             elif not options:
                 lines.append(line)
-            elif line.strip() and not re.match(r"(?:Answer|Please (?:answer|select)|Select|Choose)\b", line.strip(), re.I):
-                raise ValueError("ambiguous text after MC options")
-        gold = re.fullmatch(r"([A-Z])[.)]?", answer)
+            elif line.strip():
+                if (line.strip() not in MC_RESPONSE_INSTRUCTIONS
+                        and not re.match(r"(?:Answer|Please (?:answer|select)|Select|Choose)\b", line.strip(), re.I)):
+                    raise ValueError("ambiguous text after MC options")
+                instruction_seen = True
+        gold = re.fullmatch(r"([A-Z])(?:[.)](?:\s+(.+))?)?", answer, re.S)
         if gold is None:
-            raise ValueError("MC answer must be a single option letter")
-        row = {"question": "\n".join(lines).strip(), "options": options, "answer": ord(gold[1]) - 65}
+            raise ValueError("MC answer must be an option letter or letter plus matching option text")
+        index = ord(gold[1]) - 65
+        if not 0 <= index < len(options):
+            raise ValueError("MC answer letter outside options")
+        if gold[2] is not None:
+            # Upstream also appends a period to the complete option. Validate
+            # the text instead of trusting a leading letter on arbitrary prose.
+            text = " ".join(gold[2].split())
+            expected = " ".join(options[index].split())
+            if text not in {expected, expected + "."}:
+                raise ValueError("MC answer text disagrees with its option letter")
+        row = {"question": "\n".join(lines).strip(), "options": options, "answer": index}
     else:
         raise ValueError("unknown QA kind")
     question_and_answer(row)

@@ -25,6 +25,14 @@ An initial queue attempt stopped at the free-GPU-memory check because another jo
 
 ## A100 execution
 
+### YouTube MC parser repair
+
+The first A100 launch of `b06d166` stopped before extraction or training on row zero of the 0–30 s YouTube MC annotation: `ambiguous text after MC options`. The local ActivityNet engineering fixture and initial parser tests did not cover the official YouTube response instructions. The upstream files also contain letter-plus-full-option answers, which the original parser would have rejected next.
+
+The parser now recognizes the two exact upstream response-instruction strings and accepts either a letter or a letter followed by matching option text. A single appended period is allowed because it is present in upstream labels. Conflicting answer text, an out-of-range letter, unknown footer text and options after a response instruction still fail. The canonical training target remains the option letter. No split, model, training settings, sample minimum or malformed-record policy changed.
+
+Real annotation validation covered every first QA pair in both prospective MC inputs: **39,353 + 39,927 = 79,280 records**, all parsed successfully with the strict annotation reader. File SHA-256 values were `a573ae603153df06022d644387323c11431aa74fdd89ab4e8088f1b1582b03cc` and `750765b566e62e4bcba8f22d9ba8e6827795fd7b08512f923745eccd9131ea9a`. An additional check of all 337,693 dialogue pairs found three invalid later pairs; later pairs are already excluded by the first-pair-only protocol, so no selection rule was changed to hide them. The full core QA/run-I/O suite now passes **82 tests**, and Ruff passes. This repair needs no GPU retraining validation because it changes annotation parsing only; A100 preparation and training still need to complete.
+
 Use branch `design/v3-transition-streaming`. Fetch it, extract `scripts/launch_core_qa_a100.sh` from the reviewed code commit, and set `TRACE_REV` to that same commit before running. The launcher uses a separate immutable source snapshot; it does not switch or overwrite the operator's checkout. It uses the existing UV environment at `/data/yyy/TRACE-VL/.venv` and the already downloaded model at `/nas-data/vlm/models/qwen3.5_4b`. No model or dataset download is initiated.
 
 Defaults:
