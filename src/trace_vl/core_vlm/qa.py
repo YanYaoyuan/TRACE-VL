@@ -156,7 +156,8 @@ class VideoQALoss(nn.Module):
         return loss, {**metadata, "answer_tokens": len(answer_ids), "sequence_tokens": embeds.shape[1]}
 
     @torch.no_grad()
-    def generate(self, steps: list[VisualStep], record: dict, max_new_tokens: int = 16):
+    def generate(self, steps: list[VisualStep], record: dict, max_new_tokens: int = 16,
+                 *, return_choice: bool = False):
         """Greedy diagnostic decoding, fresh state, no gold answer fed to the LM.
 
         Recomputes the prefix each token; intended for small validation, not the
@@ -166,12 +167,19 @@ class VideoQALoss(nn.Module):
             raise ValueError("positive generation length required")
         embeds, positions, counter, _, _ = self.prefix(steps, record)
         generated = []
+        choice = None
         for _ in range(max_new_tokens):
             hidden = self.bb.lm(embeds, positions, cache=None, use_cache=False)
-            token = int(self.bb.logits(hidden[:, -1:]).argmax(-1).item())
+            logits = self.bb.logits(hidden[:, -1:])
+            if return_choice and choice is None:
+                candidates = [self.bb.ids(chr(65 + i)) for i in range(len(record["options"]))]
+                if any(len(x) != 1 for x in candidates):
+                    raise ValueError("first-token MC control requires single-token option letters")
+                choice = int(logits[0, 0, [x[0] for x in candidates]].argmax().item())
+            token = int(logits.argmax(-1).item())
             if token == self.answer_end_token_id:
                 break
             generated.append(token)
             embeds = torch.cat([embeds, self.bb.embed_ids([token])], 1)
             positions = torch.cat([positions, counter.text(1, self.bb.device)], 1)
-        return generated
+        return (generated, choice) if return_choice else generated

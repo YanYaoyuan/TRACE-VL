@@ -22,6 +22,7 @@ from trace_vl.v3.run_io import atomic_text, ensure_run_manifest
 from .control import checkpoint_identity, score_answer, select_records
 from .data import decode_observation, read_split, sha256
 from .native import NativeVideoQALoss, encode_native, prepare_native
+from .temporal import attach_temporal, load_temporal
 from .train import checked_checkpoint
 
 
@@ -75,7 +76,7 @@ def run(args):
                 "model": original, "adapter": adapter_identity,
                 "videos": {p: sha256(p) for p in sorted({r["video"] for r in rows})},
                 "code": {name: sha256(Path(__file__).parent / name) for name in
-                         ("evaluate.py", "native.py", "qa.py", "data.py", "control.py", "train.py",
+                         ("evaluate.py", "native.py", "qa.py", "data.py", "control.py", "train.py", "temporal.py",
                           "../v3/backbone.py", "../v3/positions.py", "../v3/run_io.py")}}
     identity["id"] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     ensure_run_manifest(out / "run.json", identity)
@@ -120,16 +121,25 @@ def run(args):
             bb.model.requires_grad_(False)
             net = NativeVideoQALoss(bb, mode=args.mode, pool_grid=tuple(args.pool_grid),
                                    answer_end_token_id=bb.tokenizer.eos_token_id)
+            temporal = training["config"].get("temporal", "none") if args.checkpoint else "none"
+            attach_temporal(net, temporal)
+            if temporal != "none":
+                load_temporal(net, checkpoint)
+            net.eval()
             for index, row in enumerate(pending):
                 images, times, record, audit = decode_observation(row, steps=args.steps, pixels=args.pixels)
                 layout = prepare_native(bb.processor, images, times, record, audit,
                                         allow_native_timestamp_approximation=args.timestamp_policy == "native-index-fps")
                 steps = encode_native(bb, layout)
                 record = {**record, "native_layout": layout}
-                ids = net.generate(steps, record, max_new_tokens=args.max_new_tokens)
+                constrained = getattr(args, "mc_choice_score", False)
+                output = net.generate(steps, record, max_new_tokens=args.max_new_tokens,
+                                      return_choice=constrained)
+                ids, choice = output if constrained else (output, None)
                 text = bb.tokenizer.decode(ids, skip_special_tokens=True)
                 prediction = {"run": identity["id"], "id": row["id"], "video": row["video"],
                               "answer": text, "token_ids": ids, "observation": layout.audit,
+                              "choice": choice,
                               "visual_tokens": net.prefix(steps, record)[4]["visual_tokens_total"],
                               **score_answer(text, record)}
                 atomic_text(question_path(row), json.dumps(prediction, indent=2) + "\n")
@@ -156,6 +166,7 @@ def main():
     p.add_argument("--shard", type=int, default=0)
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--report-only", action="store_true")
+    p.add_argument("--mc-choice-score", action="store_true", help="also score first-token option logits; no gold input")
     run(p.parse_args())
 
 

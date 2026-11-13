@@ -32,6 +32,24 @@ from .control import checkpoint_identity
 from .data import decode_observation, read_split, sha256
 from .native import NativeLayout, NativeVideoQALoss, check_native_forward, encode_native, prepare_native
 from .qa import VisualStep
+from .temporal import attach_temporal
+
+
+def initial_checkpoint(args):
+    path = getattr(args, "init_checkpoint", None)
+    if not path:
+        return None
+    path = Path(path)
+    previous = json.loads((path.parent / "run.json").read_text())
+    record = checked_checkpoint(path, previous["id"])
+    if previous["model"] != checkpoint_identity(args.model):
+        raise ValueError("initial checkpoint base weights differ")
+    for key in ("mode", "pool_grid", "rank", "steps", "pixels", "timestamp_policy"):
+        if previous["config"][key] != getattr(args, key):
+            raise ValueError(f"initial checkpoint configuration differs: {key}")
+    if previous["config"].get("temporal", "none") != "none":
+        raise ValueError("continuation pilot must start from the frozen plain-grid baseline")
+    return record
 
 
 def sample_indices(size, update, world, accumulation, rank, seed):
@@ -214,6 +232,7 @@ def run(args):
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
     rows = sorted(read_split(Path(args.manifest), "train"), key=lambda r: r["id"])
+    initialization = initial_checkpoint(args)
     if args.examples:
         if len(rows) < args.examples:
             raise ValueError("not enough training questions")
@@ -232,8 +251,9 @@ def run(args):
                     "model": checkpoint_identity(args.model), "torch": str(torch.__version__),
                     "transformers": transformers.__version__,
                     "deterministic_algorithms": True, "cublas_workspace": os.environ["CUBLAS_WORKSPACE_CONFIG"],
+                    "initial_checkpoint": initialization,
                     "code": {name: sha256(Path(__file__).parent / name)
-                             for name in ("train.py", "native.py", "qa.py", "data.py", "control.py",
+                             for name in ("train.py", "native.py", "qa.py", "data.py", "control.py", "temporal.py",
                                           "../v3/backbone.py", "../v3/positions.py", "../v3/run_io.py")}}
         identity["id"] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         ensure_run_manifest(out / "run.json", identity)
@@ -249,15 +269,17 @@ def run(args):
         return
     bb = Backbone(BackboneConfig(name=args.model, dtype="bfloat16", local_files_only=True),
                   StreamConfig(pixels_per_frame=args.pixels), device=f"cuda:{local}")
-    bb.add_lora(args.rank, 2 * args.rank, dropout=0.)
+    adapter = str(Path(args.init_checkpoint) / "adapter") if getattr(args, "init_checkpoint", None) else None
+    bb.add_lora(args.rank, 2 * args.rank, dropout=0., adapter=adapter)
     bb.enable_checkpointing()
     if bb.tokenizer.eos_token_id is None:
         raise ValueError("answer EOS required")
     net = NativeVideoQALoss(bb, mode=args.mode, pool_grid=tuple(args.pool_grid),
                            answer_end_token_id=bb.tokenizer.eos_token_id)
+    attach_temporal(net, getattr(args, "temporal", "none"))
     params = {n: p for n, p in net.named_parameters() if p.requires_grad}
-    if not params or any("lora_" not in n for n in params):
-        raise ValueError("this baseline must train LM LoRA only")
+    if not params or any("lora_" not in n and not n.startswith("temporal.") for n in params):
+        raise ValueError("only LM LoRA and the declared temporal adapter may train")
     optimizer = torch.optim.AdamW(list(params.values()), lr=args.lr, weight_decay=0.)
     start, metrics = (0, []) if previous is None else restore_checkpoint(previous, run_id, params, optimizer, rank, world)
     wrapped = DDP(net, device_ids=[local], broadcast_buffers=False) if world > 1 else net
@@ -265,6 +287,7 @@ def run(args):
     begin = time.monotonic()
     end = args.stop_after or args.updates
     for update in range(start, end):
+        net.train()
         optimizer.zero_grad(set_to_none=True)
         lr = args.lr * (.1 + .9 * .5 * (1 + math.cos(math.pi * update / max(1, args.updates - 1))))
         for group in optimizer.param_groups:
@@ -284,6 +307,10 @@ def run(args):
             local_tokens += meta["answer_tokens"]
             selected_ids.append(record["id"])
         norm = float(torch.nn.utils.clip_grad_norm_(list(params.values()), 1., error_if_nonfinite=True))
+        temporal_norm = sum(float(p.grad.detach().float().square().sum()) for n, p in params.items()
+                            if n.startswith("temporal.") and p.grad is not None) ** .5
+        if hasattr(net, "temporal") and (not math.isfinite(temporal_norm) or temporal_norm <= 0):
+            raise RuntimeError("temporal adapter receives no finite QA gradient")
         if norm <= 0:
             raise RuntimeError("LM adapter receives no answer gradient")
         optimizer.step()
@@ -294,6 +321,7 @@ def run(args):
         entry = {"update": update + 1, "loss": float(totals[0]) / (world * args.accumulation),
                  "answer_tokens": int(totals[1]), "question_ids_by_rank": rank_ids, "lr": lr,
                  "gradient_norm": norm, "wall_seconds_this_invocation": time.monotonic() - begin,
+                 "temporal_gradient_norm_after_clip": temporal_norm,
                  "peak_allocated_gib_rank0": torch.cuda.max_memory_allocated() / 2**30}
         metrics.append(entry)
         if rank == 0:
@@ -321,6 +349,8 @@ def main():
     for name in ("model", "manifest", "out"):
         p.add_argument(f"--{name}", required=True)
     p.add_argument("--mode", choices=("full", "grid"), default="grid")
+    p.add_argument("--temporal", choices=("none", "causal"), default="none")
+    p.add_argument("--init-checkpoint", help="new optimizer/schedule, initialized from a verified plain baseline")
     p.add_argument("--pool-grid", nargs=2, type=int, default=[4, 5])
     p.add_argument("--steps", type=int, default=4)
     p.add_argument("--pixels", type=int, default=256 * 256)

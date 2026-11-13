@@ -247,6 +247,7 @@ def verify_video(path, minimum_frames):
     if before != (path.stat().st_size, path.stat().st_mtime_ns):
         raise ValueError("media changed during verification")
     return {"sha256": identity, "frames": len(pts), "duration": pts[-1] - pts[0],
+            "minimum_frames_end": pts[minimum_frames - 1] - pts[0],
             "width": meta["streams"][0]["width"], "height": meta["streams"][0]["height"],
             "bytes": before[0], "mtime_ns": before[1], "verification": VERIFICATION}
 

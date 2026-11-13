@@ -141,8 +141,15 @@ class NativeVideoQALoss(VideoQALoss):
         if len(video_indices) != sum(counts) or int(grid[0, 0]) != len(steps):
             raise ValueError("native placeholder count does not match features")
         chunks = video_indices.split(counts)
+        temporal_tokens = None
+        if hasattr(self, "temporal"):
+            if self.mode != "grid":
+                raise ValueError("temporal adapter requires pooled visual tokens")
+            pooled = [grid_pool(s.tokens.to(bb.device, bb.dtype), s.grid, self.pool_grid)[0]
+                      for s in steps]
+            temporal_tokens = self.temporal(torch.stack(pooled), [s.end for s in steps])
         parts, pos, emitted, cursor = [], [], [], 0
-        for step, indices in zip(steps, chunks, strict=True):
+        for index, (step, indices) in enumerate(zip(steps, chunks, strict=True)):
             lo, hi = int(indices[0]), int(indices[-1]) + 1
             if hi - lo != len(indices):
                 raise ValueError("native visual spans are not contiguous")
@@ -155,6 +162,8 @@ class NativeVideoQALoss(VideoQALoss):
             if self.mode == "grid":
                 x, rr, cc = grid_pool(x, step.grid, self.pool_grid)
                 visual_pos = visual_pos[:, rr * w + cc]
+                if temporal_tokens is not None:
+                    x = temporal_tokens[index]
             parts.extend([text[:, cursor:lo], x[None]])
             pos.extend([positions[:, cursor:lo], visual_pos])
             cursor = hi
