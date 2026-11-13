@@ -1,0 +1,43 @@
+{
+  "grid": {
+    "completed": true,
+    "trainable_parameters": 6193152,
+    "peak_allocated_gib": 8.770813941955566,
+    "weight_change_l2": 0.6226856715569898,
+    "reload_max_loss_gap": 0.0,
+    "before_loss_mean": 0.1311975084245205,
+    "after_loss_mean": 0.004208200727589428
+  },
+  "full": {
+    "completed": true,
+    "trainable_parameters": 6193152,
+    "peak_allocated_gib": 8.893536567687988,
+    "weight_change_l2": 0.6322818181281759,
+    "reload_max_loss_gap": 0.0,
+    "before_loss_mean": 0.09726481139659882,
+    "after_loss_mean": 0.0020850832806900144
+  },
+  "full32": {
+    "completed": true,
+    "trainable_parameters": 6193152,
+    "peak_allocated_gib": 10.748328685760498,
+    "weight_change_l2": 0.33266361343103545,
+    "reload_max_loss_gap": 0.0,
+    "before_loss_mean": 0.12005965411663055,
+    "after_loss_mean": 0.04325057566165924
+  },
+  "files_sha256": {
+    "executed-source/data.py": "471db23dfaedf75f59acf94b7290ed64b2f97345e29e07856e0f7c718dc035c2",
+    "executed-source/flow.py": "c819212f80b15e9b4e2a381c3a56604a81c44fc5fa5e000fe20f652ed7c765a5",
+    "executed-source/qa.py": "cfb07214d3b86f6ae95aab239dc48097cafd36bc7b7d6e234835f9edc9247456",
+    "full/inputs.json": "112c3fd5c29a5ebdc53f53efa70431a02ab327fa8dee88edabb0cee08196a98b",
+    "full/metrics.jsonl": "960458bc819be1aec3a68093e9c247ea4e21ada5a53b0220ff924856e31d9ba1",
+    "full/report.json": "b7aaf9d4e83f956a54a03d6d53bd81a318a73a0641f571cde8089cb817d7cf03",
+    "full32/inputs.json": "1aca1fa1bce2cced5d18c8731c46c4edf69f5ba7e213d45fc4337f73a7e37536",
+    "full32/metrics.jsonl": "edde1f6e9fc131006177d20528a3a501dd4fdd0560a74f0cda9e8de5a58bdf60",
+    "full32/report.json": "ca040ab7c991bbcc2084b3741a061a264d6c51dd3d22798d10c3532244142f04",
+    "grid/inputs.json": "0e9e6355719b07a71129f8e27d4e0c69f14a607bae9219783dee7b543cdae945",
+    "grid/metrics.jsonl": "55e14e2023720311b8dae38868082a2b6fdaf34b7c5cd33dfe6edc274c73a705",
+    "grid/report.json": "d14e7b95c8b0d666785c4ccf84ff565030d9618a4f0cc168c3133721f99a54b3"
+  }
+}

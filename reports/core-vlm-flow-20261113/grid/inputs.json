@@ -1,0 +1,110 @@
+{
+  "purpose": "training-plumbing-only",
+  "args": {
+    "model": "/media/user/50D2BD30D2BD1AE4/WorkSpace/TRACE-VL/model-cache/Qwen3.5-4B",
+    "manifest": "/home/user/work/bgyfw/VLM/TRACE-VL/data/processed/llava-pilot-cfr.jsonl",
+    "out": "/media/user/50D2BD30D2BD1AE4/WorkSpace/TRACE-VL/core-vlm-runs/qa-flow-4b-grid-20261113-001",
+    "device": "cuda:0",
+    "dtype": "bfloat16",
+    "mode": "grid",
+    "pool_grid": [
+      4,
+      5
+    ],
+    "steps": 4,
+    "pixels": 65536,
+    "examples": 2,
+    "updates": 4,
+    "rank": 8,
+    "seed": 7,
+    "lr": 0.0001
+  },
+  "manifest_sha256": "0ed0758fe40bfd34a0c076bd83bc6c1093ca8d7188282f9448c95d32d1a80a27",
+  "backbone": {
+    "name": "/media/user/50D2BD30D2BD1AE4/WorkSpace/TRACE-VL/model-cache/Qwen3.5-4B",
+    "dtype": "bfloat16",
+    "attn_implementation": "sdpa",
+    "local_files_only": true,
+    "thinking": false
+  },
+  "observations": [
+    {
+      "id": "llava:01ea639ffa423086:1000:0",
+      "video_sha256": "5defb839115aca8be3c737c6694e74d66907c08456078a734162bd4ac19eae1e",
+      "pts_origin": 0.0,
+      "frame_indices": [
+        0,
+        110,
+        219,
+        329,
+        438,
+        548,
+        657,
+        767
+      ],
+      "frame_times": [
+        [
+          0.0,
+          3.670337
+        ],
+        [
+          7.307307,
+          10.977644
+        ],
+        [
+          14.614615,
+          18.284952
+        ],
+        [
+          21.921922,
+          25.592259
+        ]
+      ],
+      "frame_hw": [
+        192,
+        352
+      ],
+      "query_time": 25.592259,
+      "sampling": "uniform-frame-index-within-observation-v1"
+    },
+    {
+      "id": "llava:01ea639ffa423086:1001:0",
+      "video_sha256": "6722bf10b2e80960ca44dd92b4a655c8efeb14e2e26dfa8b32b52c2ccf994094",
+      "pts_origin": 0.0,
+      "frame_indices": [
+        0,
+        59,
+        117,
+        176,
+        235,
+        294,
+        352,
+        411
+      ],
+      "frame_times": [
+        [
+          0.0,
+          1.968633
+        ],
+        [
+          3.9039,
+          5.872533
+        ],
+        [
+          7.841167,
+          9.8098
+        ],
+        [
+          11.745067,
+          13.7137
+        ]
+      ],
+      "frame_hw": [
+        192,
+        352
+      ],
+      "query_time": 13.7137,
+      "sampling": "uniform-frame-index-within-observation-v1"
+    }
+  ]
+}

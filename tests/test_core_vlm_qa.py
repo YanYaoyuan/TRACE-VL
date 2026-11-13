@@ -80,6 +80,21 @@ def test_qa_loss_changes_when_observed_video_changes():
     assert abs(float((a - b).detach())) > 1e-6  # plumbing sensitivity, NOT learned video understanding
 
 
+def test_answer_termination_is_supervised_and_generation_never_consumes_gold():
+    bb = TinyBackbone()
+    model = VideoQALoss(bb, answer_end_token_id=2)
+    steps, row = sample()
+    loss, meta = model(steps, row)
+    assert meta["answer_tokens"] == 6
+    expected = F.cross_entropy(bb.logits(bb.last.hidden[:, -6:]).reshape(6, 64),
+                               torch.tensor(bb.ids("moved") + [2]))
+    torch.testing.assert_close(loss, expected)
+    first = model.generate(steps, row, max_new_tokens=3)
+    second = model.generate(steps, {**row, "answer_text": "a completely different gold answer"},
+                            max_new_tokens=3)
+    assert first == second
+
+
 def test_answer_loss_trains_lora_with_base_weights_frozen():
     from peft import LoraConfig, get_peft_model
 

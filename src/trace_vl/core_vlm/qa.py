@@ -96,13 +96,15 @@ class VideoQALoss(nn.Module):
     with verified gradients from the answer loss to its added parameters.
     """
 
-    def __init__(self, backbone, *, mode: str = "full", pool_grid: tuple[int, int] = (4, 5)):
+    def __init__(self, backbone, *, mode: str = "full", pool_grid: tuple[int, int] = (4, 5),
+                 answer_end_token_id: int | None = None):
         super().__init__()
         if mode not in ("full", "grid"):
             raise ValueError("mode must be full or grid")
         self.bb = backbone
         self.lm_model = backbone.model
         self.mode, self.pool_grid = mode, pool_grid
+        self.answer_end_token_id = answer_end_token_id
 
     def prefix(self, steps: list[VisualStep], record: dict):
         bb = self.bb
@@ -139,6 +141,8 @@ class VideoQALoss(nn.Module):
         answer_ids = self.bb.ids(answer)
         if not answer_ids:
             raise ValueError("tokenizer produced an empty answer")
+        if self.answer_end_token_id is not None:
+            answer_ids = answer_ids + [self.answer_end_token_id]
         # Predict first answer token at the final prompt position, subsequent
         # tokens from preceding gold tokens. Prompt and visual tokens have no loss.
         start = embeds.shape[1] - 1
@@ -150,3 +154,24 @@ class VideoQALoss(nn.Module):
         targets = torch.tensor(answer_ids, dtype=torch.long, device=logits.device)
         loss = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets)
         return loss, {**metadata, "answer_tokens": len(answer_ids), "sequence_tokens": embeds.shape[1]}
+
+    @torch.no_grad()
+    def generate(self, steps: list[VisualStep], record: dict, max_new_tokens: int = 16):
+        """Greedy diagnostic decoding, fresh state, no gold answer fed to the LM.
+
+        Recomputes the prefix each token; intended for small validation, not the
+        throughput benchmark. Production evaluation needs a verified cache path.
+        """
+        if max_new_tokens < 1:
+            raise ValueError("positive generation length required")
+        embeds, positions, counter, _, _ = self.prefix(steps, record)
+        generated = []
+        for _ in range(max_new_tokens):
+            hidden = self.bb.lm(embeds, positions, cache=None, use_cache=False)
+            token = int(self.bb.logits(hidden[:, -1:]).argmax(-1).item())
+            if token == self.answer_end_token_id:
+                break
+            generated.append(token)
+            embeds = torch.cat([embeds, self.bb.embed_ids([token])], 1)
+            positions = torch.cat([positions, counter.text(1, self.bb.device)], 1)
+        return generated
