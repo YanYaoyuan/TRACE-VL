@@ -1,0 +1,23 @@
+{
+  "model": "/nas-data/vlm/models/qwen3.5_4b",
+  "data_config": "configs/core_vlm/llava_youtube_pilot.json",
+  "data_out": "/nas-data/vlm/yyy/tracevl-data/core-llava-youtube-v1",
+  "gpus": [0, 1, 2, 3],
+  "minimum_free_gib": 30,
+  "cpu_threads": 4,
+  "steps": 8,
+  "pixels": 65536,
+  "pool_grid": [4, 5],
+  "timestamp_policy": "native-index-fps",
+  "updates": 1000,
+  "flow_updates": 2,
+  "accumulation": 4,
+  "rank": 8,
+  "lr": 0.0001,
+  "seed": 7,
+  "save_every": 250,
+  "cache_mb": 2048,
+  "flow_questions": 4,
+  "eval_limit": 0,
+  "max_new_tokens": 64
+}
