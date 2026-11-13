@@ -46,6 +46,7 @@ from .kv import KINDS, KVMemory, RetentionBook, score_retention
 from .model import TraceV3Modules, stream_step
 from .modules import CSTCache, TECache
 from .positions import PositionCounter
+from .run_io import atomic_text, ensure_run_manifest
 from .session import LETTERS, observe_step
 from .tracking import Tracker, enabled_from_env
 from .train import question_ids
@@ -434,8 +435,7 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
     """Stream each held-out Stage 2 stream once with the inference session; ask its delayed questions at their
     times. `policy` overrides memory.policy at the same budget (tkm vs mass / fifo / window controls)."""
     from .backbone import Backbone
-    from .data import write_jsonl
-    from .harness import _modules, clean_partial, read_unit, run_fingerprint, write_unit
+    from .harness import _modules, read_unit, run_fingerprint, write_unit
     from .session import StreamSession
 
     if policy is not None or evict_every is not None:
@@ -457,12 +457,10 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
     fingerprint = run_fingerprint(cfg, streams_path, f"stage2-{mode}-{split}-evict-{evict_schedule}-audit-{int(audit)}", checkpoint, adapter,
                                   video_root, records)  # fmt: skip
     run_file = output / "run.json"
-    if run_file.exists() and json.loads(run_file.read_text()).get("id") != fingerprint["id"]:
-        raise ValueError(f"{output} holds a different run; use a new --output")
-    run_file.write_text(json.dumps(fingerprint, indent=2) + "\n")
+    ensure_run_manifest(run_file, fingerprint)
     units = output / "streams"  # one atomically written file per completed stream (see harness.write_unit)
-    if units.exists():
-        clean_partial(units)
+    # Do not clean *.tmp here: another shard may currently be publishing a unit.
+    # Stale temporary files are ignored; write_unit replaces its own temporary file.
     done = {r["id"] for r in records if read_unit(units, r["id"], fingerprint["id"]) is not None}
     todo = [i for i, r in enumerate(records) if r["id"] not in done and i % shard[1] == shard[0]]
     bb = modules = None
@@ -530,8 +528,8 @@ def evaluate_streams(cfg: V3Config, streams_path: str, video_root: str, output: 
     if pending:
         return {"shard": list(shard), "pending_streams_other_shards": pending}
     target = output / "predictions.jsonl"  # assembled from complete streams only; rewritten each time
-    write_jsonl(target, rows)
-    summary = summarize_streams(read_jsonl(target))
+    atomic_text(target, "".join(json.dumps(row) + "\n" for row in rows))
+    summary = summarize_streams(rows)
     summary["policy"] = cfg.memory.policy
-    (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    atomic_text(output / "summary.json", json.dumps(summary, indent=2) + "\n")
     return summary
