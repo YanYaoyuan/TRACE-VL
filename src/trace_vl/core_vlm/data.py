@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import subprocess
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
@@ -74,7 +75,7 @@ def decode_observation(row: dict, *, steps: int, pixels: int, timeout: int = 180
     video = Path(row["video"])
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-threads", "1", "-select_streams", "v:0", "-show_frames",
-         "-show_entries", "stream=width,height:frame=best_effort_timestamp_time",
+         "-show_entries", "stream=width,height,avg_frame_rate:frame=best_effort_timestamp_time",
          "-of", "json", str(video)], check=True, capture_output=True, timeout=timeout)
     metadata = json.loads(probe.stdout)
     frames, stream = metadata["frames"], metadata["streams"][0]
@@ -112,9 +113,15 @@ def decode_observation(row: dict, *, steps: int, pixels: int, timeout: int = 180
     images = np.frombuffer(decoded.stdout, dtype=np.uint8).reshape(steps, 2, h, w, 3).copy()
     actual = times[chosen].reshape(steps, 2)
     resolved = {**row, "query_time": query}
+    try:
+        source_fps = float(Fraction(stream.get("avg_frame_rate", "0/1")))
+    except (ValueError, ZeroDivisionError):
+        source_fps = 0.
     audit = {"video_sha256": sha256(video), "pts_origin": origin,
              "frame_indices": chosen.tolist(), "frame_times": actual.tolist(),
              "frame_hw": [h, w], "query_time": query,
+             "source_fps": source_fps, "source_frame_count": len(pts),
+             "decoded_rgb_sha256": hashlib.sha256(images.tobytes()).hexdigest(),
              "sampling": "uniform-frame-index-within-observation-v1"}
     return images, actual, resolved, audit
 

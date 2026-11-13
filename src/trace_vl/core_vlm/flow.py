@@ -21,6 +21,7 @@ from trace_vl.v3.config import BackboneConfig, StreamConfig
 from trace_vl.v3.run_io import atomic_text
 
 from .data import decode_observation, encode_observation, read_split, sha256
+from .native import NativeVideoQALoss, check_native_forward, encode_native, prepare_native
 from .qa import VideoQALoss, VisualStep
 
 
@@ -46,13 +47,27 @@ def run(args):
     bb = Backbone(bb_cfg, stream, device=args.device)
     bb.add_lora(args.rank, 2 * args.rank, dropout=0.)
     bb.enable_checkpointing()
-    samples = [(encode_observation(bb, x[0], x[1]), x[2]) for x in observations]
+    if args.protocol == "native":
+        samples, native_audits = [], []
+        bb.language_model.eval()
+        for images, times, record, audit in observations:
+            layout = prepare_native(bb.processor, images, times, record, audit)
+            record = {**record, "native_layout": layout}
+            features = encode_native(bb, layout)
+            check = check_native_forward(bb, layout, features, record)
+            samples.append((features, record))
+            native_audits.append({"id": record["id"], **layout.audit, "forward_check": check})
+        identity["native_audits"] = native_audits
+        atomic_text(out / "inputs.json", json.dumps(identity, indent=2) + "\n")
+    else:
+        samples = [(encode_observation(bb, x[0], x[1]), x[2]) for x in observations]
     eos = bb.tokenizer.eos_token_id
     if eos is None:
         raise ValueError("tokenizer must define an EOS token for answer termination")
 
     def make_model():
-        return VideoQALoss(bb, mode=args.mode, pool_grid=tuple(args.pool_grid), answer_end_token_id=eos)
+        cls = NativeVideoQALoss if args.protocol == "native" else VideoQALoss
+        return cls(bb, mode=args.mode, pool_grid=tuple(args.pool_grid), answer_end_token_id=eos)
 
     net = make_model()
     params = {n: p for n, p in net.named_parameters() if p.requires_grad}
@@ -134,6 +149,7 @@ def main():
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--dtype", default="bfloat16", choices=("bfloat16", "float32"))
     p.add_argument("--mode", default="grid", choices=("full", "grid"))
+    p.add_argument("--protocol", default="trace", choices=("trace", "native"))
     p.add_argument("--pool-grid", nargs=2, type=int, default=[4, 5])
     p.add_argument("--steps", type=int, default=4)
     p.add_argument("--pixels", type=int, default=256 * 256)
