@@ -205,6 +205,11 @@ def test_external_prepare_real_media_and_frozen_resume(monkeypatch, tmp_path):
     import subprocess
 
     from trace_vl.core_vlm import transfer_data
+    # Tiny synthetic clips do not need the production 30 GiB reserve on /tmp.
+    # Keep the real media/manifest checks; test the disk gate independently below.
+    space_checks = []
+    monkeypatch.setattr(transfer_data, 'check_space',
+                        lambda out, reserve: space_checks.append((out, reserve)))
     media = tmp_path / 'media'
     media.mkdir()
     for i in range(10):
@@ -258,3 +263,20 @@ def test_external_prepare_real_media_and_frozen_resume(monkeypatch, tmp_path):
     changed = {**cfg, 'population_seed': 18}
     with pytest.raises(ValueError):
         transfer_data.prepare(changed, tmp_path / 'prepared')
+    assert space_checks == [(tmp_path / 'prepared', 30)] * 3
+
+
+@pytest.mark.parametrize('free_gib', [14.7, 29.9, 30, 40])
+def test_external_prepare_preserves_production_disk_reserve(monkeypatch, tmp_path, free_gib):
+    from types import SimpleNamespace
+
+    from trace_vl.core_vlm import prepare, transfer_data
+
+    monkeypatch.setattr(prepare.shutil, 'disk_usage',
+                        lambda path: SimpleNamespace(free=int(free_gib * 2**30)))
+    if free_gib < 30:
+        # The real transfer entry point must stop before reading any dataset.
+        with pytest.raises(ValueError, match='reserve is 30 GiB'):
+            transfer_data.prepare({}, tmp_path / 'prepared')
+    else:
+        prepare.check_space(tmp_path, 30)
