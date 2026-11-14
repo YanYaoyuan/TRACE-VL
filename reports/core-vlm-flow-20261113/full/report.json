@@ -1,0 +1,212 @@
+{
+  "completed": true,
+  "purpose": "training-plumbing-only; no accuracy/generalization claim",
+  "before": [
+    {
+      "id": "llava:01ea639ffa423086:1000:0",
+      "loss": 0.10699295997619629,
+      "zero_video_loss": 1.2879033088684082,
+      "generated": "badminton",
+      "protocol": "trace-explicit-video-qa-v1",
+      "mode": "full",
+      "visual_tokens_per_step": [
+        66,
+        66,
+        66,
+        66
+      ],
+      "visual_tokens_total": 264,
+      "frame_times": [
+        0.0,
+        3.670337,
+        7.307307,
+        10.977644,
+        14.614615,
+        18.284952,
+        21.921922,
+        25.592259
+      ],
+      "step_ends": [
+        3.670337,
+        10.977644,
+        18.284952,
+        25.592259
+      ],
+      "answer_tokens": 4,
+      "sequence_tokens": 337
+    },
+    {
+      "id": "llava:01ea639ffa423086:1001:0",
+      "loss": 0.08753666281700134,
+      "zero_video_loss": 0.33666369318962097,
+      "generated": "tennis",
+      "protocol": "trace-explicit-video-qa-v1",
+      "mode": "full",
+      "visual_tokens_per_step": [
+        66,
+        66,
+        66,
+        66
+      ],
+      "visual_tokens_total": 264,
+      "frame_times": [
+        0.0,
+        1.968633,
+        3.9039,
+        5.872533,
+        7.841167,
+        9.8098,
+        11.745067,
+        13.7137
+      ],
+      "step_ends": [
+        1.968633,
+        5.872533,
+        9.8098,
+        13.7137
+      ],
+      "answer_tokens": 3,
+      "sequence_tokens": 334
+    }
+  ],
+  "after": [
+    {
+      "id": "llava:01ea639ffa423086:1000:0",
+      "loss": 0.0015569825191050768,
+      "zero_video_loss": 1.1693397760391235,
+      "generated": "badminton",
+      "protocol": "trace-explicit-video-qa-v1",
+      "mode": "full",
+      "visual_tokens_per_step": [
+        66,
+        66,
+        66,
+        66
+      ],
+      "visual_tokens_total": 264,
+      "frame_times": [
+        0.0,
+        3.670337,
+        7.307307,
+        10.977644,
+        14.614615,
+        18.284952,
+        21.921922,
+        25.592259
+      ],
+      "step_ends": [
+        3.670337,
+        10.977644,
+        18.284952,
+        25.592259
+      ],
+      "answer_tokens": 4,
+      "sequence_tokens": 337
+    },
+    {
+      "id": "llava:01ea639ffa423086:1001:0",
+      "loss": 0.002613184042274952,
+      "zero_video_loss": 0.23654578626155853,
+      "generated": "tennis",
+      "protocol": "trace-explicit-video-qa-v1",
+      "mode": "full",
+      "visual_tokens_per_step": [
+        66,
+        66,
+        66,
+        66
+      ],
+      "visual_tokens_total": 264,
+      "frame_times": [
+        0.0,
+        1.968633,
+        3.9039,
+        5.872533,
+        7.841167,
+        9.8098,
+        11.745067,
+        13.7137
+      ],
+      "step_ends": [
+        1.968633,
+        5.872533,
+        9.8098,
+        13.7137
+      ],
+      "answer_tokens": 3,
+      "sequence_tokens": 334
+    }
+  ],
+  "reloaded": [
+    {
+      "id": "llava:01ea639ffa423086:1000:0",
+      "loss": 0.0015569825191050768,
+      "zero_video_loss": 1.1693397760391235,
+      "generated": "badminton",
+      "protocol": "trace-explicit-video-qa-v1",
+      "mode": "full",
+      "visual_tokens_per_step": [
+        66,
+        66,
+        66,
+        66
+      ],
+      "visual_tokens_total": 264,
+      "frame_times": [
+        0.0,
+        3.670337,
+        7.307307,
+        10.977644,
+        14.614615,
+        18.284952,
+        21.921922,
+        25.592259
+      ],
+      "step_ends": [
+        3.670337,
+        10.977644,
+        18.284952,
+        25.592259
+      ],
+      "answer_tokens": 4,
+      "sequence_tokens": 337
+    },
+    {
+      "id": "llava:01ea639ffa423086:1001:0",
+      "loss": 0.002613184042274952,
+      "zero_video_loss": 0.23654578626155853,
+      "generated": "tennis",
+      "protocol": "trace-explicit-video-qa-v1",
+      "mode": "full",
+      "visual_tokens_per_step": [
+        66,
+        66,
+        66,
+        66
+      ],
+      "visual_tokens_total": 264,
+      "frame_times": [
+        0.0,
+        1.968633,
+        3.9039,
+        5.872533,
+        7.841167,
+        9.8098,
+        11.745067,
+        13.7137
+      ],
+      "step_ends": [
+        1.968633,
+        5.872533,
+        9.8098,
+        13.7137
+      ],
+      "answer_tokens": 3,
+      "sequence_tokens": 334
+    }
+  ],
+  "weight_change_l2": 0.6322818181281759,
+  "reload_max_loss_gap": 0.0,
+  "trainable_parameters": 6193152,
+  "peak_allocated_gib": 8.893536567687988
+}

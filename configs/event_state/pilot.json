@@ -1,0 +1,53 @@
+{
+  "protocol": "response-timing-pilot-v1",
+  "seed": 7,
+  "max_videos": 1000,
+  "max_conditions_per_video": 8,
+  "max_duration": 180,
+  "max_wait": 120,
+  "min_videos": {
+    "train": 100,
+    "calibration": 20,
+    "dev": 30
+  },
+  "min_conditions": {
+    "train": 200,
+    "calibration": 40,
+    "dev": 100
+  },
+  "reserve_gb": 30,
+  "pixels": 200704,
+  "grid": 8,
+  "dim": 512,
+  "layers": 4,
+  "heads": 8,
+  "state_tokens": 16,
+  "window": 16,
+  "epochs": 5,
+  "max_updates": 2000,
+  "batch": 16,
+  "lr": 0.0002,
+  "weight_decay": 0.01,
+  "early_rate_target": 0.05,
+  "arms": [
+    "clock",
+    "frame",
+    "gru",
+    "temporal",
+    "event_state"
+  ],
+  "benchmark_roots": [
+    "/nas-data/vlm/data/OVO_Bench",
+    "/nas-data/vlm/data/StreamingBench",
+    "/nas-data/vlm/data/Video-MME",
+    "/nas-data/vlm/data/NExTQA"
+  ],
+  "require_benchmark_inventory": true,
+  "model_id": "Qwen/Qwen3.5-4B",
+  "model_revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+  "model_hidden_size": 2560,
+  "model_weight_sha256": {
+    "model.safetensors-00001-of-00002.safetensors": "26a93f066e1916adb13453dae5a0c707c0fbc71299ed98779571a907b8e74c61",
+    "model.safetensors-00002-of-00002.safetensors": "cb544bd9bfae93dc59b0f22b292f5933573854a7f9b97835c67060d7d910e188"
+  }
+}

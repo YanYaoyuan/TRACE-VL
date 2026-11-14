@@ -1,0 +1,5 @@
+# Stage 2 on 4 x A100-40GB (torchrun --nproc_per_node=4): 4 GPUs x grad_accum 2 = 8 streams per update.
+extends: stage2.yaml
+stage2:
+  steps: 1500
+  max_seconds: 900.0

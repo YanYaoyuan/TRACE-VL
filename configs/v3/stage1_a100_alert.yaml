@@ -1,0 +1,5 @@
+# 4 x A100 variant of stage1_alert.yaml.
+extends: stage1_a100.yaml
+train:
+  alert_fraction: 0.25
+  alert_weight: 1.0
