@@ -234,6 +234,10 @@ def test_external_prepare_real_media_and_frozen_resume(monkeypatch, tmp_path):
         (media / v).symlink_to(media / f'{i}.mp4')
         for task in ('ASI', 'OCR'):
             rows.append(dict(id=f'{v}-{task}', video=v, time=1, task=task, question='what?', options=['a','b'], answer=0))
+    # Low-FPS/early-query equivalent: fewer than 4 frames in the causal prefix.
+    # A query exactly at the fourth frame is eligible; the earlier query is not.
+    rows.extend([{**rows[0], 'id': 'short-prefix', 'time': .1},
+                 {**rows[1], 'id': 'boundary-prefix', 'time': 3 / 16}])
     qpath = ovo / 'questions.jsonl'
     qpath.write_text(''.join(json.dumps(r)+'\n' for r in rows))
     (ovo / 'inventory.json').write_text(json.dumps(dict(questions_sha256=sha256(qpath),
@@ -253,8 +257,23 @@ def test_external_prepare_real_media_and_frozen_resume(monkeypatch, tmp_path):
              steps=2, workers=2, pixels=65536, pool_grid=[4,5],
              minimums={d: {'questions':10,'videos':10} for d in ('ovo','nextqa')})
     result = transfer_data.prepare(cfg, tmp_path / 'prepared')
-    assert len(transfer_data.jsonl(result['ovo'])) == 20
+    assert len(transfer_data.jsonl(result['ovo'])) == 21
     assert len(transfer_data.jsonl(result['nextqa'])) == 20
+    excluded = json.loads((tmp_path / 'prepared/exclusions.json').read_text())['excluded']
+    assert [r['id'] for r in excluded] == ['short-prefix']
+    assert excluded[0]['required_distinct_frames'] == 4
+    assert excluded[0]['minimum_frames_end'] == 3 / 16
+    inv = json.loads((tmp_path / 'prepared/inventory.json').read_text())
+    assert inv['ovo']['candidate_questions'] == 22
+    assert inv['ovo']['excluded_by_task'] == {'ASI': 1}
+    assert inv['ovo']['primary_questions'] == 10
+    # Reuse media and validated full-decode caches in a NEW versioned directory.
+    monkeypatch.setattr(transfer_data, 'verify_video', lambda *a: pytest.fail('repeated full decode'))
+    reused_cfg = {**cfg, 'reuse_preparation': str(tmp_path / 'prepared')}
+    reused = transfer_data.prepare(reused_cfg, tmp_path / 'reused')
+    assert transfer_data.jsonl(reused['ovo']) == transfer_data.jsonl(result['ovo'])
+    with pytest.raises(ValueError, match='different experiment/data settings'):
+        transfer_data.prepare({**reused_cfg, 'steps': 3}, tmp_path / 'bad-reuse')
     monkeypatch.setattr(transfer_data, 'ensure_media', lambda *a, **kw: pytest.fail('resume rescanned archives'))
     assert transfer_data.prepare(cfg, tmp_path / 'prepared') == result
     complete = json.loads((tmp_path / 'prepared/complete.json').read_text())
@@ -263,7 +282,8 @@ def test_external_prepare_real_media_and_frozen_resume(monkeypatch, tmp_path):
     changed = {**cfg, 'population_seed': 18}
     with pytest.raises(ValueError):
         transfer_data.prepare(changed, tmp_path / 'prepared')
-    assert space_checks == [(tmp_path / 'prepared', 30)] * 3
+    assert space_checks == [(tmp_path / 'prepared', 30), (tmp_path / 'reused', 30),
+                            (tmp_path / 'bad-reuse', 30)] + [(tmp_path / 'prepared', 30)] * 2
 
 
 @pytest.mark.parametrize('free_gib', [14.7, 29.9, 30, 40])

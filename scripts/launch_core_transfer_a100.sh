@@ -60,6 +60,8 @@ cfg.update(model=os.environ['TRACE_MODEL'], data_out=os.environ['TRACE_DATA_OUT'
            nextqa_annotation=os.environ['TRACE_NEXTQA_ANNOTATION'],
            gpus=[int(x) for x in os.environ['TRACE_DEVICES'].split(',')],
            workers=int(os.environ['TRACE_DATA_WORKERS']), archive_workers=int(os.environ['TRACE_ARCHIVE_WORKERS']))
+if os.environ.get('TRACE_REUSE_PREPARATION'):
+    cfg['reuse_preparation'] = os.environ['TRACE_REUSE_PREPARATION']
 ensure_run_manifest(out/'launcher.json', {'id': os.environ['TRACE_REV'], 'config': cfg})
 write_json(out/'experiment-config.json', cfg)
 PY
@@ -78,7 +80,7 @@ with tarfile.open(archive.with_suffix('.tmp'),'w:gz') as tar:
         if (p.is_file() and rel.parts[0] != 'source' and p.suffix in {'.json','.jsonl','.log'}
                 and not any(part.startswith('checkpoint-') for part in rel.parts)):
             tar.add(p,arcname=str(rel))
-    for name in ['inventory.json','inputs.json','complete.json','media.json','ovo.jsonl','nextqa.jsonl']:
+    for name in ['inventory.json','exclusions.json','inputs.json','complete.json','media.json','ovo.jsonl','nextqa.jsonl']:
         p=data/name
         if p.is_file(): tar.add(p,arcname='data/'+name)
 archive.with_suffix('.tmp').replace(archive)

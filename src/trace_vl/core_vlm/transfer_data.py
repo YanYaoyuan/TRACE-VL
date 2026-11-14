@@ -87,6 +87,13 @@ def prepare(cfg, out):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     check_space(out, 30)
+    reuse = Path(cfg['reuse_preparation']) if cfg.get('reuse_preparation') else None
+    if reuse:
+        previous = json.loads((reuse / 'inputs.json').read_text())['config']
+        operational = {'data_out', 'reuse_preparation', 'workers', 'archive_workers'}
+        if ({k: v for k, v in cfg.items() if k not in operational}
+                != {k: v for k, v in previous.items() if k not in operational}):
+            raise ValueError('reused preparation has different experiment/data settings')
     base = Path(cfg["baseline_run"])
     baseline_cfg = json.loads((base / "experiment-config.json").read_text())
     manifest = Path(baseline_cfg["data_out"]) / "manifest.jsonl"
@@ -115,6 +122,9 @@ def prepare(cfg, out):
         for name, fingerprint in saved["manifests"].items():
             if sha256(out / f"{name}.jsonl") != fingerprint:
                 raise ValueError("prepared external manifest changed")
+        for name, fingerprint in saved.get('audit_files', {}).items():
+            if sha256(out / name) != fingerprint:
+                raise ValueError('prepared external inventory/exclusions changed')
         for path, fingerprint in saved["videos"].items():
             if sha256(path) != fingerprint:
                 raise ValueError("prepared external media changed")
@@ -124,6 +134,8 @@ def prepare(cfg, out):
     wanted = {r["video"] for r in nxt}
     found = defaultdict(set)
     roots = [Path(p) for p in cfg["nextqa_roots"] if Path(p).is_dir()]
+    if reuse:
+        roots.append(reuse / 'nextqa-media/media')
     for root in roots:
         for p in root.rglob("*.mp4"):
             if p.name in wanted:
@@ -165,8 +177,14 @@ def prepare(cfg, out):
     def verify(path):
         key = cache / (digest(path) + ".json")
         fingerprint = sha256(path)
-        if key.is_file() and json.loads(key.read_text()).get("sha256") == fingerprint and "minimum_frames_end" in json.loads(key.read_text()):
-            return path, json.loads(key.read_text())
+        candidates = [key] + ([reuse / 'verified' / key.name] if reuse else [])
+        for candidate in candidates:
+            if candidate.is_file():
+                cached = json.loads(candidate.read_text())
+                if cached.get('sha256') == fingerprint and 'minimum_frames_end' in cached:
+                    if candidate != key:
+                        write_json(key, cached)
+                    return path, cached
         info = verify_video(path, 2 * cfg["steps"])
         write_json(key, info)
         return path, info
@@ -178,15 +196,29 @@ def prepare(cfg, out):
             verified[path] = info
             if (i + 1) % 20 == 0:
                 print(f"VERIFIED MEDIA {i + 1}/{len(paths)}", flush=True)
+    exclusions = []
     for r in all_rows:
         info = verified[r["video"]]
         if r.get("query_time") is not None and r["query_time"] < info["minimum_frames_end"]:
-            raise ValueError(f"insufficient distinct causal frames before query: {r['id']}")
+            exclusions.append({'id': r['id'], 'source': r['source'], 'task': r['task'],
+                               'video': r['video'], 'query_time': r['query_time'],
+                               'required_distinct_frames': 2 * cfg['steps'],
+                               'minimum_frames_end': info['minimum_frames_end'],
+                               'reason': 'insufficient_distinct_causal_frames'})
+            continue
         h, w = frame_size(info["height"], info["width"], cfg["pixels"], 32)
         if h // 32 < cfg["pool_grid"][0] or w // 32 < cfg["pool_grid"][1]:
             raise ValueError(f"visual grid too small for fixed pooling: {r['id']}")
     hashes = {p: v["sha256"] for p, v in verified.items()}
     check_overlap(all_rows, training, hashes, set(training_run["videos"].values()))
+    excluded_ids = {r['id'] for r in exclusions}
+    write_json(out / 'exclusions.json', {'rule': 'distinct-causal-frames-v1',
+               'required_frames': 2 * cfg['steps'], 'excluded': exclusions,
+               'note': 'Metadata-only selection before model scores; shared by every arm; no replacement questions.'})
+    original_counts = {'ovo': len(ovo), 'nextqa': len(nxt)}
+    ovo = [r for r in ovo if r['id'] not in excluded_ids]
+    nxt = [r for r in nxt if r['id'] not in excluded_ids]
+    print(f'CAUSAL INVENTORY: excluded {len(exclusions)} questions; OVO {len(ovo)}, NExT-QA {len(nxt)}; see exclusions.json', flush=True)
     # Exact duplicates are a single bootstrap cluster, even under different IDs.
     for r in all_rows:
         r["source_group"] = "sha256:" + hashes[r["video"]]
@@ -203,6 +235,8 @@ def prepare(cfg, out):
         inventory[name] = {"questions": len(rows), "primary_questions": len(endpoint),
                            "primary_videos": len(groups), "by_task": dict(Counter(r["task"] for r in rows)),
                            "problems": problems}
+        inventory[name].update(candidate_questions=original_counts[name],
+                               excluded_by_task=dict(Counter(r['task'] for r in exclusions if r['source'] == name)))
         text = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
         path = out / f"{name}.jsonl"
         if path.exists() and path.read_text() != text:
@@ -213,6 +247,7 @@ def prepare(cfg, out):
         raise ValueError("external inventory insufficient; no training or evaluation started")
     write_json(out / "complete.json", {"inputs": inputs["id"], "manifests": {
         name: sha256(out / f"{name}.jsonl") for name in inventory},
+        'audit_files': {name: sha256(out / name) for name in ('inventory.json', 'exclusions.json')},
         "videos": hashes, "training_overlap": 0,
         "limitation": "known source aliases + exact bytes; not perceptual or pretraining contamination audit"})
     return {name: out / f"{name}.jsonl" for name in inventory}
