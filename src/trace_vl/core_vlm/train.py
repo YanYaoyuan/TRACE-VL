@@ -280,6 +280,18 @@ def run(args):
     params = {n: p for n, p in net.named_parameters() if p.requires_grad}
     if not params or any("lora_" not in n and not n.startswith("temporal.") for n in params):
         raise ValueError("only LM LoRA and the declared temporal adapter may train")
+    if rank == 0:
+        # Recorded before restoring a resumed optimizer/checkpoint: both arms
+        # must originate from identical base weights and identical LoRA tensors.
+        initial = {"run": run_id, "lora_sha256": tensor_digest({
+            n: p for n, p in params.items() if "lora_" in n}),
+            "temporal": getattr(args, "temporal", "none"),
+            "trainable_parameters": sum(p.numel() for p in params.values())}
+        ensure_run_manifest(out / "initialization.json", {"id": run_id, **initial})
+    # Temporal construction consumes random numbers; keep subsequent stochastic
+    # LM operations on the same stream in the two fresh-base arms.
+    torch.manual_seed(args.seed + 100000)
+    torch.cuda.manual_seed_all(args.seed + 100000)
     optimizer = torch.optim.AdamW(list(params.values()), lr=args.lr, weight_decay=0.)
     start, metrics = (0, []) if previous is None else restore_checkpoint(previous, run_id, params, optimizer, rank, world)
     wrapped = DDP(net, device_ids=[local], broadcast_buffers=False) if world > 1 else net
