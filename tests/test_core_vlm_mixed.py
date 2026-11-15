@@ -56,6 +56,34 @@ def test_selection_order_independent_equal_families_and_fail_closed():
         mixed_data.balanced_selection(temporal, general[:2], 4, 17)
 
 
+def test_training_source_id_collision_preserves_distinct_prompts_and_strict_eval(tmp_path):
+    from trace_vl.core_vlm.transfer_data import nextqa_rows
+    path = tmp_path / 'train.csv'
+    base = dict(video='3617262562', qid='2', type='TC', question='how did the man react?',
+                answer='2', **{f'a{i}': f'option {i}' for i in range(5)})
+    other = {**base, 'type': 'TN', 'question': 'how did the man react in the middle?', 'answer': '4'}
+    def save(rows):
+        with path.open('w') as f:
+            writer = csv.DictWriter(f, fieldnames=list(base))
+            writer.writeheader()
+            writer.writerows(rows)
+    save([base, other])
+    with pytest.raises(ValueError, match='duplicate NExT-QA questions'):
+        nextqa_rows(path, videos=1)
+    rows = nextqa_rows(path, videos=1, training_id_collisions=True)
+    assert len(rows) == len({r['id'] for r in rows}) == 2
+    assert {r['annotation_id'] for r in rows} == {'nextqa-3617262562-2'}
+    assert {(r['question'], r['answer']) for r in rows} == {(base['question'], 2), (other['question'], 4)}
+    save([other, base])
+    assert nextqa_rows(path, videos=1, training_id_collisions=True) == rows
+    for conflict in [base, {**base, 'answer': '4'}]:
+        save([base, conflict])
+        with pytest.raises(ValueError, match='duplicate or conflicting'):
+            nextqa_rows(path, videos=1, training_id_collisions=True)
+    save([base])
+    assert nextqa_rows(path, videos=1, training_id_collisions=True) == nextqa_rows(path, videos=1)
+
+
 def test_source_wrappers_and_exact_bytes_are_excluded():
     rows = [row('1', 'v_abcdefghijk.mp4'), row('2', 'other.mp4'), row('3', 'safe.mp4')]
     kept, rejected = mixed_data.disjoint_filter(rows, {'abcdefghijk'}, {'duplicate'},

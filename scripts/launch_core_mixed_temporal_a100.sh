@@ -89,7 +89,7 @@ with tarfile.open(archive.with_suffix('.tmp'),'w:gz') as tar:
         if (p.is_file() and rel.parts[0] not in {'source','tmp'} and p.suffix in {'.json','.jsonl','.log','.md'}
                 and not any(part.startswith('checkpoint-') for part in rel.parts)):
             tar.add(p,arcname=str(rel))
-    for name in ['inventory.json','inputs.json','complete.json','media.json','manifest.jsonl']:
+    for name in ['inventory.json','inputs.json','complete.json','media.json','manifest.jsonl','annotation-audit.json']:
         p=data/name
         if p.is_file(): tar.add(p,arcname='data/'+name)
     external=Path(__import__('json').loads((out/'experiment-config.json').read_text())['external_data'])

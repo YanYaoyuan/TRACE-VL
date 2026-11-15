@@ -156,7 +156,13 @@ def _prepare(cfg, out):
                 raise ValueError('training media changed')
         print('REUSED mixture; no archive scan/full decode', flush=True)
         return out / 'manifest.jsonl', manifests
-    temporal = nextqa_rows(train_path, videos=len(all_train_ids), seed=cfg['seed'])
+    temporal = nextqa_rows(train_path, videos=len(all_train_ids), seed=cfg['seed'], training_id_collisions=True)
+    id_collisions = [{k: r[k] for k in ('annotation_id', 'id', 'task', 'video')}
+                     for r in temporal if 'annotation_id' in r]
+    write_json(out / 'annotation-audit.json', {'training_rows': len(temporal),
+        'disambiguated_rows': id_collisions,
+        'policy': 'distinct prompts sharing a source ID retain both with content-derived IDs; '
+                  'identical/conflicting prompts fail; external validation IDs unchanged'})
     temporal = [{**r, 'id': 'train-' + r['id']} for r in temporal if r['task'] in TEMPORAL_TASKS]
     temporal, rejected = disjoint_filter(temporal, blocked)
     general_train = [r for r in general_train if 'options' in r]
@@ -241,5 +247,5 @@ def _prepare(cfg, out):
         'excluded': rejected, 'benchmark_inventory': bench_report, 'source_overlap': 0,
         'exact_byte_overlap': 0, 'note': 'official NExT-QA training partition; no perceptual/pretraining audit'})
     write_json(out / 'complete.json', {'inputs': identity['id'], 'videos': hashes,
-        'files': {n: sha256(out / n) for n in ('manifest.jsonl', 'inventory.json', 'media.json')}})
+        'files': {n: sha256(out / n) for n in ('manifest.jsonl', 'inventory.json', 'media.json', 'annotation-audit.json')}})
     return out / 'manifest.jsonl', manifests

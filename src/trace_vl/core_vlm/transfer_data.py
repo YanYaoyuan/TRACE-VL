@@ -47,7 +47,7 @@ def ovo_rows(directory):
     return result
 
 
-def nextqa_rows(path, *, videos=200, seed=17):
+def nextqa_rows(path, *, videos=200, seed=17, training_id_collisions=False):
     # Official NExT-QA, NOT NExT-GQA's different subset/schema or test.csv.
     with Path(path).open(newline="") as handle:
         raw = list(csv.DictReader(handle))
@@ -67,6 +67,23 @@ def nextqa_rows(path, *, videos=200, seed=17):
                      "question": r["question"], "options": [r[f"a{i}"] for i in range(5)],
                      "answer": int(r["answer"]), "protocol": "offline",
                      "observation": {"start": 0., "end": "video_end"}})
+    if training_id_collisions:
+        # The official train.csv reuses (video=3617262562, qid=2) for two
+        # different questions. Only the training caller opts into this policy;
+        # frozen validation IDs and the default strict parser stay unchanged.
+        by_id = defaultdict(list)
+        for r in rows:
+            by_id[r['id']].append(r)
+        for original_id, group in by_id.items():
+            if len(group) < 2:
+                continue
+            prompts = {digest([r['question'].strip().casefold(),
+                               [o.strip().casefold() for o in r['options']]]) for r in group}
+            if len(prompts) != len(group):
+                raise ValueError('duplicate or conflicting NExT-QA training prompt under one ID')
+            for r in group:
+                r['annotation_id'] = original_id
+                r['id'] += '-' + digest([r['task'], r['question'], r['options'], r['answer']])
     if len({r["id"] for r in rows}) != len(rows):
         raise ValueError("duplicate NExT-QA questions")
     return sorted(rows, key=lambda r: r["id"])
