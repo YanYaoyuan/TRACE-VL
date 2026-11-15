@@ -45,8 +45,8 @@ get_annotation() {
   mkdir -p "$(dirname "$dest")"
   if [[ ! -f "$dest" ]]; then
     url="https://raw.githubusercontent.com/doc-doc/NExT-QA/main/dataset/nextqa/$part.csv"
-    curl -fL --retry 3 --connect-timeout 20 --max-time 180 "$url" -o "$dest.tmp" ||
-      curl -fL --retry 3 --connect-timeout 20 --max-time 180 "https://ghfast.top/$url" -o "$dest.tmp"
+    curl -fL --retry 2 --connect-timeout 20 --max-time 900 "$url" -o "$dest.tmp" ||
+      curl -fL --retry 2 --connect-timeout 20 --max-time 900 "https://ghfast.top/$url" -o "$dest.tmp"
     printf '%s  %s\n' "$expected" "$dest.tmp" | sha256sum --check -
     mv "$dest.tmp" "$dest"
   fi
@@ -58,6 +58,7 @@ get_annotation val "$TRACE_NEXTQA_VAL" 43198bdef8436b8d64a9b75d846b0987c10cbf94e
 import json, os
 from pathlib import Path
 from trace_vl.core_vlm.prepare import write_json
+from trace_vl.core_vlm.mixed_data import resolve_general_data
 from trace_vl.v3.run_io import ensure_run_manifest
 out=Path(os.environ['TRACE_OUT'])
 cfg=json.loads(Path('configs/core_vlm/mixed_temporal_a100.json').read_text())
@@ -67,6 +68,8 @@ cfg.update(model=os.environ['TRACE_MODEL'], data_out=os.environ['TRACE_DATA_OUT'
            nextqa_train=os.environ['TRACE_NEXTQA_TRAIN'], nextqa_val=os.environ['TRACE_NEXTQA_VAL'],
            gpus=[int(x) for x in os.environ['TRACE_DEVICES'].split(',')],
            workers=int(os.environ['TRACE_DATA_WORKERS']), archive_workers=int(os.environ['TRACE_ARCHIVE_WORKERS']))
+cfg['general_data'] = str(resolve_general_data(cfg))
+print('GENERAL QA DATA:', cfg['general_data'], flush=True)
 ensure_run_manifest(out/'launcher.json', {'id': os.environ['TRACE_REV'], 'config': cfg})
 write_json(out/'experiment-config.json', cfg)
 PY

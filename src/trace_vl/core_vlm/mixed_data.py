@@ -22,6 +22,33 @@ NEXTQA_TRAIN_SHA256 = '51ae6e611fa58835f63a0beb325fe647bb197c7e320a31f0bb7a9cf96
 TEMPORAL_TASKS = {'TN', 'TC', 'TP'}
 
 
+def resolve_general_data(cfg):
+    """Follow the frozen transfer's baseline provenance, never guess a directory suffix."""
+    explicit = cfg.get('general_data')
+    expected = None
+    if explicit:
+        directory = Path(explicit).resolve()
+    else:
+        inputs = json.loads((Path(cfg['external_data']) / 'inputs.json').read_text())
+        baseline = Path(inputs['config']['baseline_run'])
+        baseline_cfg = json.loads((baseline / 'experiment-config.json').read_text())
+        directory = Path(baseline_cfg['data_out']).resolve()
+        expected = inputs['training_manifest']
+        training = json.loads((baseline / 'train/grid/run.json').read_text())
+        if training['manifest_sha256'] != expected:
+            raise ValueError('baseline and frozen transfer training manifest differ')
+    required = ('manifest.jsonl', 'complete.json', 'verification.json')
+    missing = [name for name in required if not (directory / name).is_file()]
+    if missing:
+        raise ValueError(f'prepared general QA data missing at {directory}: {missing}; '
+                         'restore the recorded directory or set TRACE_GENERAL_DATA explicitly')
+    actual = sha256(directory / 'manifest.jsonl')
+    completed = json.loads((directory / 'complete.json').read_text())
+    if actual != completed['manifest_sha256'] or (expected is not None and actual != expected):
+        raise ValueError('resolved general QA manifest differs from recorded provenance')
+    return directory
+
+
 def frozen_external(directory):
     directory = Path(directory)
     complete = json.loads((directory / 'complete.json').read_text())
@@ -85,7 +112,7 @@ def prepare(cfg, out):
 def _prepare(cfg, out):
     check_space(out, 30)
     manifests, external = frozen_external(cfg['external_data'])
-    general_root = Path(cfg['general_data'])
+    general_root = resolve_general_data(cfg)
     general_manifest = general_root / 'manifest.jsonl'
     completed = json.loads((general_root / 'complete.json').read_text())
     if sha256(general_manifest) != completed['manifest_sha256']:

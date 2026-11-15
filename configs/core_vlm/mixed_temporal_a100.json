@@ -1,7 +1,7 @@
 {
   "model": "/nas-data/vlm/models/qwen3.5_4b",
   "data_out": "/nas-data/vlm/yyy/tracevl-data/core-mixed-temporal-v1",
-  "general_data": "/nas-data/vlm/yyy/tracevl-data/core-llava-youtube-v1",
+  "general_data": null,
   "external_data": "/nas-data/vlm/yyy/tracevl-data/core-transfer-v1-f1c19a7",
   "nextqa_train": "/nas-data/vlm/data/NExTQA/trace-core-official-train.csv",
   "nextqa_val": "/nas-data/vlm/data/NExTQA/trace-core-official-val.csv",

@@ -19,6 +19,31 @@ def row(i, video, **kw):
                 question='what?', options=['a', 'b'], answer=0, protocol='offline', split='train', **kw)
 
 
+def test_general_data_follows_recorded_versioned_path_and_checks_provenance(tmp_path):
+    general = tmp_path / 'data/core-llava-youtube-v1-8c5e1b7'
+    atomic_text(general / 'manifest.jsonl', json.dumps(row('g', 'g.mp4')) + '\n')
+    expected = sha256(general / 'manifest.jsonl')
+    write_json(general / 'complete.json', {'manifest_sha256': expected})
+    write_json(general / 'verification.json', {'videos': {}})
+    baseline, external = tmp_path / 'baseline', tmp_path / 'external'
+    write_json(baseline / 'experiment-config.json', {'data_out': str(general)})
+    write_json(baseline / 'train/grid/run.json', {'manifest_sha256': expected})
+    write_json(external / 'inputs.json', {'config': {'baseline_run': str(baseline)},
+                                        'training_manifest': expected})
+    cfg = {'external_data': str(external), 'general_data': None}
+    assert mixed_data.resolve_general_data(cfg) == general
+    # Explicit overrides are respected; a missing override must not fall back.
+    assert mixed_data.resolve_general_data({'general_data': str(general)}) == general
+    with pytest.raises(ValueError, match='prepared general QA data missing'):
+        mixed_data.resolve_general_data({**cfg, 'general_data': str(tmp_path / 'wrong')})
+    (general / 'manifest.jsonl').write_text('changed')
+    with pytest.raises(ValueError, match='recorded provenance'):
+        mixed_data.resolve_general_data(cfg)
+    write_json(baseline / 'train/grid/run.json', {'manifest_sha256': 'different'})
+    with pytest.raises(ValueError, match='baseline and frozen transfer'):
+        mixed_data.resolve_general_data(cfg)
+
+
 def test_selection_order_independent_equal_families_and_fail_closed():
     temporal = [row(i, f't{i//3}') for i in range(12)]
     general = [row(f'g{i}', f'g{i//2}') for i in range(12)]
