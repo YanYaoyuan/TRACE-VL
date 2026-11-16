@@ -21,6 +21,7 @@ from trace_vl.v3.run_io import atomic_text, ensure_run_manifest
 
 from .control import checkpoint_identity, score_answer, select_records
 from .data import decode_observation, read_split, sha256
+from .interventions import disable_temporal, shuffle_blocks
 from .native import NativeVideoQALoss, encode_native, prepare_native
 from .temporal import attach_temporal, load_temporal
 from .train import checked_checkpoint
@@ -69,6 +70,11 @@ def run(args):
         adapter_identity = checked_checkpoint(checkpoint, training["id"])
         if training["config"]["mode"] != args.mode or training["config"]["pool_grid"] != args.pool_grid:
             raise ValueError("training/evaluation compression differs; declare a separate ablation protocol")
+    if getattr(args, 'temporal_off', False) and (
+            not args.checkpoint or training['config'].get('temporal', 'none') == 'none'):
+        raise ValueError('temporal-off requires a trained temporal checkpoint')
+    if getattr(args, 'block_shuffle_seed', None) is not None and args.steps < 2:
+        raise ValueError('block shuffle requires at least two temporal blocks')
     configuration = {k: v for k, v in vars(args).items() if k not in {"out", "shard", "report_only", "device"}}
     identity = {"protocol": "core-native-qa-eval-v1", "config": configuration,
                 "torch": str(torch.__version__), "transformers": transformers.__version__, "peft": peft.__version__,
@@ -76,7 +82,7 @@ def run(args):
                 "model": original, "adapter": adapter_identity,
                 "videos": {p: sha256(p) for p in sorted({r["video"] for r in rows})},
                 "code": {name: sha256(Path(__file__).parent / name) for name in
-                         ("evaluate.py", "native.py", "qa.py", "data.py", "control.py", "train.py", "temporal.py",
+                         ("evaluate.py", "native.py", "qa.py", "data.py", "control.py", "train.py", "temporal.py", "interventions.py",
                           "../v3/backbone.py", "../v3/positions.py", "../v3/run_io.py")}}
     identity["id"] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     ensure_run_manifest(out / "run.json", identity)
@@ -125,12 +131,20 @@ def run(args):
             attach_temporal(net, temporal)
             if temporal != "none":
                 load_temporal(net, checkpoint)
+            if getattr(args, 'temporal_off', False):
+                disable_temporal(net)
             net.eval()
             for index, row in enumerate(pending):
                 images, times, record, audit = decode_observation(row, steps=args.steps, pixels=args.pixels)
                 layout = prepare_native(bb.processor, images, times, record, audit,
                                         allow_native_timestamp_approximation=args.timestamp_policy == "native-index-fps")
                 steps = encode_native(bb, layout)
+                intervention = {'temporal_off': getattr(args, 'temporal_off', False),
+                                'block_order': list(range(len(steps))),
+                                'block_shuffle_seed': getattr(args, 'block_shuffle_seed', None)}
+                if intervention['block_shuffle_seed'] is not None:
+                    steps, intervention['block_order'] = shuffle_blocks(
+                        steps, layout.audit['video_sha256'], intervention['block_shuffle_seed'])
                 record = {**record, "native_layout": layout}
                 constrained = getattr(args, "mc_choice_score", False)
                 output = net.generate(steps, record, max_new_tokens=args.max_new_tokens,
@@ -140,6 +154,7 @@ def run(args):
                 prediction = {"run": identity["id"], "id": row["id"], "video": row["video"],
                               "answer": text, "token_ids": ids, "observation": layout.audit,
                               "choice": choice,
+                              "intervention": intervention,
                               "visual_tokens": net.prefix(steps, record)[4]["visual_tokens_total"],
                               **score_answer(text, record)}
                 atomic_text(question_path(row), json.dumps(prediction, indent=2) + "\n")
@@ -154,6 +169,8 @@ def main():
     for name in ("model", "manifest", "out"):
         p.add_argument(f"--{name}", required=True)
     p.add_argument("--checkpoint")
+    p.add_argument('--temporal-off', action='store_true', help='diagnostic: remove loaded temporal residual; keep its LoRA')
+    p.add_argument('--block-shuffle-seed', type=int, help='diagnostic: shuffle encoded two-frame blocks at fixed timestamp slots')
     p.add_argument("--mode", choices=("full", "grid"), default="grid")
     p.add_argument("--pool-grid", nargs=2, type=int, default=[4, 5])
     p.add_argument("--steps", type=int, default=4)
