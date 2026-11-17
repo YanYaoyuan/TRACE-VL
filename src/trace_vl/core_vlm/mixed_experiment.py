@@ -22,12 +22,13 @@ from .transfer import collect, external_report
 ARMS = {'plain': 'none', 'temporal': 'causal'}
 
 
-def audit_training(root, target):
+def audit_training(root, target, *, arms=None, config_differences=()):
     """Check real saved checkpoints and realized sample order, not log length alone."""
     import torch
     root = Path(root)
+    arms = ARMS if arms is None else arms
     runs, logs, initial, complete = {}, {}, {}, {}
-    for name in ARMS:
+    for name in arms:
         folder = root / name
         runs[name] = json.loads((folder / 'run.json').read_text())
         initial[name] = json.loads((folder / 'initialization.json').read_text())
@@ -44,25 +45,25 @@ def audit_training(root, target):
         state = torch.load(checkpoint / 'training.pt', map_location='cpu', weights_only=True)
         if tensor_digest({k: v for k, v in state['parameters'].items() if 'lora_' in k}) == initial[name]['lora_sha256']:
             raise ValueError('LoRA did not change')
-        if name == 'temporal':
+        if arms[name] == 'causal':
             up = state['parameters'].get('temporal.up.weight')
             if up is None or not torch.isfinite(up).all() or not up.count_nonzero():
                 raise ValueError('temporal residual did not learn')
             if any(x['temporal_gradient_norm_after_clip'] <= 0 for x in logs[name]):
                 raise ValueError('temporal QA gradients missing')
     for key in ('model', 'manifest_sha256', 'ids', 'videos', 'world_size', 'objective'):
-        if runs['plain'][key] != runs['temporal'][key]:
+        if any(runs[name][key] != runs['plain'][key] for name in arms):
             raise ValueError(f'unmatched training {key}')
-    for name in ARMS:
-        if runs[name]['initial_checkpoint'] is not None or runs[name]['config']['temporal'] != ARMS[name]:
+    for name in arms:
+        if runs[name]['initial_checkpoint'] is not None or runs[name]['config']['temporal'] != arms[name]:
             raise ValueError('must start from original base in the declared arm')
     def config(name):
-        return {k: v for k, v in runs[name]['config'].items() if k != 'temporal'}
-    if config('plain') != config('temporal') or initial['plain']['lora_sha256'] != initial['temporal']['lora_sha256']:
+        return {k: v for k, v in runs[name]['config'].items() if k not in {'temporal', *config_differences}}
+    if any(config(name) != config('plain') or initial[name]['lora_sha256'] != initial['plain']['lora_sha256'] for name in arms):
         raise ValueError('unmatched schedule or LoRA initialization')
     def schedule(name):
-        return [(x['question_ids_by_rank'], x['lr'], x['answer_tokens']) for x in logs[name]]
-    if schedule('plain') != schedule('temporal'):
+        return [(x['question_ids_by_rank'], x['lr'], x['answer_tokens'], x.get('teacher_questions', 0)) for x in logs[name]]
+    if any(schedule(name) != schedule('plain') for name in arms):
         raise ValueError('realized sample/LR/token budgets differ')
     return {'passed': True, 'updates': target, 'same_initial_lora': True,
             'same_samples_lr_answer_tokens': True, 'checkpoints': complete,

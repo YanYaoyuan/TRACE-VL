@@ -1,0 +1,30 @@
+{
+  "model": "/nas-data/vlm/models/qwen3.5_4b",
+  "external_data": "/nas-data/vlm/yyy/tracevl-data/core-transfer-v1-f1c19a7",
+  "workers": 32,
+  "gpus": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "minimum_free_gib": 30,
+  "steps": 8,
+  "pixels": 65536,
+  "pool_grid": [
+    4,
+    5
+  ],
+  "timestamp_policy": "native-index-fps",
+  "max_new_tokens": 64,
+  "updates": 1000,
+  "flow_updates": 2,
+  "accumulation": 4,
+  "rank": 8,
+  "lr": 2e-05,
+  "seed": 17,
+  "save_every": 100,
+  "cache_mb": 4096,
+  "mixture_data": "/nas-data/vlm/yyy/tracevl-data/core-mixed-temporal-97272fb",
+  "reviewed_pairs": null
+}

@@ -31,6 +31,7 @@ from trace_vl.v3.run_io import atomic_text, ensure_run_manifest
 from .control import checkpoint_identity
 from .data import decode_observation, read_split, sha256
 from .native import NativeLayout, NativeVideoQALoss, check_native_forward, encode_native, prepare_native
+from .preservation import original_answer_logits
 from .qa import VisualStep
 from .temporal import attach_temporal
 
@@ -221,6 +222,13 @@ def run(args):
         raise ValueError("invalid examples/cache/lr")
     if args.stop_after is not None and not 0 < args.stop_after <= args.updates:
         raise ValueError("stop-after must be within the training schedule")
+    preserve = getattr(args, "preservation_teacher", False)
+    weight = getattr(args, "preservation_weight", 0.)
+    temperature = getattr(args, "preservation_temperature", 2.)
+    if not math.isfinite(weight) or weight < 0 or not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("invalid preservation objective")
+    if weight and not preserve:
+        raise ValueError("positive preservation weight requires the original teacher")
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     torch.use_deterministic_algorithms(True)
     torch.backends.cudnn.benchmark = False
@@ -233,6 +241,12 @@ def run(args):
     torch.cuda.manual_seed_all(args.seed)
     rows = sorted(read_split(Path(args.manifest), "train"), key=lambda r: r["id"])
     initialization = initial_checkpoint(args)
+    if preserve:
+        if initialization is not None or args.mode != 'grid':
+            raise ValueError('preservation pilot starts from the original grid backbone')
+        families = {r.get('mixture_family') for r in rows}
+        if not {'general', 'temporal'} <= families or not families <= {'general', 'temporal', 'reviewed'}:
+            raise ValueError('preservation needs declared general/temporal training families')
     if args.examples:
         if len(rows) < args.examples:
             raise ValueError("not enough training questions")
@@ -245,7 +259,9 @@ def run(args):
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         configuration = {k: v for k, v in vars(args).items() if k not in {"out", "stop_after"}}
         identity = {"protocol": "core-native-qa-train-v1", "config": configuration, "world_size": world,
-                    "objective": "mean per-question answer-token CE including EOS",
+                    "objective": ("mean per-question answer CE + configured weight * T^2 KL(original || student) "
+                                  "on general-family answer positions incl EOS" if preserve else
+                                  "mean per-question answer-token CE including EOS"),
                     "manifest_sha256": sha256(args.manifest), "ids": [r["id"] for r in rows],
                     "videos": {p: sha256(p) for p in sorted({r["video"] for r in rows})},
                     "model": checkpoint_identity(args.model), "torch": str(torch.__version__),
@@ -253,7 +269,7 @@ def run(args):
                     "deterministic_algorithms": True, "cublas_workspace": os.environ["CUBLAS_WORKSPACE_CONFIG"],
                     "initial_checkpoint": initialization,
                     "code": {name: sha256(Path(__file__).parent / name)
-                             for name in ("train.py", "native.py", "qa.py", "data.py", "control.py", "temporal.py",
+                             for name in ("train.py", "native.py", "qa.py", "data.py", "control.py", "temporal.py", "preservation.py",
                                           "../v3/backbone.py", "../v3/positions.py", "../v3/run_io.py")}}
         identity["id"] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         ensure_run_manifest(out / "run.json", identity)
@@ -306,16 +322,24 @@ def run(args):
             group["lr"] = lr
         selected = sample_indices(len(rows), update, world, args.accumulation, rank, args.seed)
         local_loss, local_tokens, selected_ids = 0., 0, []
+        local_ce, local_kl, local_anchors = 0., 0., 0
         for micro, index in enumerate(selected):
             steps, record = samples.get(rows[index])
             bb.language_model.train()
+            anchor = preserve and record.get('mixture_family') == 'general'
+            teacher = original_answer_logits(net, steps, record) if anchor else None
             context = wrapped.no_sync() if world > 1 and micro < args.accumulation - 1 else nullcontext()
             with context:
-                loss, meta = wrapped(steps, record)
+                loss, meta = wrapped(steps, record, teacher_logits=teacher,
+                    preservation_weight=weight if anchor else 0., preservation_temperature=temperature)
                 if not torch.isfinite(loss):
                     raise RuntimeError("nonfinite answer loss")
                 (loss / args.accumulation).backward()
             local_loss += float(loss.detach())
+            local_ce += meta['answer_ce']
+            local_kl += meta['preservation_kl']
+            local_anchors += int(anchor)
+            del teacher
             local_tokens += meta["answer_tokens"]
             selected_ids.append(record["id"])
         norm = float(torch.nn.utils.clip_grad_norm_(list(params.values()), 1., error_if_nonfinite=True))
@@ -326,12 +350,16 @@ def run(args):
         if norm <= 0:
             raise RuntimeError("LM adapter receives no answer gradient")
         optimizer.step()
-        totals = torch.tensor([local_loss, local_tokens], dtype=torch.float64, device=f"cuda:{local}")
+        totals = torch.tensor([local_loss, local_tokens, local_ce, local_kl, local_anchors], dtype=torch.float64, device=f"cuda:{local}")
         if world > 1:
             dist.all_reduce(totals)
         rank_ids = collective_list(selected_ids, world)
         entry = {"update": update + 1, "loss": float(totals[0]) / (world * args.accumulation),
                  "answer_tokens": int(totals[1]), "question_ids_by_rank": rank_ids, "lr": lr,
+                 "answer_ce": float(totals[2]) / (world * args.accumulation),
+                 "preservation_kl_per_question": float(totals[3]) / (world * args.accumulation),
+                 "preservation_kl_per_anchor": float(totals[3]) / max(1., float(totals[4])),
+                 "teacher_questions": int(totals[4]),
                  "gradient_norm": norm, "wall_seconds_this_invocation": time.monotonic() - begin,
                  "temporal_gradient_norm_after_clip": temporal_norm,
                  "peak_allocated_gib_rank0": torch.cuda.max_memory_allocated() / 2**30}
@@ -362,6 +390,9 @@ def main():
         p.add_argument(f"--{name}", required=True)
     p.add_argument("--mode", choices=("full", "grid"), default="grid")
     p.add_argument("--temporal", choices=("none", "causal"), default="none")
+    p.add_argument("--preservation-teacher", action="store_true")
+    p.add_argument("--preservation-weight", type=float, default=0.)
+    p.add_argument("--preservation-temperature", type=float, default=2.)
     p.add_argument("--init-checkpoint", help="new optimizer/schedule, initialized from a verified plain baseline")
     p.add_argument("--pool-grid", nargs=2, type=int, default=[4, 5])
     p.add_argument("--steps", type=int, default=4)

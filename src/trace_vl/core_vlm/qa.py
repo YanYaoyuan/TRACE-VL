@@ -2,8 +2,8 @@
 
 This uses TRACE's explicit visual-embedding protocol, not Qwen's official native
 video processor/chat path. Full and grid modes share observations and prompts.
-There is no alert head, teacher distribution, retention scorer, or recurrent LM
-cache in this clip-level training path. A trained LM adapter is part of the VLM.
+There is no alert head, retention scorer, or recurrent LM cache. An optional
+frozen original teacher anchors answer distributions in the preservation pilot. A trained LM adapter is part of the VLM.
 """
 
 from __future__ import annotations
@@ -136,7 +136,7 @@ class VideoQALoss(nn.Module):
                     "step_ends": [step.end for step in steps]}
         return torch.cat(parts, 1), torch.cat(positions, 1), counter, answer, metadata
 
-    def forward(self, steps: list[VisualStep], record: dict):
+    def answer_logits(self, steps: list[VisualStep], record: dict):
         embeds, positions, counter, answer, metadata = self.prefix(steps, record)
         answer_ids = self.bb.ids(answer)
         if not answer_ids:
@@ -152,8 +152,28 @@ class VideoQALoss(nn.Module):
         hidden = self.bb.lm(embeds, positions, cache=None, use_cache=False)
         logits = self.bb.logits(hidden[:, start:]).float()
         targets = torch.tensor(answer_ids, dtype=torch.long, device=logits.device)
-        loss = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets)
-        return loss, {**metadata, "answer_tokens": len(answer_ids), "sequence_tokens": embeds.shape[1]}
+        return logits, targets, {**metadata, "answer_tokens": len(answer_ids), "sequence_tokens": embeds.shape[1]}
+
+    def forward(self, steps: list[VisualStep], record: dict, *, teacher_logits=None,
+                preservation_weight=0., preservation_temperature=2.):
+        logits, targets, metadata = self.answer_logits(steps, record)
+        ce = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets)
+        if not math.isfinite(preservation_weight) or preservation_weight < 0:
+            raise ValueError("invalid preservation weight")
+        if not math.isfinite(preservation_temperature) or preservation_temperature <= 0:
+            raise ValueError("invalid preservation temperature")
+        if preservation_weight and teacher_logits is None:
+            raise ValueError("positive preservation weight requires teacher logits")
+        kl = logits.new_zeros(())
+        if teacher_logits is not None:
+            if teacher_logits.shape != logits.shape or teacher_logits.requires_grad:
+                raise ValueError("teacher must be detached and match answer positions/vocabulary")
+            t = preservation_temperature
+            kl = F.kl_div(F.log_softmax(logits / t, -1),
+                          F.log_softmax(teacher_logits.float() / t, -1),
+                          log_target=True, reduction="none").sum(-1).mean() * t * t
+        return ce + preservation_weight * kl, {**metadata, "answer_ce": float(ce.detach()),
+            "preservation_kl": float(kl.detach()), "teacher_used": teacher_logits is not None}
 
     @torch.no_grad()
     def generate(self, steps: list[VisualStep], record: dict, max_new_tokens: int = 16,
