@@ -118,7 +118,11 @@ def run(cfg, out, prepare_only=False, smoke_only=False):
         identity['id'] = digest(identity)
         ensure_run_manifest(out / 'run.json', identity)
         print('[1/5] Fixed training-only mixture; reuse frozen external development data', flush=True)
-        manifest, external = prepare(cfg, cfg['data_out'])
+        if cfg.get('mixture_data'):
+            from .preservation_data import reuse_data
+            manifest, external = reuse_data(cfg, out / 'data')
+        else:
+            manifest, external = prepare(cfg, cfg['data_out'])
         if prepare_only:
             print('PREPARED: no GPU work', flush=True)
             return
@@ -134,6 +138,9 @@ def run(cfg, out, prepare_only=False, smoke_only=False):
             folder = out / ('smoke-train' if flow else 'train') / name
             cmd = training_command(cfg, manifest, folder, 'grid', flow=flow)
             cmd += ['--temporal', ARMS[name]]  # deliberately NO --init-checkpoint
+            if cfg.get('preservation_weight', 0):
+                cmd += ['--preservation-teacher', '--preservation-weight', str(cfg['preservation_weight']),
+                        '--preservation-temperature', '2']
             run_jobs([(f'{folder.parent.name}-{name}', cmd, cfg['gpus'])], env, out / 'logs')
             updates = cfg['flow_updates'] if flow else cfg['updates']
             path = folder / f'checkpoint-{updates:06d}'
@@ -184,6 +191,11 @@ def run(cfg, out, prepare_only=False, smoke_only=False):
                   'scope': 'official NExT-QA train used; NExT validation is in-dataset generalization, '
                            'OVO is cross-dataset development. One seed; fixed final checkpoint; '
                            'ordinary temporal adapter baseline, not an established novelty or official streaming score.'}
+        if cfg.get('mixture_data'):
+            from .scale import retention_report
+            report['capability_retention'] = retention_report(external, out / 'eval')
+            report['decision']['architecture_gate_passed'] = report['decision']['passed']
+            report['decision']['passed'] &= report['capability_retention']['passed']
         write_json(out / 'report.json', report)
         lines = ['# Core video-model mixed-training pilot', '', json.dumps(report['decision']), '',
                  '| Dataset | Arm | Choice accuracy | Strict accuracy | Format valid |', '|---|---|---:|---:|---:|']

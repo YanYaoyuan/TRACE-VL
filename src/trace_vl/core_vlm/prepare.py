@@ -328,10 +328,29 @@ def prepare(config, out):
         return _prepare(cfg, out)
 
 
+def protected_holdouts(paths):
+    """Exclude prior validation sources AND exact media bytes when expanding data."""
+    from .data import read_split
+    blocked, fingerprints, records = set(), set(), {}
+    for name in paths:
+        path = Path(name)
+        records[str(path)] = sha256(path)
+        for row in read_split(path, 'val'):
+            blocked.update(row.get('source_aliases', []))
+            blocked.update(aliases(row['video']))
+            fingerprints.add(sha256(row['video']))
+    return blocked, fingerprints, records
+
+
 def _prepare(cfg, out):
     begin = time.monotonic()
     blocked, benchmarks = benchmark_inventory(cfg["benchmark_roots"], required=True)
     blocked = set().union(*(aliases(k) for k in blocked))
+    protected, protected_bytes, protected_records = protected_holdouts(cfg.get('protected_manifests', []))
+    blocked.update(protected)
+    kinds = cfg.get('qa_kinds', ['mc', 'oe'])
+    if not kinds or not set(kinds) <= {'mc', 'oe'}:
+        raise ValueError('invalid QA kinds')
     llava = Path(cfg["llava_root"]).resolve()
     rows, annotations, rejects, source_dirs, archives = [], {}, {}, {}, {}
     for source in cfg["sources"]:
@@ -343,6 +362,8 @@ def _prepare(cfg, out):
             raise ValueError(f"source directory missing: {directory}")
         matched = []
         for kind, pattern in (("oe", "*_oe_qa*.json"), ("mc", "*_mc_*.json")):
+            if kind not in kinds:
+                continue
             for path in sorted(directory.glob(pattern)):
                 if path.name.endswith(".trace-vl.json"):
                     continue
@@ -358,7 +379,8 @@ def _prepare(cfg, out):
             raise ValueError(f"incomplete/unsupported archives in {directory}: {skipped}")
         archives[source] = {a["name"]: signature(a) for a in catalog}
     identity = {"protocol": "core-llava-prepare-v1", "config": cfg, "annotations": annotations,
-                "benchmarks": benchmarks, "archives": archives, "implementation": implementation_identity()}
+                "benchmarks": benchmarks, "archives": archives, "implementation": implementation_identity(),
+                "protected_manifests": protected_records}
     identity["id"] = digest(identity)
     ensure_run_manifest(out / "run.json", identity)
     conflicts = []
@@ -366,8 +388,11 @@ def _prepare(cfg, out):
     selected = choose(unique, cfg)
     if not selected:
         raise ValueError("no QA left after exclusions")
+    print(f'GENERAL INVENTORY: {len(unique)} unique QA; {len(selected)} selected before media checks', flush=True)
     write_json(out / "selection.json", {"run": identity["id"], "records": selected, "rejected": rejects,
                                       "rule": "fixed hash order before extraction; no post-decode replacement"})
+    if len(selected) < cfg.get('minimum_selected_questions', 0):
+        raise ValueError('insufficient general QA before media checks; inspect selection.json')
     media, resolved = {}, {}
     for source, directory in source_dirs.items():
         relative = sorted({r["relative_video"] for r in selected if r["source"] == source})
@@ -461,7 +486,12 @@ def _prepare(cfg, out):
                          "see verification.json, no replacement sampling")
     # Apply the declared quality rule to both splits; never refill a failed clip
     # with a more convenient one and never inspect model scores for selection.
-    selected = [r for r in selected if r["video"] not in errors]
+    protected_copies = [r['id'] for r in selected if r['video'] not in errors
+                        and verification[r['video']]['sha256'] in protected_bytes]
+    write_json(out / 'protected-exclusions.json', {'exact_byte_question_ids': protected_copies,
+                                                 'manifests': protected_records})
+    protected_copy_ids = set(protected_copies)
+    selected = [r for r in selected if r["video"] not in errors and r['id'] not in protected_copy_ids]
     selected = [{**r, "media_sha256": verification[r["video"]]["sha256"]} for r in selected]
     selected = unique_records(exact_content_groups(selected, verification), conflicts)
     write_json(out / "qa-conflicts.json", {"policy": "exclude every conflicting copy; no answer is chosen",

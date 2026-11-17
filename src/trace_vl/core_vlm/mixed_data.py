@@ -170,6 +170,11 @@ def _prepare(cfg, out):
     rejected.extend(rej)
     # Freeze selection before checking availability; never substitute a different
     # video because a selected file is missing/corrupt.
+    write_json(out / 'capacity.json', {'requested_per_family': cfg['questions_per_family'],
+        'available_questions': {'temporal': len(temporal), 'general': len(general_train)},
+        'available_videos': {'temporal': len({r['source_group'] for r in temporal}),
+                             'general': len({r['source_group'] for r in general_train})},
+        'note': 'Counts after source exclusions, before media checks; no automatic downsizing.'})
     rows = balanced_selection(temporal, general_train, cfg['questions_per_family'], cfg['seed'])
     wanted = sorted({r['video'] for r in rows if r['mixture_family'] == 'temporal'})
     roots = [Path(p) for p in cfg['nextqa_roots']]

@@ -227,3 +227,22 @@ def test_changed_completed_dataset_and_insufficient_counts_cannot_authorize_trai
         prepare(config, out)
     assert not (out / "complete.json").exists()
     assert json.loads((out / "report.json").read_text())["prepared"] is False
+
+
+def test_expansion_excludes_prior_val_and_renamed_content(dataset, tmp_path):
+    config, out, subset, _ = dataset
+    cfg = json.loads(config.read_text())
+    # Original held-out source plus a renamed archive member with identical bytes.
+    heldout = tmp_path / 'heldout.mkv'
+    with zipfile.ZipFile(subset / 'videos-1.zip') as z:
+        heldout.write_bytes(z.read('source/v_00000000000.mkv'))
+    manifest = tmp_path / 'prior.jsonl'
+    manifest.write_text(json.dumps({'id': 'heldout', 'question': 'q', 'answer_text': 'a', 'split': 'val', 'video': str(heldout),
+                                   'source_aliases': ['00000000000']})+'\n')
+    cfg['protected_manifests'] = [str(manifest)]
+    config.write_text(json.dumps(cfg))
+    prepare(config, out)
+    rows = read_split(out / 'manifest.jsonl', 'train') + read_split(out / 'manifest.jsonl', 'val')
+    assert all(sha256(r['video']) != sha256(heldout) for r in rows)
+    audit = json.loads((out / 'protected-exclusions.json').read_text())
+    assert len(audit['exact_byte_question_ids']) == 1  # the differently named copy
