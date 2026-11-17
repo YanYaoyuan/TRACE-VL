@@ -176,6 +176,10 @@ def _prepare(cfg, out):
                              'general': len({r['source_group'] for r in general_train})},
         'note': 'Counts after source exclusions, before media checks; no automatic downsizing.'})
     rows = balanced_selection(temporal, general_train, cfg['questions_per_family'], cfg['seed'])
+    from .scale_repair import exclude_declared_missing
+    rows, media_exclusion = exclude_declared_missing(rows, cfg, identity)
+    if media_exclusion:
+        write_json(out / 'media-exclusion.json', media_exclusion)
     wanted = sorted({r['video'] for r in rows if r['mixture_family'] == 'temporal'})
     roots = [Path(p) for p in cfg['nextqa_roots']]
     originals = out / 'originals'
@@ -249,8 +253,10 @@ def _prepare(cfg, out):
     write_json(out / 'inventory.json', {'questions': len(rows), 'videos': len(set(hashes.values())),
         'families': dict(Counter(r['mixture_family'] for r in rows)),
         'tasks': dict(Counter(r.get('task', 'general') for r in rows)),
+        'media_exclusion': media_exclusion,
         'excluded': rejected, 'benchmark_inventory': bench_report, 'source_overlap': 0,
         'exact_byte_overlap': 0, 'note': 'official NExT-QA training partition; no perceptual/pretraining audit'})
     write_json(out / 'complete.json', {'inputs': identity['id'], 'videos': hashes,
-        'files': {n: sha256(out / n) for n in ('manifest.jsonl', 'inventory.json', 'media.json', 'annotation-audit.json')}})
+        'files': {n: sha256(out / n) for n in ['manifest.jsonl', 'inventory.json', 'media.json', 'annotation-audit.json',
+                                             *(['media-exclusion.json'] if media_exclusion else [])]}})
     return out / 'manifest.jsonl', manifests

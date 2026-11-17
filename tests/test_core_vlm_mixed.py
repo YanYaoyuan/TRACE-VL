@@ -149,7 +149,8 @@ def test_real_checkpoint_audit_rejects_schedule_drift_and_corruption(tmp_path):
         mixed_experiment.audit_training(tmp_path, 2)
 
 
-def test_prepare_real_archived_media_frozen_resume_and_split_exclusion(tmp_path, monkeypatch):
+@pytest.mark.parametrize('repair_missing', [False, True])
+def test_prepare_real_archived_media_frozen_resume_and_split_exclusion(tmp_path, monkeypatch, repair_missing):
     monkeypatch.setattr(mixed_data, 'check_space', lambda *a: None)
     monkeypatch.setattr(mixed_data, 'benchmark_inventory', lambda *a, **k: ({'99'}, []))
     videos = tmp_path / 'videos'
@@ -160,7 +161,7 @@ def test_prepare_real_archived_media_frozen_resume_and_split_exclusion(tmp_path,
     archives = tmp_path/'archives'
     archives.mkdir()
     with zipfile.ZipFile(archives/'videos.zip','w') as z:
-        for i in (1, 2):
+        for i in ((1,) if repair_missing else (1, 2)):
             z.write(videos/f'{i}.mp4',f'NExTVideo/{i}.mp4')
     def annotation(path, ids):
         with path.open('w') as f:
@@ -191,9 +192,44 @@ def test_prepare_real_archived_media_frozen_resume_and_split_exclusion(tmp_path,
     cfg=dict(external_data=str(external),general_data=str(general),nextqa_train=str(train_csv),nextqa_val=str(val_csv),
         benchmark_roots=[],nextqa_roots=[str(archives)],seed=17,questions_per_family=2,minimum_videos_per_family=2,
         workers=2,archive_workers=2,steps=2,pixels=65536,pool_grid=[4,5])
+    if repair_missing:
+        from trace_vl.core_vlm.prepare import digest
+        from trace_vl.core_vlm.scale_repair import reuse_failed_preparation
+        cfg['minimum_videos_per_family'] = 1
+        prior = tmp_path / 'prior'
+        # Real archive extraction must fail with the default strict policy.
+        with pytest.raises(ValueError, match='selected training media unavailable'):
+            mixed_data.prepare(cfg, prior / 'mixture')
+        import shutil
+        shutil.copytree(general, prior / 'general')
+        manifest = (general / 'manifest.jsonl').read_text()
+        verification = json.loads((general / 'verification.json').read_text())['videos']
+        write_json(prior / 'general/run.json', {'id': 'general-run'})
+        write_json(prior / 'general/complete.json', {
+            'run': 'general-run', 'manifest_sha256': sha256(general / 'manifest.jsonl'),
+            'id': digest(['general-run', {p:v['sha256'] for p,v in verification.items()}, manifest])})
+        write_json(prior / 'preparation.json', {'config': cfg})
+        repair_cfg = {**cfg, 'repair_from': str(prior), 'exclude_training_videos': ['2.mp4']}
+        record = reuse_failed_preparation(repair_cfg, tmp_path / 'repaired')
+        assert reuse_failed_preparation(repair_cfg, tmp_path / 'repaired') == record
+        assert (tmp_path / 'repaired/general/manifest.jsonl').read_bytes() == (general / 'manifest.jsonl').read_bytes()
+        with pytest.raises(ValueError, match='original scale configuration'):
+            reuse_failed_preparation({**repair_cfg, 'seed': 18}, tmp_path / 'wrong')
+        with pytest.raises(ValueError, match='prior missing-only'):
+            reuse_failed_preparation({**repair_cfg, 'exclude_training_videos': ['1.mp4']}, tmp_path / 'wrong')
+        cfg = {**cfg, 'media_repair': record, 'general_data': str(tmp_path / 'repaired/general'),
+               'nextqa_roots': [str(prior / 'mixture/nextqa-media/media')]}
+        assert not (prior / 'mixture/complete.json').exists()
     path, _ = mixed_data.prepare(cfg,tmp_path/'prepared')
     result=read_split(path,'train')
-    assert len(result)==4 and all('99' not in r['source_aliases'] for r in result)
+    if repair_missing:
+        audit = json.loads((path.parent / 'media-exclusion.json').read_text())
+        assert audit['selected_before'] == 4 and audit['retained_after'] == 3
+        assert audit['replacement_questions'] == 0
+        assert [r['video'] for r in audit['excluded_questions']] == ['2.mp4']
+        assert json.loads((path.parent / 'media.json').read_text())['archives_scanned'] == []
+        assert 'media-exclusion.json' in json.loads((path.parent / 'complete.json').read_text())['files']
+    assert len(result)==(3 if repair_missing else 4) and all('99' not in r['source_aliases'] for r in result)
     assert {r['mixture_family'] for r in result}=={'general','temporal'}
     monkeypatch.setattr(mixed_data,'verify_video',lambda *a:pytest.fail('resume decoded again'))
     monkeypatch.setattr(mixed_data,'ensure_media',lambda *a,**k:pytest.fail('resume rescanned archives'))

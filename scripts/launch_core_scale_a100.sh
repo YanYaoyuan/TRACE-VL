@@ -46,6 +46,9 @@ cfg=json.loads(Path('configs/core_vlm/scale20k_a100.json').read_text())
 cfg.update(workers=int(os.environ['TRACE_DATA_WORKERS']),archive_workers=int(os.environ['TRACE_ARCHIVE_WORKERS']))
 for var,key in [('TRACE_MODEL','model'),('TRACE_EXTERNAL_DATA','external_data'),('TRACE_PILOT_RUN','pilot_run')]:
     if os.environ.get(var): cfg[key]=os.environ[var]
+if os.environ.get('TRACE_REPAIR_FROM') or os.environ.get('TRACE_EXCLUDE_TRAINING_VIDEO'):
+    cfg['repair_from']=os.environ['TRACE_REPAIR_FROM']
+    cfg['exclude_training_videos']=[os.environ['TRACE_EXCLUDE_TRAINING_VIDEO']]
 ensure_run_manifest(out/'launcher.json',{'id':os.environ['TRACE_REV'],'config':cfg})
 write_json(out/'config.json',cfg)
 PY
@@ -64,8 +67,8 @@ from pathlib import Path
 out=Path(os.environ['TRACE_OUT'])
 # Keep media, model weights, archive indexes and large per-frame verification out.
 roots=[out/('training-'+os.environ.get('TRACE_RECIPE',''))] if os.environ['TRACE_SCALE_MODE']=='train' else []
-files=[out/'queue-plan.json',out/'config.json',out/'launcher.json',out/'preparation.json',out/'release.json',out/'capacity-preflight.json']
-files += [out/'mixture'/name for name in ('inventory.json','inputs.json','complete.json','annotation-audit.json','capacity.json')]
+files=[out/'queue-plan.json',out/'config.json',out/'launcher.json',out/'preparation.json',out/'release.json',out/'capacity-preflight.json',out/'repair.json']
+files += [out/'mixture'/name for name in ('inventory.json','inputs.json','complete.json','annotation-audit.json','capacity.json','media-exclusion.json')]
 files += [out/'general'/name for name in ('report.json','missing.json','protected-exclusions.json')]
 for root in roots:
     files.extend(p for p in root.rglob('*') if p.is_file() and p.suffix in {'.json','.jsonl','.log','.md'}

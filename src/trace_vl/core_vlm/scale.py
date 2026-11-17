@@ -59,10 +59,26 @@ def throughput(pilot, updates):
 
 def queue_plan(cfg, inventory):
     counts = inventory['families']
-    if counts != {'general': cfg['questions_per_family'], 'temporal': cfg['questions_per_family']}:
+    expected = {'general': cfg['questions_per_family'], 'temporal': cfg['questions_per_family']}
+    amendment = inventory.get('media_exclusion')
+    if amendment:
+        excluded = amendment['excluded_questions']
+        if (not cfg.get('repair_from') or not excluded or amendment['replacement_questions'] != 0
+                or len({r['id'] for r in excluded}) != len(excluded)
+                or {r['video'] for r in excluded} != set(cfg.get('exclude_training_videos', []))
+                or any(r['split'] != 'train' or r['mixture_family'] != 'temporal' for r in excluded)
+                or amendment['selected_before'] != 2 * cfg['questions_per_family']
+                or amendment['retained_after'] != sum(counts.values())
+                or amendment['excluded_by_family'] != {'temporal': len(excluded)}):
+            raise ValueError('invalid explicit training-media amendment')
+        expected['temporal'] -= len(excluded)
+    elif cfg.get('repair_from'):
+        raise ValueError('repair exclusion audit missing')
+    if counts != expected:
         raise ValueError('prepared family counts differ from the fixed expansion target')
     effective = len(cfg['gpus']) * cfg['accumulation']
     return {'prepared': True, 'gpu_started': False, 'questions': sum(counts.values()), 'families': counts,
+            'target_before_media_exclusion': 2 * cfg['questions_per_family'], 'media_exclusion': amendment,
             'arms': ['plain', 'temporal'], 'updates_per_arm': cfg['updates'], 'effective_batch': effective,
             'example_presentations_per_arm': cfg['updates'] * effective,
             'dataset_pass_equivalents': cfg['updates'] * effective / sum(counts.values()),
@@ -114,12 +130,22 @@ def prepare(cfg, out):
                                     *[str(original / 'sources' / name / 'media') for name in cfg['general_sources']]])
         write_json(out / 'general-config.json', general)
         print('[1/3] Expand general MC QA from downloaded YouTube subsets; protect prior validation', flush=True)
-        prepare_general(out / 'general-config.json', out / 'general')
+        repair = None
+        if cfg.get('repair_from'):
+            from .scale_repair import reuse_failed_preparation
+            repair = reuse_failed_preparation(cfg, out)
+            print('REUSED completed general QA metadata and existing media from ' + repair['prior_run'], flush=True)
+        else:
+            prepare_general(out / 'general-config.json', out / 'general')
         mixture = {**cfg, 'general_data': str(out / 'general'), 'data_out': str(out / 'mixture')}
         # These are verified prior training media, not alternate labels/populations.
         prior = Path('/nas-data/vlm/yyy/tracevl-data/core-mixed-temporal-97272fb/nextqa-media/media')
         if prior.is_dir():
             mixture['nextqa_roots'] = [*cfg['nextqa_roots'], str(prior)]
+        if repair:
+            mixture['media_repair'] = repair
+            mixture['nextqa_roots'] = [*mixture['nextqa_roots'],
+                str(Path(repair['prior_run']) / 'mixture/nextqa-media/media')]
         write_json(out / 'mixture-config.json', mixture)
         print('[2/3] Freeze 10k general + 10k official train temporal QA; decode and overlap audit', flush=True)
         prepare_mixture(mixture, out / 'mixture')

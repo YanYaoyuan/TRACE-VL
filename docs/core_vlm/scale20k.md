@@ -113,3 +113,38 @@ Local validation covers core/run-I/O tests, real archive extraction and protecte
 held-out byte copies, fixed family counts, live-log timing, release identity and
 checkpoint failure handling. The full 20k inventory and real four-A100 execution
 remain to be validated on the operator's machine.
+
+## Explicit missing-training-media amendment (2026-11-17)
+
+The operator's `core-scale20k-03bdf57-001` general preparation completed, but the
+fixed temporal selection found 3,639 of 3,640 videos. The missing filename was
+`8850274965.mp4`; there were no ambiguous matches, unreadable extracted files,
+or skipped archives. Searching the operator's data roots found no loose copy.
+
+The repair launcher accepts these two explicit settings together:
+
+```bash
+TRACE_REPAIR_FROM=/nas-data/vlm/yyy/tracevl-runs/core-scale20k-03bdf57-001
+TRACE_EXCLUDE_TRAINING_VIDEO=8850274965.mp4
+```
+
+Export both settings when launching the **new pinned revision**, for preparation
+and later training. Keep the new revision's default output directory and the
+original worker/configuration settings. The old failed directory is preserved.
+
+This is a documented training-population amendment before any expanded training:
+reconstruct the same deterministic selection, then drop only the selected
+training questions referencing that missing file. Do not resample, relabel or
+borrow evaluation videos. Both arms receive the identical reduced manifest;
+`queue-plan.json` reports actual counts instead of claiming exactly 20,000.
+The per-arm 2,500 updates, all validation minimums and evaluation rules remain.
+
+The repair validates the prior configuration, annotation and external-population
+hashes, missing-media audit, and completed general-data provenance. It copies
+small general metadata only, reuses absolute media paths, and adds the previously
+extracted temporal directory to the lookup roots. It still hashes selected media
+and validates decoding and held-out overlap. Keep the prior directory because
+new manifests can reference its files. `repair.json` and
+`mixture/media-exclusion.json` record source hashes, exact excluded question IDs,
+selection hashes and zero replacements; both are included in the report bundle.
+Any additional missing/corrupt media still stops preparation.

@@ -143,3 +143,25 @@ def test_temporal_capacity_failure_precedes_any_video_work(tmp_path, monkeypatch
     with pytest.raises(ValueError, match='insufficient raw temporal'):
         scale.temporal_capacity({'nextqa_train': str(path), 'seed': 17, 'questions_per_family': 10000}, tmp_path)
     assert json.loads((tmp_path / 'capacity-preflight.json').read_text())['raw_temporal_questions'] == 1
+
+
+def test_explicit_missing_media_plan_reports_actual_counts_and_refuses_unrecorded_shrink(tmp_path):
+    import copy
+    cfg = {'gpus': [0, 1, 2, 3], 'accumulation': 4, 'updates': 2500,
+           'questions_per_family': 10000, 'pilot_run': str(tmp_path),
+           'repair_from': str(tmp_path / 'old'), 'exclude_training_videos': ['8850274965.mp4']}
+    amendment = {'selected_before': 20000, 'retained_after': 19998, 'replacement_questions': 0,
+                 'excluded_by_family': {'temporal': 2},
+                 'excluded_questions': [dict(id=str(i), video='8850274965.mp4', split='train',
+                                             mixture_family='temporal') for i in range(2)]}
+    inv = {'families': {'general': 10000, 'temporal': 9998}, 'media_exclusion': amendment}
+    plan = queue_plan(cfg, inv)
+    assert plan['questions'] == 19998 and plan['target_before_media_exclusion'] == 20000
+    assert plan['example_presentations_per_arm'] == 40000
+    for key, value in [('replacement_questions', 1), ('retained_after', 20000)]:
+        bad = copy.deepcopy(inv)
+        bad['media_exclusion'][key] = value
+        with pytest.raises(ValueError, match='amendment'):
+            queue_plan(cfg, bad)
+    with pytest.raises(ValueError, match='audit missing'):
+        queue_plan(cfg, {'families': inv['families']})
