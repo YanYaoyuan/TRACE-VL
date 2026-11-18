@@ -9,14 +9,14 @@ import pytest
 @pytest.fixture
 def fake_swan(monkeypatch):
     calls = {'logs': [], 'init': [], 'finished': 0}
-    run = types.SimpleNamespace(mode='online',
+    run = types.SimpleNamespace(mode='online', url='https://swanlab.cn/test',
         log=lambda values, step=None: calls['logs'].append((step, values)),
         finish=lambda: calls.update(finished=calls['finished'] + 1))
     def init(**kwargs):
         calls['init'].append(kwargs)
         run.mode = kwargs['mode']
         return run
-    sdk = types.SimpleNamespace(init=init, get_url=lambda: 'https://swanlab.cn/test',
+    sdk = types.SimpleNamespace(init=init,
         Settings=lambda **kw: kw, Text=lambda content, caption=None: {'content': content, 'caption': caption})
     monkeypatch.setitem(sys.modules, 'swanlab', sdk)
     monkeypatch.setenv('TRACE_TRACKER', 'swanlab')
@@ -61,6 +61,30 @@ def test_log_failure_preserves_local_training_and_records_error(fake_swan, tmp_p
         tracker.log({'loss': .2}, step=1)
     assert tracker.error and path.read_text() == '{"loss": 0.2}'
     tracker.finish()
+
+
+def test_url_metadata_failure_does_not_discard_initialized_run(fake_swan, tmp_path, capsys):
+    from trace_vl.v3.swanlab_tracking import SwanTracker
+    calls, run = fake_swan
+    del run.url
+    with pytest.warns(UserWarning, match='URL unavailable.*tracking continues'):
+        tracker = SwanTracker.start(True, 't', None, 'test', directory=tmp_path)
+    assert tracker.active and tracker.mode == 'online' and tracker.error is None
+    tracker.log({'loss': .2}, step=1)
+    tracker.finish()
+    assert calls['logs'][-1] == (1, {'loss': .2}) and calls['finished'] == 1
+    assert 'url=None' in capsys.readouterr().out
+
+
+def test_startup_failure_is_not_misreported_as_login_failure(fake_swan, tmp_path, monkeypatch):
+    from trace_vl.core_vlm.swanlab_upload import upload
+    def fail(**kwargs):
+        raise AttributeError('SDK mismatch')
+    monkeypatch.setattr(sys.modules['swanlab'], 'init', fail)
+    with pytest.warns(UserWarning, match='init failed'):
+        with pytest.raises(RuntimeError, match=r'startup failed \(init: AttributeError\)') as caught:
+            upload(tmp_path)
+    assert 'login' not in str(caught.value)
 
 
 def test_relative_paths_chunks_and_raw_bytes_are_reconstructable(fake_swan, tmp_path):
@@ -167,3 +191,29 @@ def test_real_sdk_saves_scalars_and_exact_text_chunks_offline(tmp_path, monkeypa
     decoded = raw.decode()
     for i in range(0, len(decoded), 12000):
         assert decoded[i:i + 12000].encode() in contents
+
+
+def test_real_sdk_online_url_branch_uses_run_property_without_network(tmp_path, monkeypatch):
+    swanlab = pytest.importorskip('swanlab')
+    from trace_vl.v3.swanlab_tracking import SwanTracker
+    monkeypatch.setenv('SWANLAB_MODE', 'online')
+    monkeypatch.setenv('SWANLAB_ROOT', str(tmp_path / 'global'))
+    monkeypatch.setenv('TRACE_SWANLAB_PROJECT', 'trace-core-online-api-test')
+    monkeypatch.delenv('TRACE_SWANLAB_WORKSPACE', raising=False)
+    original_init = swanlab.init
+    def init_offline_transport(**kwargs):
+        # Use a real run and real URL descriptor, replacing only cloud setup.
+        # Its transport/context remain offline, so no authentication/network is used.
+        kwargs['mode'] = 'offline'
+        run = original_init(**kwargs)
+        run.__dict__['mode'] = 'online'
+        run._path = '/test/trace-core-online-api-test/test-run'
+        return run
+    monkeypatch.setattr(swanlab, 'init', init_offline_transport)
+    monkeypatch.delattr(swanlab, 'get_url', raising=False)
+    tracker = SwanTracker.start(True, 'online-api', 'test', 'test', directory=tmp_path / 'swanlog')
+    assert tracker.active and tracker.mode == 'online'
+    assert tracker.run.url.endswith('/@test/trace-core-online-api-test/runs/test-run')
+    tracker.log({'loss': .25}, step=1)
+    tracker.finish()
+    assert tracker.error is None

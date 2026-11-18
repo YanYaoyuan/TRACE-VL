@@ -49,15 +49,29 @@ class SwanTracker:
                 config=config or {}, tags=tags, logdir=str(directory), mode=requested,
                 on_online_error="offline", settings=settings, reinit=True,
                 **({"id": run_id, "resume": "allow"} if run_id else {}))
-            tracker = cls(run, run.mode)
-            url = swanlab.get_url() if tracker.mode == "online" else None
-            print(f"SWANLAB mode={tracker.mode} experiment={name} url={url}", flush=True)
-            if tracker.mode != requested:
-                warnings.warn(f"SwanLab requested {requested}, actual {tracker.mode}; local data retained for sync")
-            return tracker
         except Exception as error:  # noqa: BLE001 - local training logs remain authoritative
             warnings.warn(f"SwanLab init failed ({type(error).__name__}); tracking inactive, local logs retained")
-            return cls()
+            tracker = cls()
+            tracker.error = f"init: {type(error).__name__}"
+            return tracker
+        # SDK 0.10.5 exposes the URL on the returned run, not swanlab.get_url().
+        # Informational metadata must never discard an already initialized run.
+        try:
+            mode = run.mode
+        except Exception as error:  # noqa: BLE001
+            mode = "unknown"
+            warnings.warn(f"SwanLab mode unavailable ({type(error).__name__}); tracking continues")
+        tracker = cls(run, mode)
+        url = None
+        if mode == "online":
+            try:
+                url = run.url
+            except Exception as error:  # noqa: BLE001
+                warnings.warn(f"SwanLab URL unavailable ({type(error).__name__}); tracking continues")
+        print(f"SWANLAB mode={tracker.mode} experiment={name} url={url}", flush=True)
+        if tracker.mode != requested:
+            warnings.warn(f"SwanLab requested {requested}, actual {tracker.mode}; local data retained for sync")
+        return tracker
 
     @property
     def active(self):

@@ -65,7 +65,8 @@ def upload(root, operator_logs=(), watch=0):
                 'scope': 'Existing logs and scores only. No model execution or scientific reclassification.'},
         directory=target / 'swanlog', run_id=run_id)
     if not tracker.active:
-        raise RuntimeError('SwanLab did not initialize; log in with swanlab login first')
+        raise RuntimeError(f'SwanLab startup failed ({tracker.error or "no active run"}); '
+                           'see preceding warning; original logs retained')
     seen, mtime = {}, {}
     completed = False
     try:

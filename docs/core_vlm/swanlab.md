@@ -100,3 +100,14 @@ Validation passed 178 core/run-I/O/tracking tests, including real offline tests
 for both SwanLab and W&B. The owner's actual six-trial batch bundle also replayed
 successfully with the real SDK in offline mode: six scalar series and all nine
 text files. This validates the replay path; it was not uploaded to an account.
+
+The first owner online replay exposed an initialization-wrapper bug: SDK 0.10.5
+provides `run.url`, while this wrapper called an unavailable top-level
+`swanlab.get_url()`. The cloud experiment was created, but the wrapper discarded
+it and incorrectly suggested logging in again. The fix uses the returned run's
+URL property and keeps the run active if optional URL metadata cannot be read.
+Startup failures now retain their error category rather than implying an auth
+failure. Regression coverage includes a real SDK run with offline transport and
+the online metadata branch, plus an unavailable URL property and startup errors.
+Replaying with the fixed source resumes the same experiment ID; no training,
+new login or source-log edits are required.
