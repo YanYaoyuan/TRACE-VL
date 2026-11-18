@@ -1,4 +1,6 @@
-"""Optional Weights & Biases tracking (extra `track`). Everything here is a no-op unless enabled, so training and
+"""Optional experiment tracking. TRACE_TRACKER=swanlab selects SwanLab (extra `swanlab`);
+otherwise the legacy Weights & Biases backend (extra `track`) is used.
+Everything here is a no-op unless enabled, so training and
 evaluation behave identically without wandb, and **tracking can never stop training**:
 
 - every wandb call is wrapped; the first failure is reported once (warning) and tracking is switched off for the
@@ -26,6 +28,8 @@ from pathlib import Path
 
 
 def enabled_from_env() -> bool:
+    if os.environ.get("TRACE_TRACKER", "wandb").lower() == "swanlab":
+        return os.environ.get("TRACE_SWANLAB", "1").lower() in {"1", "true", "yes", "on"}
     return os.environ.get("TRACE_WANDB", "0").lower() in {"1", "true", "yes", "on"}
 
 
@@ -51,6 +55,9 @@ class Tracker:
               tags: list[str] | None = None, directory: str | Path | None = None) -> "Tracker":  # fmt: skip
         if not enabled:
             return cls(None)
+        if os.environ.get("TRACE_TRACKER", "wandb").lower() == "swanlab":
+            from .swanlab_tracking import SwanTracker
+            return SwanTracker.start(enabled, name, group, job_type, config, tags, directory)
         try:
             import wandb
         except ImportError:

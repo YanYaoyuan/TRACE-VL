@@ -1,5 +1,9 @@
 # True microbatch throughput and W&B
 
+The current scale-training launcher uses **SwanLab online** at the owner's request.
+See [SwanLab tracking and existing-log upload](swanlab.md). Historical benchmark
+numbers and the W&B integration below remain recorded for reproducibility.
+
 Core QA training now accepts `--microbatch-size`. A microbatch runs multiple
 independent questions through the LM together. Per-question answer CE and KL
 are averaged equally, with EOS included. Each example retains its native M-RoPE
@@ -143,7 +147,9 @@ This is a provisional estimate on 256 sampled training questions; full-mixture
 lengths, padding and cache behavior can change throughput. Follow the actual
 `train/{plain,temporal}/metrics.jsonl` rates during the run.
 
-W&B runs and curves are collected locally, grouped by the output folder. The final
+In the original offline-W&B handoff, runs and curves were collected locally,
+grouped by the output folder. The current launcher uses SwanLab online, uploads
+curves and text log/report records, and retains local experiment files. The final
 `reports.tar.gz` bundles reports, training metrics, predictions, smoke diagnostics
 and offline W&B runs, excluding model checkpoints. The launcher resumes completed
 training/evaluations using existing identities and verified outputs. It never
