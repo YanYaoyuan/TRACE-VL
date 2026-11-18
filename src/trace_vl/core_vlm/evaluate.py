@@ -18,6 +18,7 @@ import torch
 from trace_vl.v3.backbone import Backbone
 from trace_vl.v3.config import BackboneConfig, StreamConfig
 from trace_vl.v3.run_io import atomic_text, ensure_run_manifest
+from trace_vl.v3.tracking import Tracker, enabled_from_env
 
 from .control import checkpoint_identity, score_answer, select_records
 from .data import decode_observation, read_split, sha256
@@ -101,6 +102,19 @@ def run(args):
         atomic_text(out / "predictions.jsonl", "".join(json.dumps(r) + "\n" for r in predictions))
         atomic_text(out / "report.json", json.dumps(report, indent=2) + "\n")
         print(json.dumps(report), flush=True)
+        group = os.environ.get("TRACE_WANDB_GROUP") or out.parents[2].name
+        tracker = Tracker.start(enabled_from_env(), name=f"{group}-{out.parent.name}-{out.name}",
+            group=group, job_type="core-eval", config={**configuration, "run_id": identity["id"]},
+            directory=out / "wandb")
+        metrics = {f"eval/{k}": v["score"] for k, v in report["scores"].items()}
+        if all(type(p.get("choice")) is int for p in predictions):
+            from .transfer import stats
+            metrics.update({f"eval/{k}": v for k, v in stats(rows, {p["id"]: p for p in predictions}).items()})
+        tracker.log(metrics)
+        tracker.summary(metrics)
+        tracker.upload(f"{out.parent.name}-{out.name}-evaluation", "core-evaluation",
+                       [out / "run.json", out / "report.json", out / "predictions.jsonl"], base=out)
+        tracker.finish()
         return
     with (out / f".shard-{args.shard}.lock").open("a") as guard:
         fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)

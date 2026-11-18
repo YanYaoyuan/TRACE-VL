@@ -8,7 +8,9 @@ export TRACE_MODEL="${TRACE_MODEL:-/nas-data/vlm/models/qwen3.5_4b}"
 export TRACE_OUT="${TRACE_OUT:-/nas-data/vlm/yyy/tracevl-runs/core-preservation-${TRACE_REV:0:7}-001}"
 export TRACE_DEVICES="${TRACE_DEVICES:-0,1,2,3}"
 export TRACE_DATA_WORKERS="${TRACE_DATA_WORKERS:-32}"
-export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TRACE_WANDB=0 WANDB_MODE=offline
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+export TRACE_WANDB="${TRACE_WANDB:-1}" WANDB_MODE="${WANDB_MODE:-online}"
+export WANDB_PROJECT="${WANDB_PROJECT:-trace-vl-core}"
 export PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 py="${TRACE_PYTHON:-$TRACE_REPO/.venv/bin/python}"
 [[ -x "$py" ]] || { echo "Missing UV environment: $py" >&2; exit 2; }

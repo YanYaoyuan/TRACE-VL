@@ -76,7 +76,7 @@ def queue_plan(cfg, inventory):
         raise ValueError('repair exclusion audit missing')
     if counts != expected:
         raise ValueError('prepared family counts differ from the fixed expansion target')
-    effective = len(cfg['gpus']) * cfg['accumulation']
+    effective = len(cfg['gpus']) * cfg['accumulation'] * cfg.get('microbatch_size', 1)
     return {'prepared': True, 'gpu_started': False, 'questions': sum(counts.values()), 'families': counts,
             'target_before_media_exclusion': 2 * cfg['questions_per_family'], 'media_exclusion': amendment,
             'arms': ['plain', 'temporal'], 'updates_per_arm': cfg['updates'], 'effective_batch': effective,

@@ -1,8 +1,8 @@
 """Distributed native-video QA LoRA training with identity-checked recovery.
 
-One unpadded question per microbatch; the objective is the mean of each
-question's answer-token CE, including EOS. Every rank consumes the same number
-of microbatches. This is a core-model trainer, not an alert-head trainer.
+Microbatches contain independent questions with per-question mean answer CE,
+including EOS. Every rank consumes the same number of questions. Native video
+positions and the global shuffled question stream are preserved when regrouping.
 """
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from trace_vl.v3.backbone import Backbone
 from trace_vl.v3.config import BackboneConfig, StreamConfig
 from trace_vl.v3.run_io import atomic_text, ensure_run_manifest
+from trace_vl.v3.tracking import Tracker, enabled_from_env
 
 from .control import checkpoint_identity
 from .data import decode_observation, read_split, sha256
@@ -216,7 +217,8 @@ def run(args):
     import transformers
     world, rank, local = (int(os.environ.get(k, default))
                           for k, default in (("WORLD_SIZE", 1), ("RANK", 0), ("LOCAL_RANK", 0)))
-    if min(args.updates, args.accumulation, args.rank, args.save_every, args.steps) < 1 or args.updates >= 1_000_000:
+    microbatch = getattr(args, "microbatch_size", 1)
+    if min(args.updates, args.accumulation, args.rank, args.save_every, args.steps, microbatch) < 1 or args.updates >= 1_000_000:
         raise ValueError("positive training counts required")
     if args.examples < 0 or args.cache_mb < 0 or not math.isfinite(args.lr) or args.lr <= 0:
         raise ValueError("invalid examples/cache/lr")
@@ -312,36 +314,56 @@ def run(args):
     start, metrics = (0, []) if previous is None else restore_checkpoint(previous, run_id, params, optimizer, rank, world)
     wrapped = DDP(net, device_ids=[local], broadcast_buffers=False) if world > 1 else net
     samples = Samples(bb, args)
+    tracker = Tracker()
+    if rank == 0:
+        group = os.environ.get("TRACE_WANDB_GROUP") or out.parent.parent.name
+        tracker = Tracker.start(enabled_from_env(), name=f"{group}-{out.name}", group=group,
+            job_type="core-train", config={**configuration, "run_id": run_id, "world_size": world,
+                "effective_batch_size": world * args.accumulation * microbatch}, directory=out / "wandb")
     begin = time.monotonic()
     end = args.stop_after or args.updates
     for update in range(start, end):
+        update_begin = time.monotonic()
         net.train()
         optimizer.zero_grad(set_to_none=True)
         lr = args.lr * (.1 + .9 * .5 * (1 + math.cos(math.pi * update / max(1, args.updates - 1))))
         for group in optimizer.param_groups:
             group["lr"] = lr
-        selected = sample_indices(len(rows), update, world, args.accumulation, rank, args.seed)
+        selected = sample_indices(len(rows), update, world, args.accumulation * microbatch, rank, args.seed)
         local_loss, local_tokens, selected_ids = 0., 0, []
         local_ce, local_kl, local_anchors = 0., 0., 0
-        for micro, index in enumerate(selected):
-            steps, record = samples.get(rows[index])
+        for micro in range(args.accumulation):
+            batch = [samples.get(rows[index]) for index in selected[micro * microbatch:(micro + 1) * microbatch]]
             bb.language_model.train()
-            anchor = preserve and record.get('mixture_family') == 'general'
-            teacher = original_answer_logits(net, steps, record) if anchor else None
+            if microbatch == 1:
+                steps, record = batch[0]
+                anchors = int(preserve and record.get('mixture_family') == 'general')
+                teacher = original_answer_logits(net, steps, record) if anchors else None
+                applied_weight = weight if anchors else 0.
+            else:
+                steps, record = [x[0] for x in batch], [x[1] for x in batch]
+                anchor_indices = [i for i, r in enumerate(record) if preserve and r.get('mixture_family') == 'general']
+                teacher = [None] * microbatch
+                if anchor_indices:
+                    values = original_answer_logits(net, [steps[i] for i in anchor_indices],
+                                                    [record[i] for i in anchor_indices])
+                    for i, value in zip(anchor_indices, values, strict=True):
+                        teacher[i] = value
+                anchors, applied_weight = len(anchor_indices), weight
             context = wrapped.no_sync() if world > 1 and micro < args.accumulation - 1 else nullcontext()
             with context:
                 loss, meta = wrapped(steps, record, teacher_logits=teacher,
-                    preservation_weight=weight if anchor else 0., preservation_temperature=temperature)
+                    preservation_weight=applied_weight, preservation_temperature=temperature)
                 if not torch.isfinite(loss):
                     raise RuntimeError("nonfinite answer loss")
                 (loss / args.accumulation).backward()
-            local_loss += float(loss.detach())
-            local_ce += meta['answer_ce']
-            local_kl += meta['preservation_kl']
-            local_anchors += int(anchor)
+            local_loss += float(loss.detach()) * microbatch
+            local_ce += meta['answer_ce'] * microbatch
+            local_kl += meta['preservation_kl'] * microbatch
+            local_anchors += anchors
             del teacher
             local_tokens += meta["answer_tokens"]
-            selected_ids.append(record["id"])
+            selected_ids.extend(x[1]["id"] for x in batch)
         norm = float(torch.nn.utils.clip_grad_norm_(list(params.values()), 1., error_if_nonfinite=True))
         temporal_norm = sum(float(p.grad.detach().float().square().sum()) for n, p in params.items()
                             if n.startswith("temporal.") and p.grad is not None) ** .5
@@ -353,20 +375,32 @@ def run(args):
         totals = torch.tensor([local_loss, local_tokens, local_ce, local_kl, local_anchors], dtype=torch.float64, device=f"cuda:{local}")
         if world > 1:
             dist.all_reduce(totals)
+        memory = torch.tensor([torch.cuda.max_memory_allocated(), torch.cuda.max_memory_reserved()],
+                              device=f"cuda:{local}", dtype=torch.float64)
+        if world > 1:
+            dist.all_reduce(memory, op=dist.ReduceOp.MAX)
         rank_ids = collective_list(selected_ids, world)
-        entry = {"update": update + 1, "loss": float(totals[0]) / (world * args.accumulation),
+        batch_size = world * args.accumulation * microbatch
+        entry = {"update": update + 1, "loss": float(totals[0]) / batch_size,
                  "answer_tokens": int(totals[1]), "question_ids_by_rank": rank_ids, "lr": lr,
-                 "answer_ce": float(totals[2]) / (world * args.accumulation),
-                 "preservation_kl_per_question": float(totals[3]) / (world * args.accumulation),
+                 "answer_ce": float(totals[2]) / batch_size,
+                 "preservation_kl_per_question": float(totals[3]) / batch_size,
                  "preservation_kl_per_anchor": float(totals[3]) / max(1., float(totals[4])),
                  "teacher_questions": int(totals[4]),
                  "gradient_norm": norm, "wall_seconds_this_invocation": time.monotonic() - begin,
+                 "microbatch_size": microbatch, "effective_batch_size": batch_size,
+                 "seconds_per_update": time.monotonic() - update_begin,
+                 "peak_allocated_gib_max": float(memory[0]) / 2**30,
+                 "peak_reserved_gib_max": float(memory[1]) / 2**30,
                  "temporal_gradient_norm_after_clip": temporal_norm,
                  "peak_allocated_gib_rank0": torch.cuda.max_memory_allocated() / 2**30}
         metrics.append(entry)
         if rank == 0:
+            entry["samples_per_second"] = batch_size / entry["seconds_per_update"]
+            entry["answer_tokens_per_second"] = entry["answer_tokens"] / entry["seconds_per_update"]
             atomic_text(out / "metrics.jsonl", "".join(json.dumps(x) + "\n" for x in metrics))
             print(json.dumps(entry), flush=True)
+            tracker.log(entry, step=update + 1)
         if (update + 1) % args.save_every == 0 or update + 1 == end:
             save_checkpoint(out, update + 1, run_id, bb, params, optimizer, rank, world, metrics)
     if rank == 0:
@@ -380,6 +414,12 @@ def run(args):
         print(f"{'VERIFIED training complete' if end == args.updates else 'CHECKPOINTED partial run'}: {out}", flush=True)
     if world > 1:
         dist.destroy_process_group()
+    if rank == 0:
+        tracker.summary({"completed_updates": end, "completed": end == args.updates,
+                         "checkpoint": str(final), "run_id": run_id})
+        tracker.upload(out.name + "-training", "core-training", [out / "run.json", out / "metrics.jsonl",
+                       out / "status.json"], base=out)
+        tracker.finish()
     if lock:
         lock.close()
 
@@ -400,6 +440,7 @@ def main():
     p.add_argument("--examples", type=int, default=0, help="zero uses all saved training rows")
     p.add_argument("--updates", type=int, default=1000)
     p.add_argument("--accumulation", type=int, default=4)
+    p.add_argument("--microbatch-size", type=int, default=1, help="questions processed together per GPU")
     p.add_argument("--rank", type=int, default=8)
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--seed", type=int, default=7)

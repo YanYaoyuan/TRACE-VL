@@ -156,6 +156,10 @@ class VideoQALoss(nn.Module):
 
     def forward(self, steps: list[VisualStep], record: dict, *, teacher_logits=None,
                 preservation_weight=0., preservation_temperature=2.):
+        if isinstance(record, list):
+            return self.batch_loss(steps, record, teacher_logits=teacher_logits,
+                                   preservation_weight=preservation_weight,
+                                   preservation_temperature=preservation_temperature)
         logits, targets, metadata = self.answer_logits(steps, record)
         ce = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets)
         if not math.isfinite(preservation_weight) or preservation_weight < 0:
@@ -174,6 +178,71 @@ class VideoQALoss(nn.Module):
                           log_target=True, reduction="none").sum(-1).mean() * t * t
         return ce + preservation_weight * kl, {**metadata, "answer_ce": float(ce.detach()),
             "preservation_kl": float(kl.detach()), "teacher_used": teacher_logits is not None}
+
+    def answer_logits_batch(self, steps, records):
+        """Right-pad independent examples while preserving each native position.
+
+        Only answer positions reach the vocabulary projection. Causal attention
+        and the padding mask isolate samples, including hybrid linear layers.
+        """
+        if not records or len(steps) != len(records):
+            raise ValueError("nonempty matching visual/record batches required")
+        inputs, coordinates, targets, metadata, starts = [], [], [], [], []
+        for visual, record in zip(steps, records, strict=True):
+            embeds, positions, counter, answer, info = self.prefix(visual, record)
+            ids = self.bb.ids(answer)
+            if not ids:
+                raise ValueError("tokenizer produced an empty answer")
+            if self.answer_end_token_id is not None:
+                ids = ids + [self.answer_end_token_id]
+            starts.append(embeds.shape[1] - 1)
+            if len(ids) > 1:
+                embeds = torch.cat([embeds, self.bb.embed_ids(ids[:-1])], 1)
+                positions = torch.cat([positions, counter.text(len(ids) - 1, self.bb.device)], 1)
+            inputs.append(embeds[0])
+            coordinates.append(positions)
+            targets.append(torch.tensor(ids, device=embeds.device, dtype=torch.long))
+            metadata.append({**info, "answer_tokens": len(ids), "sequence_tokens": embeds.shape[1]})
+        length = max(x.shape[0] for x in inputs)
+        embeds = torch.stack([F.pad(x, (0, 0, 0, length - len(x))) for x in inputs])
+        positions = torch.stack([F.pad(p, (0, length - p.shape[1])) for p in coordinates], dim=1)
+        attention = torch.arange(length, device=embeds.device)[None] < torch.tensor(
+            [len(x) for x in inputs], device=embeds.device)[:, None]
+        hidden = self.bb.lm(embeds, positions, cache=None, use_cache=False, attention_mask=attention)
+        answer_hidden = torch.cat([hidden[i, start:start + len(target)]
+                                   for i, (start, target) in enumerate(zip(starts, targets, strict=True))])
+        logits = self.bb.logits(answer_hidden[None]).float()[0]
+        return list(logits.split([len(t) for t in targets])), targets, metadata
+
+    def batch_loss(self, steps, records, *, teacher_logits=None,
+                   preservation_weight=0., preservation_temperature=2.):
+        if not math.isfinite(preservation_weight) or preservation_weight < 0:
+            raise ValueError("invalid preservation weight")
+        if not math.isfinite(preservation_temperature) or preservation_temperature <= 0:
+            raise ValueError("invalid preservation temperature")
+        logits, targets, metadata = self.answer_logits_batch(steps, records)
+        teachers = [None] * len(records) if teacher_logits is None else teacher_logits
+        if len(teachers) != len(records):
+            raise ValueError("teacher batch differs from student batch")
+        ce, kl = [], []
+        for value, target, teacher in zip(logits, targets, teachers, strict=True):
+            ce.append(F.cross_entropy(value, target))
+            divergence = value.new_zeros(())
+            if teacher is not None:
+                if teacher.requires_grad or teacher.shape != value.shape:
+                    raise ValueError("teacher must be detached and match answer positions/vocabulary")
+                t = preservation_temperature
+                divergence = F.kl_div(F.log_softmax(value / t, -1),
+                    F.log_softmax(teacher.float() / t, -1), log_target=True,
+                    reduction="none").sum(-1).mean() * t * t
+            kl.append(divergence)
+        mean_ce, mean_kl = torch.stack(ce).mean(), torch.stack(kl).mean()
+        return mean_ce + preservation_weight * mean_kl, {
+            "answer_ce": float(mean_ce.detach()), "preservation_kl": float(mean_kl.detach()),
+            "teacher_questions": sum(x is not None for x in teachers),
+            "answer_tokens": sum(m["answer_tokens"] for m in metadata),
+            "sequence_tokens": sum(m["sequence_tokens"] for m in metadata),
+            "padded_sequence_tokens": len(records) * max(m["sequence_tokens"] for m in metadata)}
 
     @torch.no_grad()
     def generate(self, steps: list[VisualStep], record: dict, max_new_tokens: int = 16,

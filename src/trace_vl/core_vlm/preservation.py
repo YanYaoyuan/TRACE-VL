@@ -25,6 +25,9 @@ def original_answer_logits(student, steps, record):
         with bb.peft.disable_adapter():
             teacher = NativeVideoQALoss(bb, mode=student.mode, pool_grid=student.pool_grid,
                                        answer_end_token_id=student.answer_end_token_id)
+            if isinstance(record, list):
+                logits, _, _ = teacher.answer_logits_batch(steps, record)
+                return [value.detach() for value in logits]
             logits, _, _ = teacher.answer_logits(steps, record)
             return logits.detach()
     finally:

@@ -228,11 +228,17 @@ class Backbone:
 
         return DynamicCache(config=self.text_config)
 
-    def lm(self, embeds: torch.Tensor, positions: torch.Tensor, cache=None, use_cache=True):
-        """embeds [1, L, d]; positions [3, L]. Returns last hidden states [1, L, d]."""
+    def lm(self, embeds: torch.Tensor, positions: torch.Tensor, cache=None, use_cache=True,
+           attention_mask=None):
+        """Accept single [3,L] or batched [3,B,L] M-RoPE coordinates."""
+        if positions.ndim == 2:
+            positions = positions.view(3, 1, -1)
+        if positions.shape != (3, embeds.shape[0], embeds.shape[1]):
+            raise ValueError("positions must match the embedding batch and sequence")
         out = self.language_model(
             inputs_embeds=embeds,
-            position_ids=positions.view(3, 1, -1).to(self.device),
+            position_ids=positions.to(self.device),
+            attention_mask=attention_mask,
             past_key_values=cache,
             use_cache=use_cache,
         )

@@ -96,6 +96,7 @@ def training_command(cfg, manifest, out, mode, *, flow=False):
             *shared_args(cfg, manifest), "--out", str(out), "--mode", mode,
             "--updates", str(cfg["flow_updates"] if flow else cfg["updates"]),
             "--accumulation", str(1 if flow else cfg["accumulation"]),
+            "--microbatch-size", str(cfg.get("microbatch_size", 1)),
             "--rank", str(cfg["rank"]), "--lr", str(cfg["lr"]), "--seed", str(cfg["seed"]),
             "--save-every", str(cfg["save_every"]), "--cache-mb", str(cfg["cache_mb"]), "--native-check"]
 
