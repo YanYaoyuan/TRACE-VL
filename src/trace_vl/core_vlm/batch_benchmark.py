@@ -58,7 +58,8 @@ def recommend(trials, memory_limit=32., loss_tolerance=.02):
             candidates[size] = sum(measured)
     best = min(candidates, key=candidates.get) if candidates else None
     return {"microbatch_size": best, "accumulation": 4 // best if best else None,
-            "effective_batch_size": 16, "candidate_seconds": candidates,
+            "effective_batch_size": 16,
+            "candidate_seconds": {str(size): seconds for size, seconds in candidates.items()},
             "memory_limit_gib": memory_limit, "first_loss_absolute_tolerance": loss_tolerance,
             "scope": "Timing recommendation on this training prefix. GPU gradients require numerical tolerance. "
                      "Inspect first-loss differences and full training curves before scientific claims."}

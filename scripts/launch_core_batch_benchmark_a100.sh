@@ -5,6 +5,7 @@ export TRACE_REPO="${TRACE_REPO:-/data/yyy/TRACE-VL}"
 export TRACE_PREPARED="${TRACE_PREPARED:-/nas-data/vlm/yyy/tracevl-runs/core-scale20k-b2919d8-001}"
 export TRACE_OUT="${TRACE_OUT:-/nas-data/vlm/yyy/tracevl-runs/core-batch-${TRACE_REV:0:7}-001}"
 export TRACE_WANDB="${TRACE_WANDB:-1}" WANDB_PROJECT="${WANDB_PROJECT:-trace-vl-core}"
+export WANDB_MODE="${WANDB_MODE:-offline}"
 export TRACE_WANDB_INIT_TIMEOUT="${TRACE_WANDB_INIT_TIMEOUT:-15}"
 export TRACE_WANDB_GROUP="${TRACE_WANDB_GROUP:-$(basename "$TRACE_OUT")}"
 export CUDA_VISIBLE_DEVICES=0,1,2,3 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1

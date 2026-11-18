@@ -50,6 +50,15 @@ def test_real_wandb_offline_records_curves_and_artifact(tmp_path, monkeypatch):
     tracker = Tracker.start(True, "batch4", "test", "core-train", config={"microbatch_size": 4}, directory=tmp_path)
     assert tracker.active and tracker.mode == "offline"
     tracker.log({"loss": 1., "samples_per_second": 3., "peak_allocated_gib_max": 12.}, step=1)
+    from trace_vl.core_vlm.batch_benchmark import recommend
+    trials = {f"{arm}-mb{size}": {"passed": True, "question_ids_by_update": [["same"]],
+              "initial_lora": "same", "first_loss": 1., "peak_reserved_gib_max": 12.,
+              "median_seconds_per_update": 12. / size}
+              for arm in ("plain", "temporal") for size in (1, 2, 4)}
+    recommendation = recommend(trials)
+    tracker.summary(recommendation)
+    assert tracker.active, tracker.error
+    assert dict(tracker.run.summary["candidate_seconds"]) == {"1": 24., "2": 12., "4": 6.}
     report = tmp_path / "report.json"
     report.write_text('{"completed": true}')
     artifact = tracker.upload("core-test-report", "core-evaluation", [report], base=tmp_path)

@@ -48,8 +48,8 @@ throughput remain to be measured by this launcher.
 ## W&B
 
 The new benchmark and scale/preservation launchers default to `TRACE_WANDB=1`.
-The default project is `trace-vl-core`. Authenticate once with the A100
-environment's `python -m wandb login`. The existing project extra `track`
+They default to `WANDB_MODE=offline` for the A100 machine without Internet.
+The default project is `trace-vl-core`. The existing project extra `track`
 provides the SDK. If adding it to an already working environment, install the
 locked SDK using that environment's Python and `uv pip install wandb==0.31.0`.
 
@@ -65,6 +65,16 @@ handles startup failures by collecting offline when possible and preserves
 local metrics if logging fails. Normal tracker shutdown occurs after DDP
 shutdown. Resumed invocations create separate W&B runs with the same saved
 training identity in config. `WANDB_MODE=offline` explicitly collects locally.
-Later sync those directories with `trace-vl v3 wandb-sync --runs RUN_DIRECTORY`.
+For cloud viewing later, move the offline runs to a connected machine, authenticate
+with `python -m wandb login`, then use `trace-vl v3 wandb-sync --runs RUN_DIRECTORY`.
 `TRACE_WANDB=0` disables tracking. API keys belong in W&B login or environment
 variables. Experiment scripts and configs contain no credentials.
+
+The first owner A100 short benchmark completed all trials and recommended per-GPU
+microbatch 4 with accumulation 1. Screenshot-transcribed combined median times
+were about 30.03 seconds for microbatch 1 and 23.88 seconds for microbatch 4 across
+the two architecture arms, a throughput ratio of about 1.26. Raw report review is
+still pending. Its final W&B comparison summary failed because an in-memory
+dictionary used integer batch-size keys. These keys are now strings, matching the
+JSON report representation, and a real offline-SDK test covers the complete
+recommendation summary. The saved benchmark JSON and trial results remain valid.
