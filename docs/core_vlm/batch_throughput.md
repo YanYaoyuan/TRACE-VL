@@ -42,8 +42,8 @@ Local validation passed 156 core/run-I/O/tracking tests, including the real W&B
 against sequential accumulation on a tiny Qwen3.5 model with both full and linear
 attention, different question/answer lengths, temporal parameters and gradient
 checkpointing. CPU tests also check sample isolation and unchanged sampling.
-The local NVIDIA driver was unavailable. Four-A100 training, GPU memory and
-throughput remain to be measured by this launcher.
+The local NVIDIA driver was unavailable. The subsequent owner-supplied A100
+measurements are audited below; local CPU validation does not replace GPU testing.
 
 ## W&B
 
@@ -70,11 +70,81 @@ with `python -m wandb login`, then use `trace-vl v3 wandb-sync --runs RUN_DIRECT
 `TRACE_WANDB=0` disables tracking. API keys belong in W&B login or environment
 variables. Experiment scripts and configs contain no credentials.
 
-The first owner A100 short benchmark completed all trials and recommended per-GPU
-microbatch 4 with accumulation 1. Screenshot-transcribed combined median times
-were about 30.03 seconds for microbatch 1 and 23.88 seconds for microbatch 4 across
-the two architecture arms, a throughput ratio of about 1.26. Raw report review is
-still pending. Its final W&B comparison summary failed because an in-memory
-dictionary used integer batch-size keys. These keys are now strings, matching the
-JSON report representation, and a real offline-SDK test covers the complete
-recommendation summary. The saved benchmark JSON and trial results remain valid.
+## Audited A100 result, 2026-11-18
+
+The supplied `batch-reports` bundle contains the completed report, six trial logs,
+trial summaries and source/data identity. All 12 updates in each trial have finite
+losses and nonzero finite gradients. Per-rank question IDs, learning rates, answer
+token counts and teacher question counts match across all six runs. Recomputing
+the medians from the logs reproduces the report. Initial LoRA digests agree. Saved
+checkpoint metadata is included; checkpoint weights themselves were not in this
+local bundle and were not independently rehashed here.
+
+| Arm | Microbatch | Accumulation | Seconds/update | Samples/second | Peak reserved GiB |
+|---|---:|---:|---:|---:|---:|
+| Plain LoRA | 1 | 4 | 14.958 | 1.070 | 10.781 |
+| Plain LoRA | 2 | 2 | 13.074 | 1.224 | 10.781 |
+| Plain LoRA | 4 | 1 | 11.904 | 1.344 | 10.783 |
+| Temporal + LoRA | 1 | 4 | 15.076 | 1.061 | 10.789 |
+| Temporal + LoRA | 2 | 2 | 13.130 | 1.219 | 10.789 |
+| Temporal + LoRA | 4 | 1 | 11.975 | 1.336 | 10.791 |
+
+At global batch 16, microbatch 4 reduces the combined step time from 30.034 to
+23.878 seconds: 20.5% less time, or 25.8% greater throughput. First-loss differences
+from microbatch 1 are 0.01598 (batch 2) and 0.00999 (batch 4), within the previously
+declared 0.02 tolerance. GPU results are numerically approximate, not bit-identical.
+This is a throughput result, not evidence of accuracy or architectural improvement.
+
+Provenance: prepared completion SHA256
+`e26c3e57e97b872db49afea7d3f8baee12ee4e460687eb3aaddf2e40e4cf248d`,
+training manifest SHA256
+`eddd5110998c5bbfc8ab43df81986f2cd26e8ff2ca4f364cd805c52b81cddd52`.
+The prepared completion hash matches the supplied scale-preparation bundle.
+
+The old benchmark's final W&B comparison summary failed because an in-memory
+dictionary used integer batch-size keys. These keys are now strings, and a real
+offline-SDK test covers the complete recommendation summary. Benchmark results in
+the JSON and local logs remain valid. The new queue forces offline mode, so no
+W&B authentication or network connection is required.
+
+## Run the prepared expansion
+
+`scripts/launch_core_scale_train_a100.sh` takes a pinned `TRACE_REV` and defaults to:
+
+- Prepared data: `/nas-data/vlm/yyy/tracevl-runs/core-scale20k-b2919d8-001`.
+- Batch audit: `/nas-data/vlm/yyy/tracevl-runs/core-batch-43fdd72-001`.
+- A new output folder: `core-scale20k-mb4-<revision>-001` under the same runs root.
+
+The launcher runs CPU regressions, checks preparation and benchmark identities,
+re-audits the completed preservation pilot checkpoints, and reuses the prepared
+mixture. It rehashes training media and checks frozen external data; it does not
+rescan archives or repeat full video decoding. Keep the original preparation
+folders because manifest paths can refer to media extracted during earlier runs.
+
+The queue is a new owner-authorized expansion experiment after the failed pilot
+gates, whose decisions remain recorded. Both arms start from the original
+Qwen3.5-4B weights, with the same 19,997 training questions (10,000 general and
+9,997 temporal), seed, LR, global batch 16 and 2,500-update schedule. It trains
+ordinary LoRA and causal temporal + LoRA sequentially, with original-teacher KL
+weight 0.5 on general QA. Both receive a two-update smoke train/evaluation before
+full training. Final checkpoints are compared with the original-grid model on
+the frozen OVO/NExT-QA development populations, including HLD/non-HLD retention
+checks and paired intervals. Final-test data stays frozen.
+
+No additional reviewed answerability pairs are supplied by default. This run is
+QA plus preservation KL, not a newly supervised refusal model. An explicitly
+reviewed training-only file can be passed as `TRACE_REVIEWED_PAIRS`; it is checked
+by the existing answerability loader and recorded in the new identity. Changing
+inputs, supervision or source requires a new output directory.
+
+At the short-trial rates, the two 2,500-update trainings project to 16.6 hours
+combined, excluding smoke checks, media hashes, checkpoint writes and evaluation.
+This is a provisional estimate on 256 sampled training questions; full-mixture
+lengths, padding and cache behavior can change throughput. Follow the actual
+`train/{plain,temporal}/metrics.jsonl` rates during the run.
+
+W&B runs and curves are collected locally, grouped by the output folder. The final
+`reports.tar.gz` bundles reports, training metrics, predictions, smoke diagnostics
+and offline W&B runs, excluding model checkpoints. The launcher resumes completed
+training/evaluations using existing identities and verified outputs. It never
+starts a further expansion after this experiment finishes.
