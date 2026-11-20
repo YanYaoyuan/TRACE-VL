@@ -109,6 +109,9 @@ def run(cfg, out, prepare_only=False, smoke_only=False):
         fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
         if cfg['updates'] < 2 or cfg['flow_updates'] != 2 or not cfg['gpus']:
             raise ValueError('two-update smoke and positive full schedule required')
+        midpoint = cfg.get('curve_checkpoint')
+        if midpoint is not None and (not 0 < midpoint < cfg['updates'] or midpoint % cfg['save_every']):
+            raise ValueError('learning-curve checkpoint must be a scheduled training save')
         external_cfg = json.loads((Path(cfg['external_data']) / 'inputs.json').read_text())['config']
         for key in ('model', 'steps', 'pixels', 'pool_grid', 'timestamp_policy'):
             if cfg[key] != external_cfg[key]:
@@ -147,14 +150,16 @@ def run(cfg, out, prepare_only=False, smoke_only=False):
             checked_checkpoint(path, json.loads((folder / 'run.json').read_text())['id'])
             return path
 
-        def evaluate(dataset, path, name, checkpoint, flow=False):
-            directory = out / ('smoke-eval' if flow else 'eval') / dataset / name
+        def evaluate(dataset, path, name, checkpoint, flow=False, *, subdir='eval'):
+            subdir = 'smoke-eval' if flow else subdir
+            directory = out / subdir / dataset / name
             cmd = [sys.executable, '-m', 'trace_vl.core_vlm.evaluate', *shared_args(cfg, path),
                    '--out', str(directory), '--mode', 'grid', '--shards', str(len(cfg['gpus'])),
                    '--max-new-tokens', str(cfg['max_new_tokens']), '--mc-choice-score']
             if checkpoint is not None:
                 cmd += ['--checkpoint', str(checkpoint)]
-            tag = f'{"smoke-" if flow else ""}{dataset}-{name}'
+            prefix = 'smoke-' if flow else '' if subdir == 'eval' else f'{subdir}-'
+            tag = f'{prefix}{dataset}-{name}'
             run_jobs([(f'{tag}-{i}', [*cmd, '--shard', str(i)], [gpu])
                       for i, gpu in enumerate(cfg['gpus'])], env, out / 'logs')
             run_jobs([(tag + '-report', [*cmd, '--report-only'], [])], env, out / 'logs')
@@ -196,6 +201,19 @@ def run(cfg, out, prepare_only=False, smoke_only=False):
             report['capability_retention'] = retention_report(external, out / 'eval')
             report['decision']['architecture_gate_passed'] = report['decision']['passed']
             report['decision']['passed'] &= report['capability_retention']['passed']
+        if midpoint is not None:
+            subdir = f'eval-step-{midpoint:06d}'
+            middle = {name: out / 'train' / name / f'checkpoint-{midpoint:06d}' for name in ARMS}
+            for name, path in middle.items():
+                run_id = json.loads((path.parent / 'run.json').read_text())['id']
+                if checked_checkpoint(path, run_id)['update'] != midpoint:
+                    raise ValueError('learning-curve checkpoint differs')
+            print(f'LEARNING CURVE: evaluate step {midpoint} on the same development data', flush=True)
+            for dataset, path in external.items():
+                for name, checkpoint in middle.items():
+                    evaluate(dataset, path, name, checkpoint, subdir=subdir)
+            report['learning_curve'] = {str(midpoint): matched_report(
+                external, out / subdir, tuple(ARMS), [('temporal', 'plain')])}
         write_json(out / 'report.json', report)
         lines = ['# Core video-model mixed-training pilot', '', json.dumps(report['decision']), '',
                  '| Dataset | Arm | Choice accuracy | Strict accuracy | Format valid |', '|---|---|---:|---:|---:|']

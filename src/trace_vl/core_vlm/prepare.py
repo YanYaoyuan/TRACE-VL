@@ -318,6 +318,9 @@ def prepare(config, out):
     fraction = cfg.setdefault("max_decode_error_fraction", 0.)
     if not isinstance(fraction, (float, int)) or not math.isfinite(fraction) or not 0 <= fraction < 1:
         raise ValueError("invalid max_decode_error_fraction")
+    missing_fraction = cfg.get("max_missing_fraction", 0.)
+    if not isinstance(missing_fraction, (float, int)) or not 0 <= missing_fraction < 1:
+        raise ValueError("invalid max_missing_fraction")
     if not cfg["benchmark_roots"]:
         raise ValueError("explicit benchmark exclusion inventories are required")
     out = Path(out).resolve()
@@ -328,17 +331,19 @@ def prepare(config, out):
         return _prepare(cfg, out)
 
 
-def protected_holdouts(paths):
-    """Exclude prior validation sources AND exact media bytes when expanding data."""
+def protected_holdouts(paths, split="val"):
+    """Exclude sources and exact media bytes from a recorded split."""
     from .data import read_split
-    blocked, fingerprints, records = set(), set(), {}
+    blocked, videos, records = set(), set(), {}
     for name in paths:
         path = Path(name)
         records[str(path)] = sha256(path)
-        for row in read_split(path, 'val'):
+        for row in read_split(path, split):
             blocked.update(row.get('source_aliases', []))
             blocked.update(aliases(row['video']))
-            fingerprints.add(sha256(row['video']))
+            videos.add(row['video'])
+    with ThreadPoolExecutor(8) as pool:
+        fingerprints = set(pool.map(sha256, sorted(videos)))
     return blocked, fingerprints, records
 
 
@@ -348,6 +353,10 @@ def _prepare(cfg, out):
     blocked = set().union(*(aliases(k) for k in blocked))
     protected, protected_bytes, protected_records = protected_holdouts(cfg.get('protected_manifests', []))
     blocked.update(protected)
+    previous_train, previous_bytes, previous_records = protected_holdouts(
+        cfg.get('previous_training_manifests', []), 'train')
+    blocked.update(previous_train)
+    protected_bytes.update(previous_bytes)
     kinds = cfg.get('qa_kinds', ['mc', 'oe'])
     if not kinds or not set(kinds) <= {'mc', 'oe'}:
         raise ValueError('invalid QA kinds')
@@ -381,6 +390,8 @@ def _prepare(cfg, out):
     identity = {"protocol": "core-llava-prepare-v1", "config": cfg, "annotations": annotations,
                 "benchmarks": benchmarks, "archives": archives, "implementation": implementation_identity(),
                 "protected_manifests": protected_records}
+    if previous_records:
+        identity["previous_training_manifests"] = previous_records
     identity["id"] = digest(identity)
     ensure_run_manifest(out / "run.json", identity)
     conflicts = []
@@ -446,12 +457,15 @@ def _prepare(cfg, out):
             if path.is_file():
                 resolved[(source, video)] = str(path)
     write_json(out / "media.json", media)
-    unavailable = [(r["source"], r["relative_video"]) for r in selected
-                   if (r["source"], r["relative_video"]) not in resolved]
+    requested = {(r["source"], r["relative_video"]) for r in selected}
+    unavailable = requested - resolved.keys()
     if unavailable:
-        write_json(out / "missing.json", sorted(set(unavailable)))
-        raise ValueError(f"{len(set(unavailable))} selected videos unavailable; see missing.json, no training started")
-    selected = [{**r, "video": resolved[(r["source"], r["relative_video"])]} for r in selected]
+        write_json(out / "missing.json", sorted(unavailable))
+        if len(unavailable) / len(requested) > cfg.get("max_missing_fraction", 0.):
+            raise ValueError(f"{len(unavailable)} selected videos unavailable; see missing.json, no training started")
+        print(f"DATA QUALITY: excluded {len(unavailable)} unavailable media paths; see missing.json", flush=True)
+    selected = [{**r, "video": resolved[(r["source"], r["relative_video"])]} for r in selected
+                if (r["source"], r["relative_video"]) in resolved]
     verification, errors = {}, {}
     videos = sorted({r["video"] for r in selected})
     cache = out / "verified"
@@ -518,6 +532,8 @@ def _prepare(cfg, out):
               "are grouped within selected data; no cross-name/transcoded perceptual benchmark audit",
               "dialogue": "first QA pair only; previous gold answers are never put into the prompt",
               "manifest": str(out / "manifest.jsonl")}
+    if cfg.get("max_missing_fraction", 0.):
+        report["unavailable_media_paths"] = len(unavailable)
     write_json(out / "report.json", report)
     if problems:
         raise ValueError(f"insufficient split counts: {problems}; no training started")

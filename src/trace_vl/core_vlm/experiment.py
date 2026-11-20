@@ -91,7 +91,7 @@ def shared_args(cfg, manifest):
 
 
 def training_command(cfg, manifest, out, mode, *, flow=False):
-    return [sys.executable, "-m", "torch.distributed.run", "--standalone", "--nnodes=1",
+    command = [sys.executable, "-m", "torch.distributed.run", "--standalone", "--nnodes=1",
             f"--nproc_per_node={len(cfg['gpus'])}", "-m", "trace_vl.core_vlm.train",
             *shared_args(cfg, manifest), "--out", str(out), "--mode", mode,
             "--updates", str(cfg["flow_updates"] if flow else cfg["updates"]),
@@ -99,6 +99,9 @@ def training_command(cfg, manifest, out, mode, *, flow=False):
             "--microbatch-size", str(cfg.get("microbatch_size", 1)),
             "--rank", str(cfg["rank"]), "--lr", str(cfg["lr"]), "--seed", str(cfg["seed"]),
             "--save-every", str(cfg["save_every"]), "--cache-mb", str(cfg["cache_mb"]), "--native-check"]
+    if "decode_workers" in cfg:
+        command += ["--decode-workers", str(cfg["decode_workers"])]
+    return command
 
 
 def run_jobs(jobs, env, log_root):

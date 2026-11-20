@@ -16,6 +16,7 @@ import shutil
 import tempfile
 import time
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from datetime import timedelta
 from pathlib import Path
@@ -181,12 +182,26 @@ class Samples:
         self.bb, self.args = bb, args
         self.cache, self.bytes = OrderedDict(), 0
 
-    def get(self, row):
+    def decode(self, row):
+        return decode_observation(row, steps=self.args.steps, pixels=self.args.pixels)
+
+    def batch(self, rows):
+        missing = {row["id"]: row for row in rows if row["id"] not in self.cache}
+        workers = min(len(missing), getattr(self.args, "decode_workers", 1))
+        if workers < 2:
+            return [self.get(row) for row in rows]
+        # Only CPU decoding runs concurrently. Vision encoding and cache
+        # mutation keep the original sample order on the rank's CUDA stream.
+        with ThreadPoolExecutor(workers) as pool:
+            decoded = dict(zip(missing, pool.map(self.decode, missing.values()), strict=True))
+        return [self.get(row, decoded.get(row["id"])) for row in rows]
+
+    def get(self, row, decoded=None):
         key = row["id"]
         if key in self.cache:
             self.cache.move_to_end(key)
             return self.cache[key][0]
-        images, times, record, audit = decode_observation(row, steps=self.args.steps, pixels=self.args.pixels)
+        images, times, record, audit = self.decode(row) if decoded is None else decoded
         layout = prepare_native(self.bb.processor, images, times, record, audit,
                                 allow_native_timestamp_approximation=self.args.timestamp_policy == "native-index-fps")
         self.bb.visual.eval()
@@ -218,6 +233,8 @@ def run(args):
     world, rank, local = (int(os.environ.get(k, default))
                           for k, default in (("WORLD_SIZE", 1), ("RANK", 0), ("LOCAL_RANK", 0)))
     microbatch = getattr(args, "microbatch_size", 1)
+    if not 1 <= getattr(args, "decode_workers", 1) <= 16:
+        raise ValueError("decode_workers must be in [1, 16]")
     if min(args.updates, args.accumulation, args.rank, args.save_every, args.steps, microbatch) < 1 or args.updates >= 1_000_000:
         raise ValueError("positive training counts required")
     if args.examples < 0 or args.cache_mb < 0 or not math.isfinite(args.lr) or args.lr <= 0:
@@ -260,12 +277,15 @@ def run(args):
         lock = (out / ".train.lock").open("a")
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         configuration = {k: v for k, v in vars(args).items() if k not in {"out", "stop_after"}}
+        paths = sorted({r["video"] for r in rows})
+        with ThreadPoolExecutor(8) as pool:
+            videos = dict(zip(paths, pool.map(sha256, paths), strict=True))
         identity = {"protocol": "core-native-qa-train-v1", "config": configuration, "world_size": world,
                     "objective": ("mean per-question answer CE + configured weight * T^2 KL(original || student) "
                                   "on general-family answer positions incl EOS" if preserve else
                                   "mean per-question answer-token CE including EOS"),
                     "manifest_sha256": sha256(args.manifest), "ids": [r["id"] for r in rows],
-                    "videos": {p: sha256(p) for p in sorted({r["video"] for r in rows})},
+                    "videos": videos,
                     "model": checkpoint_identity(args.model), "torch": str(torch.__version__),
                     "transformers": transformers.__version__,
                     "deterministic_algorithms": True, "cublas_workspace": os.environ["CUBLAS_WORKSPACE_CONFIG"],
@@ -316,6 +336,8 @@ def run(args):
     samples = Samples(bb, args)
     tracker = Tracker()
     if rank == 0:
+        # Drop any log suffix beyond the restored checkpoint before appending.
+        atomic_text(out / "metrics.jsonl", "".join(json.dumps(x) + "\n" for x in metrics))
         group = os.environ.get("TRACE_WANDB_GROUP") or out.parent.parent.name
         tracker = Tracker.start(enabled_from_env(), name=f"{group}-{out.name}", group=group,
             job_type="core-train", config={**configuration, "run_id": run_id, "world_size": world,
@@ -332,8 +354,11 @@ def run(args):
         selected = sample_indices(len(rows), update, world, args.accumulation * microbatch, rank, args.seed)
         local_loss, local_tokens, selected_ids = 0., 0, []
         local_ce, local_kl, local_anchors = 0., 0., 0
+        sample_seconds = 0.
         for micro in range(args.accumulation):
-            batch = [samples.get(rows[index]) for index in selected[micro * microbatch:(micro + 1) * microbatch]]
+            begin_samples = time.monotonic()
+            batch = samples.batch([rows[index] for index in selected[micro * microbatch:(micro + 1) * microbatch]])
+            sample_seconds += time.monotonic() - begin_samples
             bb.language_model.train()
             if microbatch == 1:
                 steps, record = batch[0]
@@ -390,6 +415,7 @@ def run(args):
                  "gradient_norm": norm, "wall_seconds_this_invocation": time.monotonic() - begin,
                  "microbatch_size": microbatch, "effective_batch_size": batch_size,
                  "seconds_per_update": time.monotonic() - update_begin,
+                 "sample_preparation_seconds_rank0": sample_seconds,
                  "peak_allocated_gib_max": float(memory[0]) / 2**30,
                  "peak_reserved_gib_max": float(memory[1]) / 2**30,
                  "temporal_gradient_norm_after_clip": temporal_norm,
@@ -398,7 +424,8 @@ def run(args):
         if rank == 0:
             entry["samples_per_second"] = batch_size / entry["seconds_per_update"]
             entry["answer_tokens_per_second"] = entry["answer_tokens"] / entry["seconds_per_update"]
-            atomic_text(out / "metrics.jsonl", "".join(json.dumps(x) + "\n" for x in metrics))
+            with (out / "metrics.jsonl").open("a", encoding="utf-8") as log:
+                log.write(json.dumps(entry) + "\n")
             print(json.dumps(entry), flush=True)
             tracker.log(entry, step=update + 1)
         if (update + 1) % args.save_every == 0 or update + 1 == end:
@@ -441,6 +468,7 @@ def main():
     p.add_argument("--updates", type=int, default=1000)
     p.add_argument("--accumulation", type=int, default=4)
     p.add_argument("--microbatch-size", type=int, default=1, help="questions processed together per GPU")
+    p.add_argument("--decode-workers", type=int, default=1, help="parallel CPU decoders per GPU process")
     p.add_argument("--rank", type=int, default=8)
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--seed", type=int, default=7)

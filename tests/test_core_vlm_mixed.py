@@ -248,7 +248,7 @@ def test_queue_smoke_before_full_training_and_fresh_initialization(tmp_path, mon
     cfg = dict(updates=4, flow_updates=2, gpus=[0,1], model='model', steps=2, pixels=65536,
         pool_grid=[4,5], timestamp_policy='native-index-fps', data_out=str(tmp_path/'data'),
         external_data=str(ext), minimum_free_gib=30, accumulation=2, rank=8, lr=.00002,
-        seed=17, save_every=2, cache_mb=0, max_new_tokens=4)
+        seed=17, save_every=2, cache_mb=0, max_new_tokens=4, curve_checkpoint=2)
     write_json(ext/'inputs.json',{'config':cfg})
     manifest=tmp_path/'train.jsonl'
     rows=[{**row(i,f'{i}.mp4'), 'split':'val'} for i in range(4)]
@@ -263,7 +263,8 @@ def test_queue_smoke_before_full_training_and_fresh_initialization(tmp_path, mon
                 folder=Path(cmd[cmd.index('--out')+1])
                 write_json(folder/'run.json',{'id':'test'})
     monkeypatch.setattr(mixed_experiment,'run_jobs',run_jobs)
-    monkeypatch.setattr(mixed_experiment,'checked_checkpoint',lambda *a: {})
+    monkeypatch.setattr(mixed_experiment,'checked_checkpoint',
+                        lambda path, _: {'update': int(path.name.split('-')[1])})
     def audit(path, updates):
         if fail_smoke:
             raise ValueError('smoke failure')
@@ -282,4 +283,7 @@ def test_queue_smoke_before_full_training_and_fresh_initialization(tmp_path, mon
         assert [n for n,c in train_jobs]==['smoke-train-plain','smoke-train-temporal','train-plain','train-temporal']
         assert all('--init-checkpoint' not in c for n,c in train_jobs)
         assert [c[c.index('--temporal')+1] for n,c in train_jobs]==['none','causal','none','causal']
-        assert (tmp_path/'out/report.json').is_file()
+        mid = [(n, c) for n, c in jobs if n.startswith('eval-step-000002-')]
+        assert len(mid) == 12
+        assert all(c[c.index('--checkpoint')+1].endswith('checkpoint-000002') for n, c in mid)
+        assert json.loads((tmp_path/'out/report.json').read_text())['learning_curve'] == {'2': {}}
