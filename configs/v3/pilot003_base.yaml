@@ -1,0 +1,18 @@
+# Pilot-003 (M2 representation test at identical budgets), 4 x A100-40GB, torchrun --nproc_per_node=4.
+# Same data, splits, seeds and schedule as pilots 001/002 (100 updates, batch 1 per rank, no accumulation,
+# warmup 10, cosine to 0.1 x lr); only the P-step budget rule changes:
+#   - fixed_active 4: exactly the top-4 slots by mass on every P-step -> gist 8 + 12 = 20 tokens, no learned gate,
+#     no sampling, no straight-through (pilot-002: the learned gate saturated at 32 and budgets diverged by 17.8%);
+#   - scene-cut I-steps off (sigmoid surprise <= 1 < 1.01): I-steps only on the fixed every-8 schedule, so
+#     tokens/step are identical across independently trained arms by construction.
+# Arms differ only in transition.p_step_mode (pilot003_{transition,after,b4}.yaml).
+extends: stage1_a100.yaml
+transition:
+  fixed_active: 4
+  scene_cut_surprise: 1.01
+train:
+  grad_accum: 1
+  steps: 100
+  warmup: 10
+  save_every: 100
+  target_p_step_tokens: 20

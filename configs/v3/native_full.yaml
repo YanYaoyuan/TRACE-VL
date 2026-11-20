@@ -1,0 +1,13 @@
+# Qwen3.5-2B zero-shot, all 196 tokens per step, no eviction (short videos / upper bound). M0 baseline B0.
+backbone:
+  name: Qwen/Qwen3.5-2B
+  dtype: bfloat16
+  attn_implementation: sdpa
+  thinking: false
+stream:
+  step_seconds: 1.0
+  frame_gap: 0.5
+  pixels_per_frame: 200704   # 448 x 448 -> 14 x 14 merged grid = 196 tokens per step
+  max_steps: 0
+memory:
+  policy: full

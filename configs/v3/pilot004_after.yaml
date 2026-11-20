@@ -1,0 +1,10 @@
+# Pilot-004 arm "after": pilot-003's arm unchanged except the training duration (experiments.md section 11).
+# FRESH training from the same initialization and seed (not a continuation of pilot-003). Same optimizer,
+# data, budget (fixed_active 4 -> 20 tokens per P-step), warmup 10 and cosine decay to 0.1 x lr, but over
+# 1,000 updates: the learning-rate trajectory of the first 100 updates therefore differs from pilot-003.
+# Checkpoints at 100 / 300 / 1,000 (final = primary); selector diagnostics every 10 updates (logging only).
+extends: pilot003_after.yaml
+train:
+  steps: 1000
+  checkpoint_steps: [100, 300, 1000]
+  diag_every: 10

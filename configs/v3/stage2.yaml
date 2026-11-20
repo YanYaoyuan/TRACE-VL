@@ -1,0 +1,18 @@
+# Stage 2: long streams through the streaming cache with the inference KV policy (TKM).
+# Starts from a Stage 1 checkpoint: --init <stage1>/modules.pt --adapter <stage1>/lora.
+# 2 x 5090: torchrun --nproc_per_node=2. Effective batch = world x stage2.grad_accum streams.
+extends: stage1.yaml
+memory:
+  policy: tkm             # same policy and budget as inference (v3_tkm.yaml): eviction is what Stage 2 learns
+  window_seconds: 32.0
+  budget_tokens: 4096
+stage2:
+  chunk_steps: 8          # gradient chunk (truncated BPTT); also cut at every question time
+  max_seconds: 600.0
+  steps: 1000
+  grad_accum: 2
+  question_weight: 1.0
+  retention_weight: 0.5
+  lr_scale: 0.5
+train:
+  save_every: 100

@@ -1,0 +1,26 @@
+{
+  "llava_root": "/nas-data/vlm/llava",
+  "sources": ["0_30_s_youtube_v0_1", "30_60_s_youtube_v0_1"],
+  "media_roots": [],
+  "benchmark_roots": [
+    "/nas-data/vlm/data/OVO_Bench",
+    "/nas-data/vlm/data/StreamingBench",
+    "/nas-data/vlm/data/Video-MME",
+    "/nas-data/vlm/data/NExTQA"
+  ],
+  "exclude_source_patterns": ["activitynet", "nextqa", "next-q", "perceptiontest", "perception_test"],
+  "seed": 7,
+  "val_fraction": 0.1,
+  "max_videos": 6000,
+  "max_questions_per_video": 6,
+  "minimum_frames": 16,
+  "max_question_chars": 4096,
+  "max_answer_chars": 1024,
+  "workers": 32,
+  "archive_workers": 8,
+  "reserve_gb": 30,
+  "min_videos": {"train": 1000, "val": 100},
+  "max_decode_error_fraction": 0.05,
+  "fail_on_malformed": true,
+  "purpose": "Shared core video QA training/development pilot; excludes benchmark source IDs, not a perceptual contamination audit."
+}

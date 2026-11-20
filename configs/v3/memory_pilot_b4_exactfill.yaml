@@ -1,0 +1,6 @@
+# Memory pilot budget repair (experiments.md §14.1): evaluation-only. Identical to memory_pilot_b4.yaml except
+# memory.fill: exact, so every policy retains exactly min(budget, older tokens) KV tokens (the 448adf1 pilot was
+# invalid: retained-KV spread 2.14% > 2% from whole-group packing). Training used "groups"; this mismatch is recorded.
+extends: memory_pilot_b4.yaml
+memory:
+  fill: exact

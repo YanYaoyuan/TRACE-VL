@@ -1,0 +1,7 @@
+# Pilot-005 arm "b4" (experiments.md section 12, approved 2026-11-09): pilot-004's arm with ONE change,
+# transition.gist_mode: grid (8 exact grid-region pools replace the learned gist, which stayed uniform in
+# pilot-004). Same data, seed, 1,000 updates, checkpoints 100/300/1000, diagnostics, 20-token P-step budget.
+# B4 does not emit a gist (no effect on its tokens; tested); it is retrained at the same revision as the control.
+extends: pilot004_b4.yaml
+transition:
+  gist_mode: grid

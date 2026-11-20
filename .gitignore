@@ -23,3 +23,4 @@ wandb/
 *.mkv
 *.parquet
 .DS_Store
+papers/

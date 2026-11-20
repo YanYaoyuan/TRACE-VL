@@ -1,0 +1,18 @@
+# v3: CST adapter + transition encoder + transition KV memory (use with --mode v3).
+extends: native_full.yaml
+cst:
+  dim: 768
+  layers: 4
+  heads: 12
+  window: 16
+transition:
+  slots: 8
+  gist: 8
+  max_active: 8
+  mass_threshold: 1.0
+  before_lag: 4
+  i_step_every: 8
+memory:
+  policy: tkm
+  window_seconds: 32.0
+  budget_tokens: 4096

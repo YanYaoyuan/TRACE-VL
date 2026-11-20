@@ -1,0 +1,90 @@
+{
+  "completed": true,
+  "budget_matched": true,
+  "budget_gap": 0.0,
+  "scores": {
+    "native": {
+      "run": "420b149eda21cd06",
+      "n": 488,
+      "accuracy": 0.8831967213114754,
+      "ci95": [0.8551020408163266, 0.9094650205761317],
+      "by_task": {
+        "llava-video-178k-mc/0_30_s_youtube_mc_v0_1_qa_processed": {
+          "n": 488,
+          "accuracy": 0.8831967213114754
+        }
+      },
+      "lm_tokens_per_step": 196.3012295081967,
+      "kv_mb_mean": 41.218998142930324,
+      "kv_mb_max": 71.4609375,
+      "answer_seconds_mean": 0.09568852459016393
+    },
+    "transition": {
+      "run": "62ce773e362689b9",
+      "n": 488,
+      "accuracy": 0.8524590163934426,
+      "ci95": [0.8168724279835391, 0.8852459016393442],
+      "by_task": {
+        "llava-video-178k-mc/0_30_s_youtube_mc_v0_1_qa_processed": {
+          "n": 488,
+          "accuracy": 0.8524590163934426
+        }
+      },
+      "lm_tokens_per_step": 36.74618870585335,
+      "kv_mb_mean": 9.07177734375,
+      "kv_mb_max": 14.9296875,
+      "answer_seconds_mean": 0.12029098360655738
+    },
+    "b4": {
+      "run": "a251c0cba1b73d68",
+      "n": 488,
+      "accuracy": 0.8565573770491803,
+      "ci95": [0.8213552361396304, 0.8895705521472392],
+      "by_task": {
+        "llava-video-178k-mc/0_30_s_youtube_mc_v0_1_qa_processed": {
+          "n": 488,
+          "accuracy": 0.8565573770491803
+        }
+      },
+      "lm_tokens_per_step": 36.74618870585335,
+      "kv_mb_mean": 9.07177734375,
+      "kv_mb_max": 14.9296875,
+      "answer_seconds_mean": 0.11913319672131148
+    }
+  },
+  "paired": {
+    "transition_minus_b4": {
+      "delta_accuracy_pp": -0.4098360655737705,
+      "ci95_pp": [-1.8480492813141685, 1.0438413361169103],
+      "videos": 29,
+      "bootstrap_samples": 4000,
+      "seed": 7
+    },
+    "transition_minus_native": {
+      "delta_accuracy_pp": -3.0737704918032787,
+      "ci95_pp": [-5.725971370143149, -0.40899795501022496],
+      "videos": 29,
+      "bootstrap_samples": 4000,
+      "seed": 7
+    }
+  },
+  "gate_summary": {
+    "transition": {
+      "logged_updates": 100,
+      "records_with_P_steps": 100,
+      "gist_only_records": 96,
+      "records_with_transition_tokens": 4,
+      "P_mean_min": 8.0,
+      "P_mean_max": 32.0
+    },
+    "b4": {
+      "logged_updates": 100,
+      "records_with_P_steps": 100,
+      "gist_only_records": 97,
+      "records_with_transition_tokens": 3,
+      "P_mean_min": 8.0,
+      "P_mean_max": 32.0
+    }
+  },
+  "note": "Gate statistics cover rank-0 logged samples. Budget mismatch confounds equal-budget architecture comparisons."
+}

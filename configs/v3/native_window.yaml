@@ -1,0 +1,5 @@
+# B1 (training-free part): StreamingVLM-style sink + 32 s window, no long-term store.
+extends: native_full.yaml
+memory:
+  policy: window
+  window_seconds: 32.0

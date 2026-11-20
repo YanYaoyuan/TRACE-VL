@@ -1,0 +1,7 @@
+# Stage 1 with alert-head supervision: pass the LLaVA-MC records and the `v3 convert-anomaly` records together
+#   trace-vl v3 train --config configs/v3/stage1_alert.yaml --records data/v3/llava_mc.jsonl data/v3/shanghaitech.jsonl ...
+# A quarter of the samples are alert-only anomaly videos (no question: no CE/KD; alert + pred + budget losses).
+extends: stage1.yaml
+train:
+  alert_fraction: 0.25
+  alert_weight: 1.0
