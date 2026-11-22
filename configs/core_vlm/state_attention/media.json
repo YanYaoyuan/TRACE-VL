@@ -1,0 +1,57 @@
+{
+  "archive": "0_30_s_activitynetqa_videos_1.tar.gz",
+  "videos": {
+    "v_8TDYCXqSHCw.mp4": {
+      "member": "ActivityNet-QA/activitynet/train/v_8TDYCXqSHCw.mp4",
+      "sha256": "3066ace398600aa7545d68acc736026bd46dd36cdc242f2e2b2b876cfcdfe829"
+    },
+    "v_DOONG5zq1Yg.mp4": {
+      "member": "ActivityNet-QA/activitynet/train/v1-3/train_val/v_DOONG5zq1Yg.mp4",
+      "sha256": "728b035dfe85f1ac5c29d8a6fe0abae8fd993e2fead5aae6d0401ed2f54df436"
+    },
+    "v_HeMpg3SAUUs.mp4": {
+      "member": "ActivityNet-QA/activitynet/train/v_HeMpg3SAUUs.mp4",
+      "sha256": "53eb2ad3ddc1b042efee2a6d0f845d2677aea85fec4a5792aa711637af288bcf"
+    },
+    "v_QeIsJBPG8EM.mp4": {
+      "member": "ActivityNet-QA/activitynet/train/v1-3/train_val/v_QeIsJBPG8EM.mp4",
+      "sha256": "d39da00a6a077c41d00e4caba3ffac842c89834039d536ebe82a8e8fa1e7f22c"
+    },
+    "v_T-vwsIOVNTw.mp4": {
+      "member": "ActivityNet-QA/activitynet/train/v_T-vwsIOVNTw.mp4",
+      "sha256": "da2385a728a720d1aa11622948e37804ffcc069379a5e50d37b557db3557c29d"
+    },
+    "v_UciHec7xncc.mp4": {
+      "member": "ActivityNet-QA/activitynet/train/v1-3/train_val/v_UciHec7xncc.mp4",
+      "sha256": "99afaa8ec03f2204eb6a601c28b7343a0858f728fcc5fc6ac4b87fce8f3e5aa1"
+    },
+    "v_W2Wjbhsuacw.mp4": {
+      "member": "ActivityNet-QA/activitynet/train/v_W2Wjbhsuacw.mp4",
+      "sha256": "46f1a411251bada46e0eb557a8d7c4a398c4e46e834f6fa64bc9a784524b2a48"
+    },
+    "v_W40iaV960sw.mp4": {
+      "member": "ActivityNet-QA/activitynet/train/v1-3/train_val/v_W40iaV960sw.mp4",
+      "sha256": "aa0da4f40ad318f0581259b53be75333b571fd1d458da6fcdf02f2693373a0bb"
+    },
+    "v_cyJAifECfH0.mp4": {
+      "member": "ActivityNet-QA/activitynet/train/v_cyJAifECfH0.mp4",
+      "sha256": "97a549961c537c369cb24db06ff44b866c1e08c119f84437364965d1d43f9d27"
+    },
+    "v_f0Z-qud2N74.mp4": {
+      "member": "ActivityNet-QA/activitynet/train/v1-3/train_val/v_f0Z-qud2N74.mp4",
+      "sha256": "701722ffd980916d5940c474f69e8c57d7ed8218366611329e2983da15f7045e"
+    },
+    "v_qm1dudWLlUg.mp4": {
+      "member": "ActivityNet-QA/activitynet/train/v_qm1dudWLlUg.mp4",
+      "sha256": "165967e2c00b88f1eeff8f7d439266a9e3c6b2c129ee43f20b66a654fa3c2838"
+    },
+    "v_u9oARzRT3fI.mp4": {
+      "member": "ActivityNet-QA/activitynet/train/v_u9oARzRT3fI.mp4",
+      "sha256": "146ad8ea6b1cb60750c0bd57dcc12159870622170198480b2310c88128479364"
+    },
+    "v_znoMrA2qCbA.mp4": {
+      "member": "ActivityNet-QA/activitynet/train/v1-3/train_val/v_znoMrA2qCbA.mp4",
+      "sha256": "42e93b29a7112cda0c405f00a8ef9ad61ba0cfc381a1eaf1f26f5348fed0f229"
+    }
+  }
+}
