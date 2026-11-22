@@ -56,3 +56,14 @@ StreamingBench 的 ZIP 补解压，训练后自动完成五组评测，写出 `R
 `TRACE_TRAIN_MANIFEST`、`TRACE_OVO_MANIFEST`、`TRACE_STREAMING_ROOT` 和 `TRACE_MODEL`
 可以覆盖默认路径。`TRACE_STREAMING_ROOT=` 可以只跑 OVO，使用另一实验目录。
 `TRACE_OUT` 可指定 NAS 输出。`TRACE_PREPARE_ONLY=1` 跑数据准备。
+
+### 续跑已训练的评测
+
+启动时设置 `TRACE_RESUME_RUN` 指向原实验目录。入口校验原始清单、基础模型、校正权重和
+已有逐题记录，并执行剩余评测与汇总。修复使用独立的评测源码快照及
+`eval-recovery.json`，原训练源码继续保留。
+
+评测默认每卡两个解码线程。各分片共享原始帧时间戳索引，探测或解码超时的视频按需复制到
+A100 本机 `/data` 下的缓存后重试。可用 `TRACE_EVAL_SCRATCH` 指定缓存路径，或设置
+`TRACE_EVAL_DECODE_WORKERS` 调整每卡并行度。由于续跑前后的解码开销不同，报告提供分流程
+回放时延。模型对照使用同样的帧选择、五路输入和分项计分。

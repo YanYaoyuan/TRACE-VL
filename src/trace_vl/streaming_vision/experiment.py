@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import subprocess
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -30,6 +31,9 @@ from trace_vl.v3.run_io import atomic_text, ensure_run_manifest
 
 from .data import read_rows, streaming_population, train_population, validate_population, write_rows
 from .encoder import ContextCorrection, SpatialRefresh
+from .media import DECODE_POLICY, VideoProbeCache
+
+ORIGINAL_DECODE_POLICY = "per-question-pts-probe-v1"
 
 
 def frozen_inputs(args, root):
@@ -97,14 +101,14 @@ def load_prepared(root):
     return record
 
 
-def decoded(args, rows):
+def decoded(args, rows, media_cache=None):
     """Bound the decode queue and overlap FFmpeg with GPU work."""
     def work(row):
         start = time.perf_counter()
-        images, times, record, audit = decode_observation(
-            row, steps=args.lookback, pixels=args.pixels, recent_hz=args.hz,
-        )
-        return images, times, record, {**audit, "cpu_decode_ms": 1000 * (time.perf_counter() - start)}
+        decoder = decode_observation if media_cache is None else media_cache.decode
+        images, times, record, audit = decoder(row, steps=args.lookback, pixels=args.pixels, recent_hz=args.hz)
+        return images, times, record, {**audit, "cpu_decode_ms": 1000 * (time.perf_counter() - start),
+                                       "decode_policy": DECODE_POLICY if media_cache else ORIGINAL_DECODE_POLICY}
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         queue = {}
@@ -115,7 +119,7 @@ def decoded(args, rows):
                     queue[j] = pool.submit(work, rows[j])
             try:
                 yield queue.pop(i).result()
-            except (ValueError, OSError) as error:
+            except (ValueError, OSError, subprocess.SubprocessError) as error:
                 raise ValueError(f"media decode failed for {row['id']}: {row['video']}") from error
 
 
@@ -346,7 +350,8 @@ def predict(args, bb, net, correction, observation, rotate, *, check=False):
             raise ValueError("refresh budgets differ between reuse and correction")
     return {"id": row["id"], "video": row["video"], "observation": layout.audit,
             "all_frame_times": times.tolist(), "rgb_sha256": audit["decoded_rgb_sha256"],
-            "decode_ms": audit["cpu_decode_ms"], "processor_ms": setup_ms, "arms": results}
+            "decode_ms": audit["cpu_decode_ms"], "processor_ms": setup_ms, "arms": results,
+            "decode_policy": audit.get("decode_policy", ORIGINAL_DECODE_POLICY)}
 
 
 def evaluate(args, root, device):
@@ -367,7 +372,13 @@ def evaluate(args, root, device):
     correction = corrector(args, bb)
     correction.load_state_dict(torch.load(path, map_location=device, weights_only=True))
     net = NativeVideoQALoss(bb, mode="full", answer_end_token_id=bb.tokenizer.eos_token_id).eval()
-    for i, ((row, dest), observation) in enumerate(zip(pending, decoded(args, [r for r, _ in pending]), strict=True)):
+    cache = VideoProbeCache(
+        Path(os.environ.get("TRACE_EVAL_SCRATCH", root / "tmp" / "media-cache")),
+        fast_timeout=int(os.environ.get("TRACE_MEDIA_TIMEOUT", 180)),
+        retry_timeout=int(os.environ.get("TRACE_MEDIA_RETRY_TIMEOUT", 900)),
+    )
+    observations = decoded(args, [row for row, _ in pending], cache)
+    for i, ((row, dest), observation) in enumerate(zip(pending, observations, strict=True)):
         if i == 0:
             # Warm each process and validate both full encoder paths before timing.
             predict(args, bb, net, correction, observation, 0, check=True)
@@ -393,12 +404,18 @@ def report(args, root):
         rows = read_rows(root / f"{name}.jsonl")
         saved = {r["id"]: json.loads((root / "predictions" / f"{digest(r['id'])}.json").read_text()) for r in rows}
         groups = {"all": rows}
+        video_hashes, decode_groups = {}, {}
         for row in rows:
             pred = saved[row["id"]]
             if (pred["id"] != row["id"] or pred["run"] != prepared["input_id"]
                     or pred["correction"] != training["weights_sha256"]
                     or any(t > row["query_time"] for pair in pred["all_frame_times"] for t in pair)):
                 raise ValueError("prediction identity/causality check failed")
+            checksum = pred["observation"]["video_sha256"]
+            if video_hashes.setdefault(row["video"], checksum) != checksum:
+                raise ValueError(f"video bytes differ between predictions: {row['video']}")
+            policy = pred.get("decode_policy", ORIGINAL_DECODE_POLICY)
+            decode_groups.setdefault(policy, []).append(row["id"])
             groups.setdefault(row["task"], []).append(row)
         if name == "ovo":
             groups["realtime"] = [r for r in rows if r["task"] in {"OCR", "ACR", "ATR", "STU", "FPD", "OJR"}]
@@ -419,6 +436,10 @@ def report(args, root):
                 "lm_choice_ms": latency([p["answer_ms"] for p in vals]),
                 "visual_loop_plus_lm_ms": latency([p["recent_loop_and_answer_ms"] for p in vals]),
                 "replay_service_ms": latency([p["replay_service_ms"] for p in vals]),
+                "replay_service_ms_by_decode_policy": {
+                    policy: latency([predictions[qid]["replay_service_ms"] for qid in ids])
+                    for policy, ids in decode_groups.items()
+                },
                 "refresh_events": dict(Counter(reason for p in vals for reason in p["refresh_reasons"])),
                 "encoder_sampled_frames_per_second": (2000 * len(steady) / sum(steady) if steady else None),
                 "refreshed_fraction": sum(sum(p["refreshed_tiles"]) for p in vals) /
@@ -433,12 +454,16 @@ def report(args, root):
             for left, right in ((correct, reuse), (correct, "dense"), (reuse, "dense")):
                 comparisons[f"{left}_minus_{right}"] = {group: paired(subset, arms[left], arms[right])
                                                        for group, subset in groups.items() if subset}
-        results[name] = {"scores": scores, "paired": comparisons}
+        results[name] = {"scores": scores, "paired": comparisons,
+                         "decode_policy_question_counts": {key: len(ids) for key, ids in decode_groups.items()}}
     config = json.loads((root / "inputs.json").read_text())["config"]
     output = {"completed": True, "device": args.device, "config": config, "data": prepared, "results": results,
               "scope": "One seed. Matched causal fixed-rate recent clips, reset per question; native Qwen "
                        "choice score. Encoder rates exclude decoding/preprocessing and are not deployment FPS. "
                        "Replay service time adds shared decode/preprocess cost to per-arm vision and one-token LM."}
+    repair = root / "eval-recovery.json"
+    if repair.is_file():
+        output["evaluation_recovery"] = json.loads(repair.read_text())
     write_json(root / "report.json", output)
     lines = ["# TRACE-VL 流式视觉编码验证", "", output["scope"], ""]
     for name, result in results.items():
@@ -452,6 +477,9 @@ def report(args, root):
                          f"{s['replay_service_ms']['p95']:.2f} | {s['refreshed_fraction']:.2%} | "
                          f"{s['normalized_feature_mse']:.5f} |")
         lines.append("")
+        policies = result["decode_policy_question_counts"]
+        if len(policies) > 1:
+            lines += [f"回放时延涵盖两种解码流程 {policies}。分流程统计见 report.json。", ""]
         for arm, values in result["paired"].items():
             value = values["all"]
             lines.append(f"- {arm} {value['delta_pp']:+.2f} pp，95% CI {value['ci95_pp']}")

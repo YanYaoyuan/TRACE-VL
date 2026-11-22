@@ -82,16 +82,22 @@ def recent_indices(times, indices, steps, hz, endpoint):
     return chosen[len(chosen) % 2:]
 
 
-def decode_observation(row: dict, *, steps: int, pixels: int, timeout: int = 180,
-                       recent_hz: float | None = None):
-    if type(steps) is not int or steps < 1 or type(pixels) is not int or pixels < 1024:
-        raise ValueError("positive steps and at least 1024 pixels required")
-    video = Path(row["video"])
+def probe_video(video, timeout):
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-threads", "1", "-select_streams", "v:0", "-show_frames",
          "-show_entries", "stream=width,height,avg_frame_rate:frame=best_effort_timestamp_time",
          "-of", "json", str(video)], check=True, capture_output=True, timeout=timeout)
-    metadata = json.loads(probe.stdout)
+    return json.loads(probe.stdout)
+
+def decode_observation(row: dict, *, steps: int, pixels: int, timeout: int = 180,
+                       recent_hz: float | None = None, media=None):
+    if type(steps) is not int or steps < 1 or type(pixels) is not int or pixels < 1024:
+        raise ValueError("positive steps and at least 1024 pixels required")
+    video = Path(row["video"])
+    if media is None:
+        metadata = probe_video(video, timeout)
+    else:
+        video, metadata, media_hash = media
     frames, stream = metadata["frames"], metadata["streams"][0]
     pts = np.array([float(f["best_effort_timestamp_time"]) for f in frames])
     if not len(pts) or not np.isfinite(pts).all() or (np.diff(pts) <= 0).any():
@@ -139,7 +145,7 @@ def decode_observation(row: dict, *, steps: int, pixels: int, timeout: int = 180
         source_fps = float(Fraction(stream.get("avg_frame_rate", "0/1")))
     except (ValueError, ZeroDivisionError):
         source_fps = 0.
-    audit = {"video_sha256": sha256(video), "pts_origin": origin,
+    audit = {"video_sha256": sha256(video) if media is None else media_hash, "pts_origin": origin,
              "frame_indices": chosen.tolist(), "frame_times": actual.tolist(),
              "frame_hw": [h, w], "query_time": query,
              "source_fps": source_fps, "source_frame_count": len(pts),

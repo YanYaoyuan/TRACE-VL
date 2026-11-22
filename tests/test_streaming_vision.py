@@ -102,3 +102,41 @@ def test_streamingbench_reads_official_csv_and_extracts_only_selected_zip_member
     assert len(rows) == 1 and rows[0]["options"] == ["One", "Two"] and rows[0]["answer"] == 1
     assert rows[0]["query_time"] == 8
     assert {p.name for p in output.iterdir()} == {"sample_1.mp4"}
+
+
+def test_probe_cache_preserves_frames_and_shares_index_across_workers(tmp_path, monkeypatch):
+    import subprocess
+    from concurrent.futures import ThreadPoolExecutor
+
+    from trace_vl.core_vlm.data import decode_observation, probe_video
+    from trace_vl.streaming_vision import media
+
+    video = tmp_path / "motion.mp4"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=96x64:rate=8:duration=4",
+         "-c:v", "libx264", "-threads", "1", str(video)],
+        check=True,
+    )
+    row = {"video": str(video), "query_time": 2.75}
+    observation = {"steps": 3, "pixels": 6144, "recent_hz": 2}
+    reference = decode_observation(row, **observation)
+    probed = []
+
+    def delayed(path, timeout):
+        probed.append(path)
+        if path == video:
+            raise subprocess.TimeoutExpired("ffprobe", timeout)
+        return probe_video(path, timeout)
+
+    monkeypatch.setattr(media, "probe_video", delayed)
+    scratch = tmp_path / "cache"
+    caches = [media.VideoProbeCache(scratch, fast_timeout=1) for _ in range(3)]
+    with ThreadPoolExecutor(max_workers=3) as workers:
+        results = list(workers.map(lambda cache: cache.decode(row, **observation), caches))
+    assert len(probed) == 2
+    assert probed[0] == video and probed[1].parent == scratch
+    assert len(list(scratch.glob("*.mp4"))) == 1
+    for images, times, resolved, audit in results:
+        np.testing.assert_array_equal(images, reference[0])
+        np.testing.assert_array_equal(times, reference[1])
+        assert (resolved, audit) == reference[2:]
