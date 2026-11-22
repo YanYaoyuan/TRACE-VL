@@ -57,21 +57,63 @@ export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-2}" MKL_NUM_THREADS="${MKL_NUM_THREADS:-2}"
 module=trace_vl.history_reader.experiment
 scratch="${TRACE_HISTORY_SCRATCH:-$repo/.cache/history-reader/$(basename "$out")}"
+annotation_sha256=7ed4f4d613d965683fbdbb9f01baad4fe2a439b99fc39cfd2f6fa6cf9201fd2b
+
+verify_annotation() {
+    [[ -s "$1" ]] && printf '%s  %s\n' "$annotation_sha256" "$1" | sha256sum --status -c -
+}
+
+download_annotation() (
+    mkdir -p "$(dirname "$annotation")" || exit 1
+    exec 8>"$annotation.lock" || exit 1
+    flock 8 || exit 1
+    if [[ -s "$annotation" ]]; then
+        verify_annotation "$annotation"
+        exit $?
+    fi
+    local url=https://cs.stanford.edu/people/ranjaykrishna/densevid/captions.zip
+    local partial="$annotation.part" attempt status bytes
+    for attempt in 1 2 3; do
+        if verify_annotation "$partial"; then
+            mv -- "$partial" "$annotation"
+            exit $?
+        fi
+        bytes=0
+        if [[ -e "$partial" ]]; then
+            bytes=$(stat -c '%s' -- "$partial") || exit 1
+            if (( bytes >= 2690459 )); then
+                rm -f -- "$partial" || exit 1
+                bytes=0
+            fi
+        fi
+        printf 'ActivityNet annotation download %s/3, resuming at %s bytes\n' "$attempt" "$bytes"
+        status=0
+        curl -fL --connect-timeout 15 --max-time 600 --continue-at - -o "$partial" "$url" || status=$?
+        if verify_annotation "$partial"; then
+            mv -- "$partial" "$annotation"
+            exit $?
+        fi
+        if (( status == 33 )); then
+            # A gateway rejected the range. Start a fresh transfer on the next attempt.
+            rm -f -- "$partial" || exit 1
+        fi
+    done
+    exit 1
+)
 
 echo "TRACE-VL history reader $rev; GPUs $gpus; output $out"
 echo "[1/4] Align ActivityNet Captions and lock the development populations"
-if [[ ! -s "$annotation" ]]; then
-    mkdir -p "$(dirname "$annotation")"
-    download=$(mktemp "$annotation.tmp.XXXXXX")
-    url=https://cs.stanford.edu/people/ranjaykrishna/densevid/captions.zip
-    if ! curl -fL --retry 2 --connect-timeout 15 --max-time 90 "$url" -o "$download" ||
-       ! printf '%s  %s\n' 7ed4f4d613d965683fbdbb9f01baad4fe2a439b99fc39cfd2f6fa6cf9201fd2b "$download" | sha256sum -c -; then
-        rm -f -- "$download"
-        echo "Place the official captions.zip at $annotation, or set TRACE_ACTIVITYNET_ANNOTATION." >&2
-        exit 1
-    fi
-    mv -- "$download" "$annotation"
+if [[ ! -s "$annotation" ]] && ! download_annotation; then
+    echo "ActivityNet download incomplete. Rerun to resume $annotation.part." >&2
+    echo "A verified captions.zip can also be supplied with TRACE_ACTIVITYNET_ANNOTATION." >&2
+    exit 1
 fi
+if ! verify_annotation "$annotation"; then
+    echo "ActivityNet annotation missing or SHA-256 mismatch: $annotation" >&2
+    echo "Supply a verified captions.zip with TRACE_ACTIVITYNET_ANNOTATION." >&2
+    exit 1
+fi
+echo "ActivityNet annotation SHA-256 verified: $annotation"
 CUDA_VISIBLE_DEVICES='' "$py" -m pytest -q tests/test_history_reader.py
 CUDA_VISIBLE_DEVICES='' "$py" -m "$module" prepare --out "$out" --model "$model" \
     --annotation "$annotation" --media "${media[@]}" --ovo "$ovo" --ovo-media "$ovo_media" \
