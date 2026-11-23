@@ -20,7 +20,7 @@ from torch.nn import functional as F
 from trace_vl.core_vlm.data import sha256
 from trace_vl.core_vlm.experiment import paired
 from trace_vl.core_vlm.prepare import digest, write_json
-from trace_vl.core_vlm.qa import VideoQALoss
+from trace_vl.core_vlm.qa import VideoQALoss, grid_pool
 from trace_vl.streaming_vision.data import read_rows, write_rows
 from trace_vl.streaming_vision.media import VideoProbeCache
 from trace_vl.v3.backbone import Backbone
@@ -32,6 +32,7 @@ from .experiment import encode_steps, load, option_heads, query_hidden
 from .model import IntervalReader, VisualHistory
 
 ARMS = ("recent", "dense_oracle", "oracle", "position", "cosine", "learned")
+EXTRA_ARMS = ("oracle_grid4", "oracle_grid6", "oracle_motion2")
 
 
 def center_window(event, seconds):
@@ -72,6 +73,8 @@ def make_plan(args, base, out, run):
             "rejected": dict(rejected), "reader_sha256": sha256(base / "learned.pt"),
             "revision": os.environ.get("TRACE_ROUTE_REV", "local"),
             "scope": "Caption-derived counterfactual development pairs; sampled label visibility requires review."}
+    if args.budget_sweep:
+        plan["history_budget_protocol"] = "oracle-grid-and-motion-v1"
     plan["id"] = digest(plan)
     ensure_run_manifest(out / "plan.json", plan)
     print(f"PLAN {len(candidates)} pairs; exclusions {dict(rejected)}", flush=True)
@@ -112,6 +115,36 @@ def preview(path, pair, frames):
             canvas.paste(thumb, (j * 144, row + 16))
     path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(path, quality=82)
+
+
+def pooled_history(steps, side):
+    for step in steps:
+        height, width = step.grid
+        grid = min(side, height), min(side, width)
+        tokens = grid_pool(step.tokens, step.grid, grid)[0]
+        yield replace(step, tokens=tokens, grid=grid)
+
+
+def motion_history(steps):
+    """Favor changing patches inside each 2x2 region and keep its position."""
+    previous = None
+    for step in steps:
+        height, width = step.grid
+        features = step.tokens.float().reshape(height, width, -1)
+        scores = (features.new_zeros((height, width)) if previous is None
+                  else 1 - F.cosine_similarity(features, previous, dim=-1))
+        rows, cols = min(2, height), min(2, width)
+        parts = []
+        for row in range(rows):
+            for col in range(cols):
+                y = slice(row * height // rows, (row + 1) * height // rows)
+                x = slice(col * width // cols, (col + 1) * width // cols)
+                cells = features[y, x].reshape(-1, features.shape[-1])
+                weights = scores[y, x].flatten().mul(10).softmax(0)
+                parts.append(weights @ cells)
+        pooled = torch.stack(parts).reshape(rows, cols, -1).expand(2, 2, -1)
+        yield replace(step, tokens=pooled.reshape(4, -1).to(step.tokens.dtype), grid=(2, 2))
+        previous = features
 
 
 @torch.no_grad()
@@ -158,6 +191,18 @@ def evaluate(args, bb, qa, reader, pair, frames):
         choices = {"recent": int((heads @ query).argmax())}
         dense_history = [step for i in target for step in dense[i]]
         choices["dense_oracle"] = int((heads @ query_hidden(bb, qa, row, dense_history + recent)).argmax())
+        count = {"recent": 0, "dense_oracle": sum(len(s.tokens) for s in dense_history)}
+        if args.budget_sweep:
+            alternatives = {
+                "oracle_grid4": list(pooled_history(dense_history, 4)),
+                "oracle_grid6": list(pooled_history(dense_history, 6)),
+                "oracle_motion2": [s for i in target for s in motion_history(dense[i])],
+            }
+            for arm, history in alternatives.items():
+                count[arm] = sum(len(s.tokens) for s in history)
+                choices[arm] = int((heads @ query_hidden(bb, qa, row, history + recent)).argmax())
+            if count["oracle_motion2"] != 2 * args.block * 4:
+                raise ValueError("motion pooling changed the 2x2 history budget")
         cached = {}
         for arm, indices in routes.items():
             key = tuple(indices)
@@ -167,7 +212,11 @@ def evaluate(args, bb, qa, reader, pair, frames):
                     raise ValueError("history token budget differs across paired routes")
                 cached[key] = int((heads @ query_hidden(bb, qa, row, selected + recent)).argmax())
             choices[arm] = cached[key]
-        predictions.append({"answer": row["answer"], "choice": choices, "route": routes})
+            count[arm] = 2 * args.block * 4
+        prediction = {"answer": row["answer"], "choice": choices, "route": routes}
+        if args.budget_sweep:
+            prediction["history_tokens"] = count
+        predictions.append(prediction)
     if predictions[0]["answer"] == predictions[1]["answer"]:
         raise ValueError("paired answers did not flip")
     if predictions[0]["choice"]["recent"] != predictions[1]["choice"]["recent"]:
@@ -215,7 +264,7 @@ def report(args, out, plan):
         raise ValueError("saved pairs have a different identity")
     rows = [r for r in all_rows if "predictions" in r]
     results, maps = {}, {}
-    for arm in ARMS:
+    for arm in ARMS + (EXTRA_ARMS if args.budget_sweep else ()):
         outcomes = [[p["choice"][arm] == p["answer"] for p in row["predictions"]] for row in rows]
         count = sum(all(pair) for pair in outcomes)
         results[arm] = {"both_correct": count, "pair_accuracy": count / len(rows) if rows else None,
@@ -224,15 +273,23 @@ def report(args, out, plan):
             results[arm]["both_blocks_found"] = sum(
                 p["route"][arm] == p["route"]["oracle"] for row in rows for p in row["predictions"]
             )
+        if args.budget_sweep and rows:
+            counts = [p["history_tokens"][arm] for r in rows for p in r["predictions"]]
+            results[arm]["history_tokens"] = {"mean": sum(counts) / len(counts),
+                                               "min": min(counts), "max": max(counts)}
         maps[arm] = {r["id"]: {"answer": "A" if all(pair) else "B"}
                      for r, pair in zip(rows, outcomes, strict=True)}
     refs = [{"id": r["id"], "video": r["source_group"], "source_group": r["source_group"],
              "options": ["both correct", "at most one correct"], "answer": 0} for r in rows]
     compare = (("dense_oracle", "recent"), ("oracle", "dense_oracle"),
                ("learned", "position"), ("learned", "cosine"), ("learned", "oracle"))
+    if args.budget_sweep:
+        compare += (("oracle_grid4", "oracle"), ("oracle_grid6", "oracle_grid4"),
+                    ("oracle_grid6", "dense_oracle"), ("oracle_motion2", "oracle"))
+    budget_key = "matched_history_tokens" if args.budget_sweep else "history_tokens_per_budgeted_arm"
     result = {"plan": plan["id"], "scope": plan["scope"], "eligible_pairs": len(rows),
               "excluded": {r["id"]: r["excluded"] for r in all_rows if "excluded" in r},
-              "history_tokens_per_budgeted_arm": 2 * args.block * 4, "arms": results,
+              budget_key: 2 * args.block * 4, "arms": results,
               "paired": {f"{a}_minus_{b}": paired(refs, maps[a], maps[b]) for a, b in compare}}
     write_json(out / "report.json", result)
     write_rows(out / "predictions.jsonl", all_rows)
@@ -251,6 +308,7 @@ def main():
     parser.add_argument("--shard", type=int, default=0)
     parser.add_argument("--shards", type=int, default=1)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--budget-sweep", action="store_true")
     args = parser.parse_args()
     base, out = Path(args.base), Path(args.out)
     run = load(base, args)
@@ -261,6 +319,8 @@ def main():
     plan = json.loads((out / "plan.json").read_text())
     if plan["source_run"] != run:
         raise ValueError("pair plan belongs to a different source run")
+    if ("history_budget_protocol" in plan) != args.budget_sweep:
+        raise ValueError("pair plan belongs to a different budget protocol")
     if args.stage == "eval":
         if not 0 <= args.shard < args.shards:
             parser.error("invalid shard")

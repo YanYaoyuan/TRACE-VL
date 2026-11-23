@@ -9,9 +9,11 @@ rev=$(git rev-parse --verify "${TRACE_ROUTE_REV:-HEAD}^{commit}")
 run_root=/nas-data/vlm/yyy/tracevl-runs
 base="${TRACE_HISTORY_BASE:-$run_root/history-reader-3e5cb79-001}"
 probe="${TRACE_HISTORY_PROBE:-route}"
+probe_args=()
 case "$probe" in
     route) module=trace_vl.history_reader.route_probe; extras=() ;;
     pairs) module=trace_vl.history_reader.paired_probe; extras=(previews) ;;
+    budget) module=trace_vl.history_reader.paired_probe; extras=(previews); probe_args=(--budget-sweep) ;;
     *) echo "Unknown TRACE_HISTORY_PROBE: $probe" >&2; exit 1 ;;
 esac
 out="${TRACE_OUT:-$run_root/history-$probe-${rev:0:7}-001}"
@@ -37,7 +39,7 @@ export PYTHONPATH="$source/src" TRACE_ROUTE_REV="$rev"
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-2}" MKL_NUM_THREADS="${MKL_NUM_THREADS:-2}"
 
-args=(--base "$base" --out "$out" --scratch "$scratch" --shards "${#devices[@]}")
+args=(--base "$base" --out "$out" --scratch "$scratch" --shards "${#devices[@]}" "${probe_args[@]}")
 echo "HISTORY PROBE $probe $rev, GPUs ${devices[*]}, output $out"
 CUDA_VISIBLE_DEVICES='' "$py" -m "$module" plan "${args[@]}"
 
