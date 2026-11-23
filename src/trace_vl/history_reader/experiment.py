@@ -135,7 +135,8 @@ def cache_features(args, root, run):
     bb = Backbone(BackboneConfig(name=args.model, dtype=args.dtype, local_files_only=True),
                   StreamConfig(pixels_per_frame=args.pixels), device=device)
     qa = VideoQALoss(bb, mode="full").eval()
-    cache = VideoProbeCache(args.scratch or root / "media-cache")
+    cache = VideoProbeCache(args.scratch or root / "media-cache",
+                            stage_media=os.environ.get("TRACE_HISTORY_STAGE_MEDIA") == "1")
     for index, ((row, path), observation) in enumerate(zip(
         pending, decoded(args, [r for r, _ in pending], cache, drop_bad_pts=True), strict=True,
     ), 1):

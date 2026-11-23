@@ -5,6 +5,7 @@ import csv
 import zipfile
 
 import numpy as np
+import pytest
 import torch
 from transformers.models.qwen3_5.configuration_qwen3_5 import Qwen3_5VisionConfig
 from transformers.models.qwen3_5.modeling_qwen3_5 import Qwen3_5VisionModel
@@ -104,7 +105,8 @@ def test_streamingbench_reads_official_csv_and_extracts_only_selected_zip_member
     assert {p.name for p in output.iterdir()} == {"sample_1.mp4"}
 
 
-def test_probe_cache_preserves_frames_and_shares_index_across_workers(tmp_path, monkeypatch):
+@pytest.mark.parametrize("stage_media", [False, True])
+def test_probe_cache_preserves_frames_and_shares_index_across_workers(tmp_path, monkeypatch, stage_media):
     import subprocess
     from concurrent.futures import ThreadPoolExecutor
 
@@ -130,12 +132,15 @@ def test_probe_cache_preserves_frames_and_shares_index_across_workers(tmp_path, 
 
     monkeypatch.setattr(media, "probe_video", delayed)
     scratch = tmp_path / "cache"
-    caches = [media.VideoProbeCache(scratch, fast_timeout=1) for _ in range(3)]
+    caches = [media.VideoProbeCache(scratch, fast_timeout=1, stage_media=stage_media) for _ in range(3)]
     with ThreadPoolExecutor(max_workers=3) as workers:
         results = list(workers.map(lambda cache: cache.decode(row, **observation), caches))
-    assert len(probed) == 2
-    assert probed[0] == video and probed[1].parent == scratch
-    assert len(list(scratch.glob("*.mp4"))) == 1
+    assert len(probed) == (1 if stage_media else 2)
+    if not stage_media:
+        assert probed[0] == video
+    assert probed[-1].parent == scratch
+    assert list(scratch.glob("*.mp4")) == [probed[-1]]
+    assert probed[-1].read_bytes() == video.read_bytes()
     for images, times, resolved, audit in results:
         np.testing.assert_array_equal(images, reference[0])
         np.testing.assert_array_equal(times, reference[1])

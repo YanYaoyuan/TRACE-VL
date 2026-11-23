@@ -107,6 +107,9 @@ download_annotation() (
 
 echo "TRACE-VL history reader $rev; GPUs $gpus; output $out"
 echo "Runtime code $code_rev"
+if [[ "${TRACE_HISTORY_STAGE_MEDIA:-0}" == 1 ]]; then
+    echo "Stage each pending video on demand to $scratch before probing and decoding."
+fi
 echo "[1/4] Align ActivityNet Captions and lock the development populations"
 if [[ ! -s "$annotation" ]] && ! download_annotation; then
     echo "ActivityNet download incomplete. Rerun to resume $annotation.part." >&2
