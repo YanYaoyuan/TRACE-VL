@@ -115,6 +115,7 @@ def clip_features(args, bb, qa, observation, *, controls):
         "gold_slot": targets[0] if targets is not None else -1, "baseline": predictions,
         "control_slot": targets[1] if targets is not None else -1,
         "sampled_times": times.tolist(), "video_sha256": audit["video_sha256"],
+        "frame_indices": audit["frame_indices"], "timestamp_filter": audit.get("timestamp_filter"),
         "recent_tokens": sum(len(step.tokens) for step in recent),
         "history_tokens": int(slots.shape[0] * slots.shape[1]),
     }
@@ -136,11 +137,13 @@ def cache_features(args, root, run):
     qa = VideoQALoss(bb, mode="full").eval()
     cache = VideoProbeCache(args.scratch or root / "media-cache")
     for index, ((row, path), observation) in enumerate(zip(
-        pending, decoded(args, [r for r, _ in pending], cache), strict=True,
+        pending, decoded(args, [r for r, _ in pending], cache, drop_bad_pts=True), strict=True,
     ), 1):
         features = clip_features(args, bb, qa, observation, controls=args.split == "dev")
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_checkpoint(path, {**features, "run": run})
+        if features["timestamp_filter"]["dropped_frames"]:
+            print(f"PTS FILTER {row['id']} {features['timestamp_filter']}", flush=True)
         if index == 1 or index % 10 == 0 or index == len(pending):
             print(f"CACHE {args.split} {args.shard} {index}/{len(pending)} {row['id']}", flush=True)
 
@@ -163,6 +166,11 @@ def choices(items, answer, arms):
     return {arm: {row["id"]: {"answer": chr(65 + answer(item, arm))} for row, item in items} for arm in arms}
 
 
+def timestamp_audit(items):
+    return {row["id"]: audit for row, item in items
+            if (audit := item.get("timestamp_filter")) and audit["dropped_frames"]}
+
+
 def oracle_report(root, run):
     candidates = feature_rows(root, "dev", run)
     items = [(row, item) for row, item in candidates if item["gold_slot"] >= 0]
@@ -176,6 +184,8 @@ def oracle_report(root, run):
         d and d["ci95_pp"] and d["ci95_pp"][0] > 0 and d["delta_pp"] >= 5 for d in pairs.values()
     ))
     data = {"run": run, "eligible": len(rows), "prepared_dev": len(candidates), "scores": stats,
+            "code_revision": os.environ.get("TRACE_HISTORY_CODE_REV"),
+            "timestamp_filter_applied": timestamp_audit(candidates),
             "excluded_ids": [r["id"] for r, d in candidates if d["gold_slot"] < 0],
             "paired": pairs, "passed": passed,
             "rule": "At least 24 eligible videos; oracle gains >=5 pp over all controls, 95% lower bound >0"}
@@ -185,7 +195,8 @@ def oracle_report(root, run):
                     "choices": item["baseline"], "evidence": row["evidence"],
                     "oracle_span": item["spans"][item["gold_slot"]].tolist(),
                     "distractor_span": item["spans"][item["control_slot"]].tolist(),
-                    "sampled_times": item["sampled_times"], "video_sha256": item["video_sha256"]}) + "\n"
+                    "sampled_times": item["sampled_times"], "frame_indices": item.get("frame_indices"),
+                    "video_sha256": item["video_sha256"]}) + "\n"
         for row, item in items
     ))
     print("ORACLE", json.dumps(data), flush=True)
@@ -306,6 +317,7 @@ def final_report(args, root, run):
                 hits[arm] = {"n": len(labelled), "overlap_hits": count, "rate": count / len(labelled)}
         results[split] = {"n": len(rows), "accuracy": scores, "learned_minus_cosine": comparison,
                           "learned_minus_recent": recent_comparison,
+                          "timestamp_filter_applied": timestamp_audit(features),
                           "interval_hit": hits, "empty_history": sum(p["slots"] == 0 for p in predictions)}
         atomic_text(root / f"{split}-predictions.jsonl",
                     "".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in predictions))
@@ -316,6 +328,7 @@ def final_report(args, root, run):
     passed = bool(main["delta_pp"] >= 2 and main["ci95_pp"] and main["ci95_pp"][0] > 0
                   and len(guard) == 2 and all(guard.values()))
     result = {"run": run, "datasets": results, "passed": passed, "ovo_no_harm": guard,
+              "code_revision": os.environ.get("TRACE_HISTORY_CODE_REV"),
               "trainable_parameters": {arm: sum(p.numel() for p in model.parameters())
                                        for arm, model in models.items()},
               "visual_token_budget": {"history_capacity": args.capacity * args.block * 4,

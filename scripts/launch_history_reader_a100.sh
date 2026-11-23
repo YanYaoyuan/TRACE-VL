@@ -6,6 +6,7 @@ repo="${TRACE_REPO:-/data/yyy/TRACE-VL}"
 py="${TRACE_PYTHON:-$repo/.venv/bin/python}"
 cd "$repo"
 rev=$(git rev-parse --verify "${TRACE_REV:-HEAD}^{commit}")
+code_rev=$(git rev-parse --verify "${TRACE_HISTORY_CODE_REV:-$rev}^{commit}")
 run_root=/nas-data/vlm/yyy/tracevl-runs
 out="${TRACE_OUT:-$run_root/history-reader-${rev:0:7}-001}"
 model="${TRACE_MODEL:-/nas-data/vlm/models/qwen3.5_4b}"
@@ -42,16 +43,19 @@ flock -n 9 || { echo "Already running: $out" >&2; exit 2; }
 trap 'code=$?; if (( code )); then echo "STOPPED ($code). See $out/logs and data-audit.json." >&2; fi' EXIT
 
 source="$out/source"
+if [[ "$code_rev" != "$rev" ]]; then
+    source="$out/source-$code_rev"
+fi
 if [[ ! -f "$source/.revision" ]]; then
     staging=$(mktemp -d "$out/source.tmp.XXXXXX")
-    git archive "$rev" | tar -xf - -C "$staging"
-    printf '%s\n' "$rev" > "$staging/.revision"
+    git archive "$code_rev" | tar -xf - -C "$staging"
+    printf '%s\n' "$code_rev" > "$staging/.revision"
     mv -T "$staging" "$source"
 fi
-[[ "$(cat "$source/.revision")" == "$rev" ]]
+[[ "$(cat "$source/.revision")" == "$code_rev" ]]
 cd "$source"
 
-export TRACE_REV="$rev" PYTHONPATH="$source/src"
+export TRACE_REV="$rev" TRACE_HISTORY_CODE_REV="$code_rev" PYTHONPATH="$source/src"
 export TMPDIR="$out/tmp" PYTHONUNBUFFERED=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-2}" MKL_NUM_THREADS="${MKL_NUM_THREADS:-2}"
@@ -102,6 +106,7 @@ download_annotation() (
 )
 
 echo "TRACE-VL history reader $rev; GPUs $gpus; output $out"
+echo "Runtime code $code_rev"
 echo "[1/4] Align ActivityNet Captions and lock the development populations"
 if [[ ! -s "$annotation" ]] && ! download_annotation; then
     echo "ActivityNet download incomplete. Rerun to resume $annotation.part." >&2
@@ -114,7 +119,7 @@ if ! verify_annotation "$annotation"; then
     exit 1
 fi
 echo "ActivityNet annotation SHA-256 verified: $annotation"
-CUDA_VISIBLE_DEVICES='' "$py" -m pytest -q tests/test_history_reader.py
+CUDA_VISIBLE_DEVICES='' "$py" -m pytest -q tests/test_history_reader.py tests/test_core_vlm_data.py
 CUDA_VISIBLE_DEVICES='' "$py" -m "$module" prepare --out "$out" --model "$model" \
     --annotation "$annotation" --media "${media[@]}" --ovo "$ovo" --ovo-media "$ovo_media" \
     --train-limit "${TRACE_HISTORY_TRAIN_LIMIT:-512}" --dev-limit "${TRACE_HISTORY_DEV_LIMIT:-192}" \

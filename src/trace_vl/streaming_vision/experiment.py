@@ -101,12 +101,13 @@ def load_prepared(root):
     return record
 
 
-def decoded(args, rows, media_cache=None):
+def decoded(args, rows, media_cache=None, **decode_options):
     """Bound the decode queue and overlap FFmpeg with GPU work."""
     def work(row):
         start = time.perf_counter()
         decoder = decode_observation if media_cache is None else media_cache.decode
-        images, times, record, audit = decoder(row, steps=args.lookback, pixels=args.pixels, recent_hz=args.hz)
+        images, times, record, audit = decoder(row, steps=args.lookback, pixels=args.pixels, recent_hz=args.hz,
+                                               **decode_options)
         return images, times, record, {**audit, "cpu_decode_ms": 1000 * (time.perf_counter() - start),
                                        "decode_policy": DECODE_POLICY if media_cache else ORIGINAL_DECODE_POLICY}
 
