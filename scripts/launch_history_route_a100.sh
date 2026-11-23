@@ -14,6 +14,11 @@ case "$probe" in
     route) module=trace_vl.history_reader.route_probe; extras=() ;;
     pairs) module=trace_vl.history_reader.paired_probe; extras=(previews) ;;
     budget) module=trace_vl.history_reader.paired_probe; extras=(previews); probe_args=(--budget-sweep) ;;
+    dual-rate)
+        module=trace_vl.history_reader.dual_rate_probe
+        extras=(previews)
+        probe_args=(--reference "${TRACE_HISTORY_REFERENCE:?set the verified 128-token reference run}")
+        ;;
     *) echo "Unknown TRACE_HISTORY_PROBE: $probe" >&2; exit 1 ;;
 esac
 out="${TRACE_OUT:-$run_root/history-$probe-${rev:0:7}-001}"

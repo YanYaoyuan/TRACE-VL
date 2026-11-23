@@ -109,6 +109,20 @@ def presentation_frames(frames, *, drop_bad_pts):
     return pts, keep
 
 
+def decode_frame_indices(video, chosen, height, width, timeout, *, stop_after_selection=False):
+    expression = "+".join(f"eq(n\\,{int(i)})" for i in chosen)
+    decoded = subprocess.run(
+        ["ffmpeg", "-v", "error", "-xerror", "-nostdin", "-threads", "1", "-noautorotate",
+         "-i", str(video), "-map", "0:v:0", "-vf", f"select={expression},scale={width}:{height}",
+         "-vsync", "0", *(["-frames:v", str(len(chosen))] if stop_after_selection else []),
+         "-filter_threads", "1", "-threads", "1", "-pix_fmt", "rgb24",
+         "-f", "rawvideo", "pipe:1"], check=True, capture_output=True, timeout=timeout)
+    expected = len(chosen) * height * width * 3
+    if len(decoded.stdout) != expected:
+        raise ValueError(f"decoded byte count {len(decoded.stdout)} != expected {expected}")
+    return np.frombuffer(decoded.stdout, dtype=np.uint8).reshape(-1, height, width, 3)
+
+
 def decode_observation(row: dict, *, steps: int, pixels: int, timeout: int = 180,
                        recent_hz: float | None = None, media=None, drop_bad_pts: bool = False):
     if type(steps) is not int or steps < 1 or type(pixels) is not int or pixels < 1024:
@@ -146,17 +160,8 @@ def decode_observation(row: dict, *, steps: int, pixels: int, timeout: int = 180
             raise ValueError(f"need two distinct causal frames, found {len(indices)}")
         chosen = recent_indices(times, indices, steps, recent_hz, min(end, query))
     h, w = frame_size(stream["height"], stream["width"], pixels, 32)
-    expression = "+".join(f"eq(n\\,{int(i)})" for i in chosen)
-    decoded = subprocess.run(
-        ["ffmpeg", "-v", "error", "-xerror", "-nostdin", "-threads", "1", "-noautorotate",
-         "-i", str(video), "-map", "0:v:0", "-vf", f"select={expression},scale={w}:{h}",
-         "-vsync", "0", *(["-frames:v", str(len(chosen))] if recent_hz is not None else []),
-         "-filter_threads", "1", "-threads", "1", "-pix_fmt", "rgb24",
-         "-f", "rawvideo", "pipe:1"], check=True, capture_output=True, timeout=timeout)
-    expected = len(chosen) * h * w * 3
-    if len(decoded.stdout) != expected:
-        raise ValueError(f"decoded byte count {len(decoded.stdout)} != expected {expected}")
-    images = np.frombuffer(decoded.stdout, dtype=np.uint8).reshape(-1, 2, h, w, 3).copy()
+    images = decode_frame_indices(video, chosen, h, w, timeout,
+                                  stop_after_selection=recent_hz is not None).reshape(-1, 2, h, w, 3).copy()
     actual = times[chosen].reshape(-1, 2)
     resolved = {**row, "query_time": query}
     try:
