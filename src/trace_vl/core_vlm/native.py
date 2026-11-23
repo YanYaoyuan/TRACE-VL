@@ -145,9 +145,17 @@ class NativeVideoQALoss(VideoQALoss):
         if hasattr(self, "temporal"):
             if self.mode != "grid":
                 raise ValueError("temporal adapter requires pooled visual tokens")
-            pooled = [grid_pool(s.tokens.to(bb.device, bb.dtype), s.grid, self.pool_grid)[0]
-                      for s in steps]
-            temporal_tokens = self.temporal(torch.stack(pooled), [s.end for s in steps])
+            visual_inputs = [s.tokens.to(bb.device, bb.dtype) for s in steps]
+            pooled = torch.stack([grid_pool(x, s.grid, self.pool_grid)[0]
+                                  for x, s in zip(visual_inputs, steps, strict=True)])
+            if getattr(self.temporal, "dense_input", False):
+                spatial = steps[0].grid
+                if any(s.grid != spatial for s in steps):
+                    raise ValueError("causal patch pooling requires an identical spatial grid per clip")
+                dense = torch.stack(visual_inputs).reshape(len(steps), *spatial, bb.hidden)
+                temporal_tokens = self.temporal(dense, spatial, self.pool_grid, pooled)
+            else:
+                temporal_tokens = self.temporal(pooled, [s.end for s in steps])
         parts, pos, emitted, cursor = [], [], [], 0
         for index, (step, indices) in enumerate(zip(steps, chunks, strict=True)):
             lo, hi = int(indices[0]), int(indices[-1]) + 1

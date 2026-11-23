@@ -6,6 +6,7 @@ import torch
 from torch.nn import functional as F
 
 from trace_vl.core_vlm.native import NativeLayout, NativeVideoQALoss, encode_native, prepare_native
+from trace_vl.core_vlm.temporal import attach_temporal
 from trace_vl.v3.backbone import Backbone
 
 
@@ -81,6 +82,27 @@ def test_grid_preserves_all_native_text_positions_and_compresses_only_vision():
     torch.testing.assert_close(gp, fp[:, kept])
     with pytest.raises(ValueError, match="question/observations"):
         full.prefix(steps, {**row, "question": "Wrong question"})
+
+
+def test_causal_patch_pool_starts_at_grid_baseline_and_uses_only_prefix():
+    bb, layout, row = tiny_example()
+    steps = encode_native(bb, layout)
+    net = NativeVideoQALoss(bb, mode="grid", pool_grid=(1, 1))
+    expected, positions, *_ = net.prefix(steps, row)
+    attach_temporal(net, "causal-pool")
+    actual, actual_positions, *_ = net.prefix(steps, row)
+    assert torch.equal(expected, actual)
+    assert torch.equal(positions, actual_positions)
+    loss, _ = net(steps, row)
+    loss.backward()
+    assert net.temporal.score.weight.grad.abs().sum() > 0
+    with torch.no_grad():
+        net.temporal.score.weight.copy_(net.temporal.score.weight.grad)
+    actual, *_ = net.prefix(steps, row)
+    steps[-1].tokens = steps[-1].tokens + torch.randn_like(steps[-1].tokens)
+    changed, *_ = net.prefix(steps, row)
+    assert torch.equal(actual[:, :5], changed[:, :5])
+    assert not torch.equal(actual, changed)
 
 
 def test_native_processor_never_silently_guesses_fps_or_vfr_timestamps():

@@ -456,7 +456,7 @@ def main():
     for name in ("model", "manifest", "out"):
         p.add_argument(f"--{name}", required=True)
     p.add_argument("--mode", choices=("full", "grid"), default="grid")
-    p.add_argument("--temporal", choices=("none", "causal"), default="none")
+    p.add_argument("--temporal", choices=("none", "causal", "causal-pool"), default="none")
     p.add_argument("--preservation-teacher", action="store_true")
     p.add_argument("--preservation-weight", type=float, default=0.)
     p.add_argument("--preservation-temperature", type=float, default=2.)

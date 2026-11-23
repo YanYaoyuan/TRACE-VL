@@ -45,12 +45,50 @@ class CausalTemporalAdapter(nn.Module):
         return (x + self.up(z.transpose(0, 1))).to(tokens.dtype)
 
 
+class CausalPatchPool(nn.Module):
+    """Compress regions before the LM, using the preceding region to score current patches."""
+
+    dense_input = True
+
+    def __init__(self, hidden: int, width: int = 96):
+        super().__init__()
+        self.norm = nn.LayerNorm(hidden)
+        self.appearance = nn.Linear(hidden, width, bias=False)
+        self.predict = nn.Linear(width, width, bias=False)
+        self.score = nn.Linear(width, 1, bias=False)
+        nn.init.zeros_(self.score.weight)
+
+    def forward(self, tokens, grid, target, baseline):
+        height, width = grid
+        rows, cols = target
+        blocks = [tokens[:, y * height // rows:(y + 1) * height // rows,
+                         x * width // cols:(x + 1) * width // cols].flatten(1, 2)
+                  for y in range(rows) for x in range(cols)]
+        lengths = [block.shape[1] for block in blocks]
+        widest = max(lengths)
+        patches = torch.stack([
+            torch.nn.functional.pad(block, (0, 0, 0, widest - length))
+            for block, length in zip(blocks, lengths, strict=True)
+        ], dim=1).float()
+        valid = torch.arange(widest, device=tokens.device) < torch.tensor(lengths, device=tokens.device)[:, None]
+        appearance = self.appearance(self.norm(patches))
+        means = (appearance * valid[None, :, :, None]).sum(2) / valid.sum(-1)[:, None]
+        previous = torch.cat((torch.zeros_like(means[:1]), means[:-1]), dim=0)
+        residual = appearance - self.predict(previous)[:, :, None, :]
+        logits = self.score(residual.tanh()).squeeze(-1)
+        weights = logits.masked_fill(~valid, -torch.inf).softmax(-1)
+        uniform = torch.zeros_like(logits).masked_fill(~valid, -torch.inf).softmax(-1)
+        correction = ((weights - uniform)[..., None] * patches).sum(2)
+        return (baseline.float() + correction).to(baseline.dtype)
+
+
 def attach_temporal(net, kind):
     if kind == "none":
         return
-    if kind != "causal" or net.mode != "grid":
-        raise ValueError("causal temporal adapter requires grid compression")
-    net.temporal = CausalTemporalAdapter(net.bb.hidden).to(net.bb.device)
+    variants = {"causal": CausalTemporalAdapter, "causal-pool": CausalPatchPool}
+    if kind not in variants or net.mode != "grid":
+        raise ValueError("temporal modules require grid compression and a declared architecture")
+    net.temporal = variants[kind](net.bb.hidden).to(net.bb.device)
 
 
 def load_temporal(net, checkpoint):
