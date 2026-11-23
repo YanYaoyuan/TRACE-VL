@@ -120,7 +120,7 @@ class SharedVisionSamples:
                 or any(not torch.equal(a.tokens.cpu(), b.tokens) for a, b in zip(visual, cached, strict=True))):
             raise ValueError("cached visual features or prompt layout differ from fresh encoding")
         self.bb.language_model.eval()
-        check_native_forward(self.bb, layout, visual, record)
+        check_native_forward(self.bb, layout, visual, {**record, "native_layout": layout})
         self.check_pending = False
         print("VERIFIED SHARED VISION CACHE PARITY", flush=True)
 
