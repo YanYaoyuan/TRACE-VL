@@ -18,6 +18,11 @@ else
     export TRACE_SWANLAB="${TRACE_SWANLAB:-1}"
 fi
 out="${TRACE_OUT:-/data/yyy/tracevl-runs/core-pool-${rev:0:7}-$suffix}"
+if [[ "${TRACE_CACHE_CHECK:-0}" == 1 ]]; then
+    args+=(--cache-check)
+    export TRACE_SWANLAB=0
+fi
+args+=(--feature-cache "${TRACE_FEATURE_CACHE:-$out/vision-cache}")
 mkdir -p "$out"
 exec 9>"$out/.launcher.lock"
 flock -n 9 || { echo 'Comparison is already running' >&2; exit 2; }

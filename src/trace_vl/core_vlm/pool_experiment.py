@@ -22,7 +22,7 @@ ARMS = {"plain": "none", "causal_pool": "causal-pool"}
 CONTRAST = "causal_pool_minus_plain"
 
 
-def run(previous, local_data, out, updates, smoke):
+def run(previous, local_data, out, updates, smoke, *, feature_cache=None, cache_check=False):
     receipt = json.loads((local_data / "complete.json").read_text())
     manifest = local_data / "manifest.jsonl"
     previous = Path(previous)
@@ -40,7 +40,8 @@ def run(previous, local_data, out, updates, smoke):
         raise ValueError("the comparison requires 128 visual tokens from eight steps")
     out.mkdir(parents=True, exist_ok=True)
     identity = {"config": cfg, "manifest_sha256": receipt["local_sha256"], "external": audit,
-                "smoke": smoke, "revision": os.environ.get("TRACE_REV", "local"),
+                "smoke": smoke, "cache_check": cache_check, "feature_cache": feature_cache,
+                "revision": os.environ.get("TRACE_REV", "local"),
                 "arms": ARMS, "implementation": sha256(__file__)}
     identity["id"] = digest(identity)
     with (out / ".experiment.lock").open("a") as lock:
@@ -54,7 +55,7 @@ def run(previous, local_data, out, updates, smoke):
                      f"print(free); assert min(free)>={cfg['minimum_free_gib']}")
         logs = out / "logs"
         run_jobs([("gpu-check", [sys.executable, "-c", gpu_check], cfg["gpus"])], env, logs)
-        if smoke:
+        if smoke and not cache_check:
             for dataset, path in external.items():
                 subset = select_records(read_split(path, "val"), 4)
                 for video in {row["video"] for row in subset}:
@@ -66,6 +67,8 @@ def run(previous, local_data, out, updates, smoke):
             folder = out / "train" / name
             cmd = training_command(cfg, manifest, folder, "grid", flow=smoke)
             cmd += ["--temporal", arm]
+            if feature_cache:
+                cmd += ["--feature-cache", feature_cache]
             if smoke:
                 cmd += ["--examples", "256"]
             if cfg["preservation_weight"]:
@@ -73,6 +76,18 @@ def run(previous, local_data, out, updates, smoke):
             run_jobs([(f"train-{name}", cmd, cfg["gpus"])], env, logs)
         checkpoint_step = cfg["flow_updates"] if smoke else cfg["updates"]
         training = audit_training(out / "train", checkpoint_step, arms=ARMS)
+        if cache_check:
+            last = (out / "train/causal_pool/metrics.jsonl").read_text().splitlines()[-1]
+            metrics = json.loads(last)
+            hits = metrics["vision_cache_hits_rank0"]
+            writes = metrics["vision_cache_writes_rank0"]
+            if not hits or writes:
+                raise ValueError("second arm did not reuse the first arm's cached observations")
+            write_json(out / "report.json", {"completed": True, "cache_check": True,
+                       "visual_tokens": budget, "training": training,
+                       "vision_cache_hits_rank0": hits, "vision_cache_writes_rank0": writes})
+            print(f"VERIFIED SHARED CACHE TRAINING: {out / 'report.json'}", flush=True)
+            return
         for dataset, path in external.items():
             for name in ARMS:
                 checkpoint = out / "train" / name / f"checkpoint-{checkpoint_step:06d}"
@@ -102,8 +117,13 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--updates", type=int, default=2500)
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--feature-cache")
+    parser.add_argument("--cache-check", action="store_true")
     args = parser.parse_args()
-    run(args.previous, args.local_data, args.out, args.updates, args.smoke)
+    if args.cache_check and not args.feature_cache:
+        parser.error("--cache-check needs --feature-cache")
+    run(args.previous, args.local_data, args.out, args.updates, args.smoke or args.cache_check,
+        feature_cache=args.feature_cache, cache_check=args.cache_check)
 
 
 if __name__ == "__main__":
