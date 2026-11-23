@@ -25,7 +25,7 @@ def source_id(value):
     return match[1] if match else None
 
 
-def tasks(raw, source, split, seed, recent, lookback, block):
+def tasks(raw, source, split, seed, recent, lookback, block, *, include_events=False):
     """Generate before/after MC items from three ordered human captions."""
     duration = float(raw["duration"])
     if not math.isfinite(duration) or duration < recent + 2 * block:
@@ -51,12 +51,15 @@ def tasks(raw, source, split, seed, recent, lookback, block):
             order = int(digest([seed, item])[:8], 16) % 2
             options = [gold[2], other[2]] if not order else [other[2], gold[2]]
             question = f'Which event happened {direction} the following event? "{anchor[2]}"'
-            candidates.append({
+            row = {
                 "id": f"actnet-{item[:24]}", "source_group": source, "split": split,
                 "task": direction, "question": question, "options": options, "answer": order,
                 "evidence": list(gold[:2]), "duration": duration, "query_time": query,
                 "observation": {"start": 0., "end": query}, "protocol": "causal-prefix",
-            })
+            }
+            if include_events:
+                row["events"] = (left, anchor, right)
+            candidates.append(row)
     # Select one triple and direction per video. All choices are selected from
     # captions of that video. Labels remain separate from visual routing.
     return sorted(candidates, key=lambda row: digest([seed, row["id"]]))

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Frozen-reader diagnostic on the existing ActivityNet development videos.
+# Frozen-reader diagnostics on the existing ActivityNet development videos.
 set -Eeuo pipefail
 
 repo="${TRACE_REPO:-/data/yyy/TRACE-VL}"
@@ -8,7 +8,13 @@ cd "$repo"
 rev=$(git rev-parse --verify "${TRACE_ROUTE_REV:-HEAD}^{commit}")
 run_root=/nas-data/vlm/yyy/tracevl-runs
 base="${TRACE_HISTORY_BASE:-$run_root/history-reader-3e5cb79-001}"
-out="${TRACE_OUT:-$run_root/history-route-${rev:0:7}-001}"
+probe="${TRACE_HISTORY_PROBE:-route}"
+case "$probe" in
+    route) module=trace_vl.history_reader.route_probe; extras=() ;;
+    pairs) module=trace_vl.history_reader.paired_probe; extras=(previews) ;;
+    *) echo "Unknown TRACE_HISTORY_PROBE: $probe" >&2; exit 1 ;;
+esac
+out="${TRACE_OUT:-$run_root/history-$probe-${rev:0:7}-001}"
 scratch="${TRACE_HISTORY_SCRATCH:-$repo/.cache/history-reader/$(basename "$base")}"
 IFS=, read -r -a devices <<< "${TRACE_CUDA_DEVICES:-0,1,2,3}"
 for path in "$py" "$base/prepared.json" "$base/learned.pt"; do
@@ -31,9 +37,8 @@ export PYTHONPATH="$source/src" TRACE_ROUTE_REV="$rev"
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-2}" MKL_NUM_THREADS="${MKL_NUM_THREADS:-2}"
 
-module=trace_vl.history_reader.route_probe
 args=(--base "$base" --out "$out" --scratch "$scratch" --shards "${#devices[@]}")
-echo "HISTORY ROUTES $rev, GPUs ${devices[*]}, output $out"
+echo "HISTORY PROBE $probe $rev, GPUs ${devices[*]}, output $out"
 CUDA_VISIBLE_DEVICES='' "$py" -m "$module" plan "${args[@]}"
 
 pids=()
@@ -51,6 +56,6 @@ for i in "${!pids[@]}"; do
 done
 (( failed == 0 ))
 CUDA_VISIBLE_DEVICES='' "$py" -m "$module" report "${args[@]}"
-tar -czf "$out/reports.tmp" -C "$out" plan.json report.json predictions.jsonl logs
+tar -czf "$out/reports.tmp" -C "$out" plan.json report.json predictions.jsonl logs "${extras[@]}"
 mv "$out/reports.tmp" "$out/reports.tar.gz"
 echo "REPORT BUNDLE: $out/reports.tar.gz"

@@ -66,16 +66,21 @@ def option_heads(bb, row):
     return bb.lm_head.weight[[tokens[0] for tokens in ids]].float()
 
 
-def encode_clip(args, bb, images, times):
+def encode_steps(args, bb, images, times):
     pixels, _, h, w = patch_inputs(bb, images)
     shape = (h // bb.visual.spatial_merge_size, w // bb.visual.spatial_merge_size)
-    bank = VisualHistory(args.recent, args.block, args.capacity)
     for begin in range(0, len(pixels), args.vision_batch):
         chunk = pixels[begin:begin + args.vision_batch]
         grid = torch.tensor([[len(chunk), h, w]], device=bb.device)
         xn = bb.encode(torch.cat(chunk), grid).split(shape[0] * shape[1])
         for feat, pair in zip(xn, times[begin:begin + len(chunk)], strict=True):
-            bank.append(VisualStep(feat.clone(), shape, float(pair[-1]), tuple(float(t) for t in pair)))
+            yield VisualStep(feat.clone(), shape, float(pair[-1]), tuple(float(t) for t in pair))
+
+
+def encode_clip(args, bb, images, times):
+    bank = VisualHistory(args.recent, args.block, args.capacity)
+    for step in encode_steps(args, bb, images, times):
+        bank.append(step)
     return bank
 
 
