@@ -165,25 +165,27 @@ def schedule(metadata, end):
     return indices, times[indices].reshape(-1, 2), int((~keep).sum())
 
 
-def stream_pixels(path, indices, height, width):
-    """Single FFmpeg process; only one two-frame RGB block is resident here."""
+def stream_pixels(path, indices, height, width, *, frames_per_block=2):
+    """Single FFmpeg process; only one requested RGB block is resident here."""
+    if frames_per_block not in (1, 2) or len(indices) % frames_per_block:
+        raise ValueError('one/two-frame decoder blocks must divide selected frame count')
     expr = '+'.join(f'eq(n\\,{int(i)})' for i in indices)
     command = ['ffmpeg', '-v', 'error', '-xerror', '-nostdin', '-threads', '1', '-noautorotate',
                '-i', str(path), '-map', '0:v:0', '-vf', f'select={expr},scale={width}:{height}',
                '-vsync', '0', '-frames:v', str(len(indices)), '-filter_threads', '1',
                '-threads', '1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'pipe:1']
-    size = 2 * height * width * 3
+    size = frames_per_block * height * width * 3
     with tempfile.TemporaryFile() as errors:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors)
         try:
-            for _ in range(len(indices) // 2):
+            for _ in range(len(indices) // frames_per_block):
                 data = bytearray()
                 while len(data) < size:
                     block = process.stdout.read(size - len(data))
                     if not block:
                         raise ValueError('stream decoder ended before the selected prefix')
                     data.extend(block)
-                yield np.frombuffer(data, dtype=np.uint8).reshape(2, height, width, 3).copy()
+                yield np.frombuffer(data, dtype=np.uint8).reshape(frames_per_block, height, width, 3).copy()
             if process.wait(timeout=30) != 0:
                 errors.seek(0)
                 raise ValueError('stream decoder failed: ' + errors.read(2000).decode(errors='replace'))

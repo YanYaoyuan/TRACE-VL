@@ -8,7 +8,13 @@ import numpy as np
 import pytest
 
 from trace_vl.core_vlm.longstream import schedule, stream_pixels
-from trace_vl.core_vlm.longstream_pairs import pair_queries, select_events, write_views
+from trace_vl.core_vlm.longstream_pairs import (
+    filler_schedule,
+    held_pixels,
+    pair_queries,
+    select_events,
+    write_views,
+)
 from trace_vl.streaming_vision.media import VideoProbeCache
 
 
@@ -72,3 +78,29 @@ def test_lossless_materialized_pair_changes_only_history_and_preserves_decoder_c
     np.testing.assert_array_equal(decoded[0][4:8], decoded[1][:4])
     np.testing.assert_array_equal(decoded[0][8:], decoded[1][8:])
     assert not np.array_equal(decoded[0][:8], decoded[1][:8])
+
+
+def test_one_fps_real_source_is_held_causally_and_verified_media_can_be_reused(tmp_path):
+    rng = np.random.default_rng(7)
+    original = rng.integers(0, 256, (7, 32, 32, 3), dtype=np.uint8)
+    source = tmp_path / 'one-fps.mkv'
+    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '32x32',
+                    '-r', '1', '-i', 'pipe:0', '-c:v', 'ffv1', '-pix_fmt', 'bgr0', str(source)],
+                   input=original.tobytes(), capture_output=True, check=True)
+    _, meta, _ = VideoProbeCache(tmp_path / 'cache', stage_media=False).source(str(source))
+    indices, times = filler_schedule(meta, seconds=4)
+    assert indices.tolist() == [0, 0, 1, 1, 2, 2, 3, 3]
+    np.testing.assert_array_equal(times.ravel(), indices)
+    assert np.all(times.ravel() <= np.arange(8) / 2)
+    held = np.concatenate(list(held_pixels(source, indices[:6], (32, 32))))
+    np.testing.assert_array_equal(held, np.repeat(original[:3], 2, axis=0))  # odd distinct count
+    events = [original[:4], original[3:7]]
+    paths = [tmp_path / 'ab.mkv', tmp_path / 'ba.mkv']
+    hashes, suffix = write_views(paths, events, source, indices, (32, 32))
+    reuse = [tmp_path / 'ab-reuse.mkv', tmp_path / 'ba-reuse.mkv']
+    assert write_views(reuse, events, source, indices, (32, 32), reuse_paths=paths) == (hashes, suffix)
+    for path, expected in zip(reuse, hashes, strict=True):
+        rgb = np.concatenate(list(stream_pixels(path, np.arange(16), 32, 32)))
+        assert hashlib.sha256(rgb.tobytes()).hexdigest() == expected
+    with pytest.raises(ValueError, match='cover'):
+        filler_schedule(meta, seconds=8)

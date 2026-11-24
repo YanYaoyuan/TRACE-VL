@@ -22,6 +22,10 @@ export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 CUBLAS_WORKSPACE_CONFIG=:4096:8
 export TRACE_WANDB=0 TRACE_SWANLAB=0
 "$py" -m pytest -q tests/test_core_longstream_pairs.py tests/test_core_longstream.py tests/test_core_vlm_native.py
-"$py" -m trace_vl.core_vlm.longstream_pairs run --out "$out"
+extra=()
+if [[ -n "${TRACE_PAIR_REUSE:-}" ]]; then
+    extra+=(--reuse-prepared "$TRACE_PAIR_REUSE")
+fi
+"$py" -m trace_vl.core_vlm.longstream_pairs run --out "$out" "${extra[@]}"
 tar -czf "$out/reports.tar.gz" -C "$out" inputs.json data-audit.json smoke-ok.json report.json lineage questions sources logs
 echo "PAIRED LONGSTREAM COMPLETE: $out/report.json"

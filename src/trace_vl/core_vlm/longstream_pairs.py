@@ -17,7 +17,7 @@ from trace_vl.v3.run_io import ensure_run_manifest
 
 from . import longstream
 from .control import checkpoint_identity
-from .data import decode_frame_indices, sha256
+from .data import decode_frame_indices, presentation_frames, sha256
 from .experiment import run_jobs
 from .prepare import digest, write_json
 from .train import checked_checkpoint
@@ -69,14 +69,59 @@ def pair_queries(annotation, swapped, question, delays):
             for delay in delays]
 
 
-def write_views(paths, event_frames, filler_path, filler_indices, hw):
+def filler_schedule(metadata, seconds=304):
+    """Causal zero-order hold at2fps; repeated indices expose low source frame rates."""
+    pts, keep = presentation_frames(metadata['frames'], drop_bad_pts=True)
+    times = pts - pts[0]
+    valid = np.flatnonzero(keep)
+    slots = np.arange(2 * seconds) / 2
+    if not len(valid) or times[valid[-1]] < slots[-1]:
+        raise ValueError('filler does not cover the requested presentation duration')
+    indices = valid[np.maximum(0, np.searchsorted(times[valid], slots, side='right') - 1)]
+    if not np.all(times[indices] <= slots + 1e-8):
+        raise ValueError('filler frame hold selected future source pixels')
+    return indices, times[indices].reshape(-1, 2)
+
+
+def held_pixels(path, indices, hw):
+    """Decode each distinct original frame once, retaining at most the current frame."""
+    unique = np.unique(indices)
+    if np.any(np.diff(indices) < 0) or len(indices) % 2:
+        raise ValueError('held source indices must be chronological two-frame steps')
+    decoder = longstream.stream_pixels(path, unique, *hw, frames_per_block=1)
+    cursor, current, last = iter(unique), None, None
+    try:
+        for pair in np.asarray(indices).reshape(-1, 2):
+            frames = []
+            for index in pair:
+                if last != index:
+                    if next(cursor) != index:
+                        raise ValueError('frame-hold decoder lost source lineage')
+                    current = next(decoder)[0]
+                    last = index
+                frames.append(current)
+            yield np.stack(frames)
+        try:
+            next(decoder)
+        except StopIteration:
+            pass
+        else:
+            raise ValueError('frame-hold decoder produced unexpected source pixels')
+    finally:
+        decoder.close()
+
+
+def write_views(paths, event_frames, filler_path, filler_indices, hw, *, reuse_paths=None):
     """Lossless 2-fps real-frame inputs; both views share every pixel after the first4 steps."""
     h, w = hw
     processes, logs = [], []
     hashes = [hashlib.sha256(), hashlib.sha256()]
     suffix = hashlib.sha256()
     try:
-        for path in paths:
+        for i, path in enumerate(paths):
+            if reuse_paths is not None:
+                path.symlink_to(reuse_paths[i])
+                continue
             log = path.with_suffix('.encode.log').open('wb')
             logs.append(log)
             processes.append(subprocess.Popen(
@@ -87,15 +132,17 @@ def write_views(paths, event_frames, filler_path, filler_indices, hw):
         for view, order in enumerate(((0, 1), (1, 0))):
             for index in order:
                 raw = event_frames[index].tobytes()
-                processes[view].stdin.write(raw)
+                if processes:
+                    processes[view].stdin.write(raw)
                 hashes[view].update(raw)
-        filler = longstream.stream_pixels(filler_path, filler_indices, h, w)
+        filler = held_pixels(filler_path, filler_indices, hw)
         try:
             for block in filler:
                 raw = block.tobytes()
                 suffix.update(raw)
-                for process, checksum in zip(processes, hashes, strict=True):
-                    process.stdin.write(raw)
+                for i, checksum in enumerate(hashes):
+                    if processes:
+                        processes[i].stdin.write(raw)
                     checksum.update(raw)
         finally:
             filler.close()
@@ -166,16 +213,34 @@ def prepare(args):
         lookup = dict(zip(ordered, decoded, strict=True))
         frames = [np.stack([lookup[i] for pair in e['indices'] for i in pair]) for e in events]
         fm = json.loads(Path(filler['metadata']).read_text())
-        indices, times, _ = longstream.schedule(fm, 304.)
+        indices, times = filler_schedule(fm)
         if len(indices) != 608:
-            raise ValueError('filler must provide304 distinct two-frame steps')
+            raise ValueError('filler must provide304 presentation steps')
         paths = [media / f'{a["source_group"]}-{int(swapped)}.mkv' for swapped in (False, True)]
-        expected, suffix = write_views(paths, frames, filler['video'], indices, hw)
+        reuse_paths = None
+        if args.reuse_prepared is not None:
+            prior = args.reuse_prepared / 'lineage' / f'{a["source_group"]}.json'
+            if prior.exists():
+                old = json.loads(prior.read_text())
+                if (old['annotation'] != a or old['events'] != events
+                        or old['source_video_sha256'] != source['video_sha256']
+                        or old['filler_video_sha256'] != filler['video_sha256']
+                        or old['filler_source_indices'] != indices.tolist()
+                        or old['filler_source_times'] != times.tolist()):
+                    raise ValueError('reused media lineage differs from frozen source pixels')
+                reuse_paths = [args.reuse_prepared / 'media' / p.name for p in paths]
+                if not all(p.exists() for p in reuse_paths):
+                    raise ValueError('previously verified paired media missing')
+        expected, suffix = write_views(paths, frames, filler['video'], indices, hw, reuse_paths=reuse_paths)
         receipt = {'source_group': a['source_group'], 'annotation': a, 'review_image_sha256': r['image_sha256'],
                    'events': events, 'source_video_sha256': source['video_sha256'],
                    'source_video': source['video'], 'filler_source_group': filler['source_group'],
                    'filler_video': filler['video'], 'filler_video_sha256': filler['video_sha256'],
                    'filler_source_indices': indices.tolist(), 'filler_source_times': times.tolist(),
+                   'filler_distinct_source_frames': len(np.unique(indices)),
+                   'filler_repeated_frame_slots': len(indices) - len(np.unique(indices)),
+                   'filler_resampling': 'causal last-frame hold at2fps; original frames are not claimed distinct',
+                   'reused_verified_media': reuse_paths is not None,
                    'event_rgb_hashes': [hashlib.sha256(f.tobytes()).hexdigest() for f in frames],
                    'identical_suffix_rgb_sha256': suffix, 'views': []}
         for swapped, path, expected_hash in zip((False, True), paths, expected, strict=True):
@@ -213,6 +278,7 @@ def prepare(args):
     ensure_run_manifest(root / 'inputs.json', inputs)
     write_json(root / 'data-audit.json', {'completed': True, 'original_event_sources': 8,
                'original_filler_sources': 8, 'materialized_views': 16, 'questions': 48,
+               'filler_repeated_frame_slots_by_source': {p['source_group']: p['filler_repeated_frame_slots'] for p in pairs},
                'training_video_hash_overlap': False, 'lossless_all_pixels_verified': True,
                'synthetic_presentation_clock': True, 'scope': SCOPE})
 
@@ -300,6 +366,7 @@ def main():
     p.add_argument('--base', type=Path, default=Path('/data/yyy/tracevl-runs/core-longstream-29e5163-001'))
     p.add_argument('--review', type=Path, default=Path('/data/yyy/tracevl-runs/longstream-evidence-review-29e5163-001'))
     p.add_argument('--annotations', type=Path, default=Path('docs/core_vlm/longstream_pairs_v1.json'))
+    p.add_argument('--reuse-prepared', type=Path)
     p.add_argument('--smoke', action='store_true')
     args = p.parse_args()
     {'prepare': prepare, 'run': run, 'report': report}[args.stage](args)
