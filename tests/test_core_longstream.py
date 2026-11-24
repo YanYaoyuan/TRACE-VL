@@ -157,6 +157,8 @@ def test_real_tiny_native_decoder_reads_stored_features_without_vision_or_gold(m
     a = answer(bb, qa, selected, query, metadata, (128, 128), 'video')
     b = answer(bb, qa, selected, {**query, 'answer': 0}, metadata, (128, 128), 'video')
     assert a == b and a['query_time_encoder_calls'] == 0 and a['visual_tokens'] == 32
+    assert len(a['option_logits_fp32']) == 2
+    assert a['choice_fp32'] == max(range(2), key=lambda i: a['option_logits_fp32'][i])
     with pytest.raises(ValueError, match='causal'):
         answer(bb, qa, selected, {**query, 'query_time': .5}, metadata, (128, 128), 'video')
 

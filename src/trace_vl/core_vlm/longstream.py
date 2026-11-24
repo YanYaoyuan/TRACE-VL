@@ -295,7 +295,8 @@ def text_answer(bb, query, video_hash):
     logits = bb.logits(hidden)[0, 0, [i[0] for i in candidates]].float()
     fp32 = bb.lm_head.weight[[i[0] for i in candidates]].float() @ hidden[0, 0].float()
     return {'choice': int(logits.argmax()), 'choice_fp32': int(fp32.argmax()),
-            'option_logits': logits.tolist(), 'visual_tokens': 0, 'read_frame_indices': [],
+            'option_logits': logits.tolist(), 'option_logits_fp32': fp32.tolist(),
+            'visual_tokens': 0, 'read_frame_indices': [],
             'read_times': [], 'real_feature_rgb_hashes': [], 'source_video_sha256': video_hash,
             'layout_uses_zero_pixels_only_for_packing': False, 'query_time_encoder_calls': 0}
 
@@ -327,6 +328,7 @@ def answer(bb, qa, selected, query, metadata, hw, video_hash):
     if info['visual_tokens_total'] != len(selected) * 16 or info['visual_tokens_total'] > 128:
         raise ValueError('read budget exceeded')
     return {'choice': choice, 'choice_fp32': int(fp32.argmax()), 'option_logits': logits.tolist(),
+            'option_logits_fp32': fp32.tolist(),
             'visual_tokens': info['visual_tokens_total'], 'read_frame_indices': indices,
             'read_times': times.tolist(), 'real_feature_rgb_hashes': [s.rgb_sha256 for s in selected],
             'source_video_sha256': video_hash, 'layout_uses_zero_pixels_only_for_packing': True,
