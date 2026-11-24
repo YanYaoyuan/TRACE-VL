@@ -68,13 +68,15 @@ def spread(items, count=4):
 class BoundedBank:
     """Writer accepts only observations; questions/answers cannot affect storage."""
 
-    def __init__(self, capacity=32, seed=17):
+    def __init__(self, capacity=32, seed=17, *, keep_prefix=False):
         if type(capacity) is not int or capacity < 4:
             raise ValueError('at least four historical slots required')
         self.capacity = capacity
         self.recent = deque(maxlen=8)
         self.fifo = deque(maxlen=capacity)
         self.reservoir = []
+        self.prefix = []
+        self.keep_prefix = keep_prefix
         self.old_seen = 0
         self.seen = 0
         self.rng = random.Random(seed)
@@ -97,6 +99,8 @@ class BoundedBank:
                 if index < self.capacity:
                     self.reservoir[index] = old
         self.recent.append(step)
+        if self.keep_prefix and len(self.prefix) < 4:
+            self.prefix.append(step)
         self.seen += 1
         self.lineage.update(bytes.fromhex(step.rgb_sha256))
         self.lineage.update(np.asarray(step.indices, dtype=np.int64).tobytes())
@@ -107,15 +111,18 @@ class BoundedBank:
             return recent
         if arm == 'recent8':
             return list(self.recent)
+        if arm == 'prefix4' and self.keep_prefix:
+            return sorted({s.indices: s for s in self.prefix + recent}.values(), key=lambda s: s.end)
         if arm == 'fifo_uniform':
             old = spread(self.fifo)
         elif arm == 'reservoir_uniform':
             old = spread(self.reservoir)
-        elif arm == 'stored_oracle' and evidence is not None:
-            matching = [s for s in self.reservoir if any(evidence[0] <= t <= evidence[1] for t in s.times)]
+        elif arm in ('stored_oracle', 'fifo_stored_oracle') and evidence is not None:
+            retained = self.reservoir if arm == 'stored_oracle' else self.fifo
+            matching = [s for s in retained if any(evidence[0] <= t <= evidence[1] for t in s.times)]
             old = spread(matching)
             selected_indices = {s.indices for s in old}
-            other = [s for s in self.reservoir if s.indices not in selected_indices]
+            other = [s for s in retained if s.indices not in selected_indices]
             if len(old) < 4:
                 old += spread(other, 4 - len(old))
         else:
@@ -125,16 +132,18 @@ class BoundedBank:
     def audit(self):
         # Per-policy feature payload and fixed-width source metadata (96 B/slot).
         per_step = self.recent[-1].tokens.numel() * self.recent[-1].tokens.element_size() if self.recent else 0
-        union = {s.indices: s for s in (*self.recent, *self.fifo, *self.reservoir)}
+        union = {s.indices: s for s in (*self.recent, *self.fifo, *self.reservoir, *self.prefix)}
         return {'seen': self.seen, 'lineage': self.lineage.hexdigest(), 'old_seen': self.old_seen,
                 'recent_steps': len(self.recent), 'fifo_steps': len(self.fifo),
                 'reservoir_steps': len(self.reservoir), 'capacity': self.capacity,
+                'prefix_control_enabled': self.keep_prefix, 'prefix_control_steps': len(self.prefix),
                 'per_policy_retained_step_limit': self.capacity + 4,
                 'joint_experiment_unique_retained_steps': len(union),
                 'joint_experiment_feature_and_fixed_metadata_bytes': len(union) * (per_step + 96),
                 'per_policy_feature_and_fixed_metadata_bytes': {
                     'fifo': (len(self.fifo) + min(4, len(self.recent))) * (per_step + 96),
-                    'reservoir': (len(self.reservoir) + min(4, len(self.recent))) * (per_step + 96)},
+                    'reservoir': (len(self.reservoir) + min(4, len(self.recent))) * (per_step + 96),
+                    **({'prefix4': (len(self.prefix) + min(4, len(self.recent))) * (per_step + 96)} if self.keep_prefix else {})},
                 'accounting': 'Tensor payload plus 96-byte logical metadata/slot; Python/framework overhead and shared decoder buffers reported separately, not claimed as exact RSS.'}
 
 
@@ -332,7 +341,8 @@ def evaluate_source(bb, inputs, source, out, verify):
     indices, times, dropped = schedule(metadata, queries[-1]['query_time'])
     stream = metadata['streams'][0]
     hw = frame_size(stream['height'], stream['width'], inputs['pixels'], 32)
-    bank = BoundedBank(inputs['capacity'], source.get('memory_seed', int(digest(source['source_group'])[:8], 16)))
+    bank = BoundedBank(inputs['capacity'], source.get('memory_seed', int(digest(source['source_group'])[:8], 16)),
+                       keep_prefix=inputs.get('position_controls', False))
     qa = NativeVideoQALoss(bb, mode='grid', pool_grid=(4, 4))
     evidence = queries[0].get('evidence')
     privileged = set()
@@ -345,8 +355,9 @@ def evaluate_source(bb, inputs, source, out, verify):
 
     def ask(query):
         state = bank.audit()
+        read_arms = ARMS + (('prefix4',) if inputs.get('position_controls') else ())
         predictions = {arm: answer(bb, qa, bank.read(arm), query, metadata, hw, source['video_sha256'])
-                       for arm in ARMS}
+                       for arm in read_arms}
         predictions['text_only'] = text_answer(bb, query, source['video_sha256'])
         if oracle:
             selected = sorted(oracle + list(bank.recent)[-4:], key=lambda s: s.end)
@@ -354,6 +365,8 @@ def evaluate_source(bb, inputs, source, out, verify):
             selected = list({s.indices: s for s in selected}.values())
             predictions['evidence_oracle'] = answer(bb, qa, selected, query, metadata, hw, source['video_sha256'])
             predictions['stored_oracle'] = answer(bb, qa, bank.read('stored_oracle', evidence), query, metadata, hw, source['video_sha256'])
+            if inputs.get('position_controls'):
+                predictions['fifo_stored_oracle'] = answer(bb, qa, bank.read('fifo_stored_oracle', evidence), query, metadata, hw, source['video_sha256'])
         if not results:
             replay = answer(bb, qa, bank.read('recent8'), query, metadata, hw, source['video_sha256'])
             if replay != predictions['recent8']:
@@ -430,7 +443,9 @@ def worker(args):
         raise ValueError('frozen Plain checkpoint changed')
     selected = inputs['sources'][args.shard::args.shards]
     if args.smoke:
-        selected = [s for s in selected if s in inputs['sources'][:1] + inputs['sources'][len(inputs['sources']) // 2:len(inputs['sources']) // 2 + 1]]
+        smoke_groups = inputs.get('smoke_source_groups')
+        selected = [s for s in selected if s['source_group'] in smoke_groups] if smoke_groups else [
+            s for s in selected if s in inputs['sources'][:1] + inputs['sources'][len(inputs['sources']) // 2:len(inputs['sources']) // 2 + 1]]
     if not selected:
         return
     torch.manual_seed(17)

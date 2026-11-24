@@ -111,7 +111,7 @@ def held_pixels(path, indices, hw):
         decoder.close()
 
 
-def write_views(paths, event_frames, filler_path, filler_indices, hw, *, reuse_paths=None):
+def write_views(paths, event_frames, filler_path, filler_indices, hw, *, reuse_paths=None, shared_prefix=None):
     """Lossless 2-fps real-frame inputs; both views share every pixel after the first4 steps."""
     h, w = hw
     processes, logs = [], []
@@ -129,6 +129,17 @@ def write_views(paths, event_frames, filler_path, filler_indices, hw, *, reuse_p
                  '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{w}x{h}', '-r', '2', '-i', 'pipe:0',
                  '-an', '-c:v', 'ffv1', '-level', '3', '-pix_fmt', 'bgr0', '-threads', '1', str(path)],
                 stdin=subprocess.PIPE, stderr=log))
+        if shared_prefix is not None:
+            prefix = held_pixels(shared_prefix[0], shared_prefix[1], hw)
+            try:
+                for block in prefix:
+                    raw = block.tobytes()
+                    for i, checksum in enumerate(hashes):
+                        if processes:
+                            processes[i].stdin.write(raw)
+                        checksum.update(raw)
+            finally:
+                prefix.close()
         for view, order in enumerate(((0, 1), (1, 0))):
             for index in order:
                 raw = event_frames[index].tobytes()

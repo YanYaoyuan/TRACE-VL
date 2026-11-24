@@ -55,6 +55,25 @@ def test_bounded_storage_is_independent_of_stream_length_and_questions():
         queried.append(step(1099))
 
 
+def test_prefix_control_is_bounded_and_fifo_routing_only_reads_retained_evidence():
+    bank = BoundedBank(32, 17, keep_prefix=True)
+    for i in range(1000):
+        bank.append(step(i))
+    before = bank.audit()
+    selected = bank.read('prefix4')
+    assert [s.times[0] for s in selected] == [0, 1, 2, 3, 996, 997, 998, 999]
+    assert bank.audit()['prefix_control_steps'] == 4
+    assert bank.audit()['joint_experiment_unique_retained_steps'] <= 76
+    oracle = bank.read('fifo_stored_oracle', (970, 973.5))
+    assert [s.times[0] for s in oracle[:4]] == [970, 971, 972, 973]
+    assert not any(s.times[0] < 964 for s in bank.read('fifo_stored_oracle', (0, 3.5)))
+    assert bank.audit() == before
+    baseline = BoundedBank(32, 17)
+    baseline.append(step(0))
+    with pytest.raises(ValueError, match='unknown memory arm'):
+        baseline.read('prefix4')
+
+
 @pytest.mark.parametrize('shape', [(4, 4), (6, 10), (7, 9)])
 def test_compact_feature_expansion_preserves_native_pool_values_exactly(shape):
     torch.manual_seed(3)
