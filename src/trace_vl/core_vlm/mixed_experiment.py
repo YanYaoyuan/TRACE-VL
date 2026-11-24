@@ -46,7 +46,8 @@ def audit_training(root, target, *, arms=None, config_differences=()):
         if tensor_digest({k: v for k, v in state['parameters'].items() if 'lora_' in k}) == initial[name]['lora_sha256']:
             raise ValueError('LoRA did not change')
         if arms[name] != 'none':
-            parameter = {'causal': 'up.weight', 'causal-pool': 'score.weight'}[arms[name]]
+            parameter = {'causal': 'up.weight', 'causal-pool': 'score.weight',
+                         'static-pool': 'score.weight'}[arms[name]]
             scores = state['parameters'].get(f'temporal.{parameter}')
             if scores is None or not torch.isfinite(scores).all() or not scores.count_nonzero():
                 raise ValueError('temporal residual did not learn')

@@ -332,6 +332,9 @@ def run(args):
             n: p for n, p in params.items() if "lora_" in n}),
             "temporal": getattr(args, "temporal", "none"),
             "trainable_parameters": sum(p.numel() for p in params.values())}
+        if hasattr(getattr(net, "temporal", None), "history_enabled"):
+            initial["temporal_history_enabled"] = net.temporal.history_enabled
+            initial["predictor_sha256"] = tensor_digest({"predict.weight": net.temporal.predict.weight})
         ensure_run_manifest(out / "initialization.json", {"id": run_id, **initial})
     # Temporal construction consumes random numbers; keep subsequent stochastic
     # LM operations on the same stream in the two fresh-base arms.
@@ -432,6 +435,8 @@ def run(args):
                  "peak_allocated_gib_rank0": torch.cuda.max_memory_allocated() / 2**30}
         if getattr(args, "feature_cache", None):
             entry.update(vision_cache_hits_rank0=samples.hits, vision_cache_writes_rank0=samples.writes)
+        if hasattr(getattr(net, "temporal", None), "history_enabled"):
+            entry["temporal_history_enabled"] = net.temporal.history_enabled
         metrics.append(entry)
         if rank == 0:
             entry["samples_per_second"] = batch_size / entry["seconds_per_update"]
@@ -468,7 +473,7 @@ def main():
     for name in ("model", "manifest", "out"):
         p.add_argument(f"--{name}", required=True)
     p.add_argument("--mode", choices=("full", "grid"), default="grid")
-    p.add_argument("--temporal", choices=("none", "causal", "causal-pool"), default="none")
+    p.add_argument("--temporal", choices=("none", "causal", "causal-pool", "static-pool"), default="none")
     p.add_argument("--preservation-teacher", action="store_true")
     p.add_argument("--preservation-weight", type=float, default=0.)
     p.add_argument("--preservation-temperature", type=float, default=2.)

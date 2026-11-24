@@ -86,10 +86,24 @@ class CausalPatchPool(nn.Module):
         return (baseline.float() + correction).to(baseline.dtype)
 
 
+class StaticPatchPool(CausalPatchPool):
+    """Train the same region scorer with its previous-block condition always zero.
+
+    Keep constructor RNG consumption and parameter layout identical to the causal
+    arm. The retained predictor receives zero gradient and is audited unchanged;
+    its presence does not imply equal effective capacity or deployment cost.
+    """
+
+    def __init__(self, hidden: int, width: int = 96):
+        super().__init__(hidden, width)
+        self.history_enabled = False
+
+
 def attach_temporal(net, kind):
     if kind == "none":
         return
-    variants = {"causal": CausalTemporalAdapter, "causal-pool": CausalPatchPool}
+    variants = {"causal": CausalTemporalAdapter, "causal-pool": CausalPatchPool,
+                "static-pool": StaticPatchPool}
     if kind not in variants or net.mode != "grid":
         raise ValueError("temporal modules require grid compression and a declared architecture")
     net.temporal = variants[kind](net.bb.hidden).to(net.bb.device)
