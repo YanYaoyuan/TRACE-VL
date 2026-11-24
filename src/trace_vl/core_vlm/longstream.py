@@ -238,7 +238,7 @@ def prepare(args):
         if checksum in train_hashes or checksum in seen_hashes:
             raise ValueError('training overlap or duplicated video bytes in diagnostic')
         seen_hashes.add(checksum)
-        metadata = root / 'media' / f'{checksum}.metadata.json'
+        metadata = root / 'metadata' / f'{checksum}.metadata.json'
         write_json(metadata, meta)
         source.update({'original_video': source['video'], 'video': str(local),
                        'video_sha256': checksum, 'metadata': str(metadata),
@@ -261,6 +261,11 @@ def prepare(args):
             c: sum(s['queries'][0]['cohort'] == c for s in sources) for c in ('activitynet_delayed', 'ovo_long')},
         'scope': SCOPE})
     print(f'PREPARED {len(sources)} sources, {identity["questions"]} questions', flush=True)
+
+
+def verify_native_step(bb, layout, raw, record):
+    """The native parity helper's prefix needs the layout bound to its record."""
+    return check_native_forward(bb, layout, [raw], {**record, 'native_layout': layout})
 
 
 @torch.no_grad()
@@ -385,7 +390,7 @@ def evaluate_source(bb, inputs, source, out, verify):
             shape = bb.merged_grid(grid)
             raw = VisualStep(dense, shape, pair[-1], pair)
             if verify and i == 0:
-                write_json(out / f'native-parity-{digest(source["source_group"])}.json', check_native_forward(bb, layout, [raw], row))
+                write_json(out / f'native-parity-{digest(source["source_group"])}.json', verify_native_step(bb, layout, raw, row))
             pooled = grid_pool(dense, shape, (4, 4))[0].detach().clone()
             step = StoredStep(pooled, shape, pair, tuple(int(x) for x in indices[2 * i:2 * i + 2]),
                               hashlib.sha256(frames.tobytes()).hexdigest())

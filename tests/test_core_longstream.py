@@ -16,8 +16,9 @@ from trace_vl.core_vlm.longstream import (
     expand_pooled,
     schedule,
     stream_pixels,
+    verify_native_step,
 )
-from trace_vl.core_vlm.native import NativeVideoQALoss
+from trace_vl.core_vlm.native import NativeVideoQALoss, encode_native
 from trace_vl.core_vlm.qa import grid_pool
 
 
@@ -139,3 +140,23 @@ def test_real_tiny_native_decoder_reads_stored_features_without_vision_or_gold(m
     assert a == b and a['query_time_encoder_calls'] == 0 and a['visual_tokens'] == 32
     with pytest.raises(ValueError, match='causal'):
         answer(bb, qa, selected, {**query, 'query_time': .5}, metadata, (128, 128), 'video')
+
+
+def test_real_native_parity_binds_layout_without_mutating_the_query():
+    from test_core_vlm_native import tiny_example
+
+    bb, layout, record = tiny_example()
+    # One native two-frame step, as used by the first streamed observation.
+    from trace_vl.core_vlm.native import NativeLayout
+    inputs = {k: v.clone() for k, v in layout.inputs.items()}
+    inputs['input_ids'] = inputs['input_ids'][:, :8]
+    inputs['attention_mask'] = inputs['attention_mask'][:, :8]
+    inputs['mm_token_type_ids'] = inputs['mm_token_type_ids'][:, :8]
+    inputs['video_grid_thw'][0, 0] = 1
+    inputs['pixel_values_videos'] = inputs['pixel_values_videos'][:16]
+    one = NativeLayout(inputs, layout.frame_times[:1], layout.question, {})
+    raw = encode_native(bb, one)[0]
+    unbound = {k: v for k, v in record.items() if k != 'native_layout'}
+    result = verify_native_step(bb, one, raw, unbound)
+    assert result['argmax_equal'] and result['max_logit_abs_difference'] <= result['tolerance']
+    assert 'native_layout' not in unbound
