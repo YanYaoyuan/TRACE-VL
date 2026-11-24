@@ -22,6 +22,7 @@ from .train import checked_checkpoint
 
 DATA_ID = "6b84b8a3e7ecaf43fdc1d17d19aa9de09a07f5757f6aefbc616f84b8d0016a9f"
 READY_SHA256 = "67a7cf5dfa14e0354295d5627983f36d476f3d844c5685000135fad6599697aa"
+OLD_DEVELOPMENT_MANIFEST = Path("/nas-data/vlm/yyy/tracevl-runs/streaming-vision-a566104-001/streamingbench.jsonl")
 TASKS = {"Event Understanding", "Action Perception", "Causal Reasoning", "Counting", "Object Perception"}
 SCOPE = (
     "Fixed natural delayed development cohort, all34 metadata/availability-selected targets on28 "
@@ -70,7 +71,7 @@ def prepare(args):
     spec = json.loads((args.data / "candidate-spec.json").read_text())
     if digest({k: v for k, v in spec.items() if k != "id"}) != spec["id"] or spec["id"] != ready["candidate_spec_id"]:
         raise ValueError("candidate selection spec changed")
-    old = Path("/nas-data/vlm/yyy/tracevl-runs/streaming-vision-a566104-001/streamingbench.jsonl")
+    old = OLD_DEVELOPMENT_MANIFEST
     if sha256(old) != spec["old_development_manifest_sha256"]:
         raise ValueError("existing development boundary changed")
     allowed = {q["source_group"] for q in map(json.loads, old.read_text().splitlines())}
@@ -106,7 +107,7 @@ def prepare(args):
                         "sampled_frame_indices": indices.tolist(), "sampled_frame_times": times.tolist(),
                         "planned_stream_encoder_calls": len(times), "dropped_bad_pts_frames": dropped,
                         "memory_seed": int(digest(["natural-longprefix-writer-v1", s["source_group"]])[:8], 16),
-                        "events": core.events_for(queries)})
+                        "events": [list(event) for event in core.events_for(queries)]})
     inputs = {**{k: copy.deepcopy(base[k]) for k in ("model", "model_identity", "plain", "checkpoint", "pixels",
                                                    "capacity", "seed", "primary_score", "secondary_score")},
               "protocol": "natural-delayed-candidates-v1", "scope": SCOPE,
@@ -120,7 +121,6 @@ def prepare(args):
               "protected_target_limit": 2, "protected_total_step_limit": 24,
               "natural_reference": str(args.reference), "natural_reference_input_id": core.REFERENCE_ID,
               "overlap_reference": str(args.overlap), "overlap_reference_input_id": "2b4ca77baee10a9d84f293f9bb0d6502e9577da00c573053afb1c31239c594c5"}
-    inputs.pop("id")
     inputs["id"] = digest(inputs)
     ensure_run_manifest(args.out / "inputs.json", inputs)
     write_json(args.out / "data-audit.json", {"completed": True, "input_id": inputs["id"],
