@@ -200,6 +200,23 @@ def test_probe_refuses_source_output_overlap_before_writing(tmp_path, relative):
     assert not args.base.exists() and not args.data.exists()
 
 
+def test_prepare_only_builds_real_cross_package_code_identity(tmp_path, monkeypatch):
+    import trace_vl.core_vlm.pool_probe as probe
+
+    def prepared(base, out, data, workers):
+        (out / 'inputs.json').write_text('{"id":"fixture-source"}')
+        return {'id': 'fixture-source'}
+
+    monkeypatch.setattr(probe, 'prepare', prepared)
+    args = SimpleNamespace(base=tmp_path / 'base', out=tmp_path / 'out',
+                           data=tmp_path / 'data', workers=2, gpus=[0], prepare_only=True)
+    run(args)
+    identity = json.loads((args.out / 'run.json').read_text())
+    assert identity['source_id'] == 'fixture-source'
+    assert identity['code']['../v3/backbone.py'] == sha256(
+        __import__('pathlib').Path(probe.__file__).parent / '../v3/backbone.py')
+
+
 def test_stage_space_failure_precedes_copy_or_decode(tmp_path, monkeypatch):
     import trace_vl.core_vlm.pool_probe_cache as cache
     root, video = tmp_path / 'out', tmp_path / 'source'

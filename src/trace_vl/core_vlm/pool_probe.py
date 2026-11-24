@@ -352,7 +352,7 @@ def run(args):
     with (out / '.launcher-python.lock').open('a') as guard:
         fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
         inputs = prepare(args.base, out, args.data, args.workers)
-        code = {name: sha256(Path(__file__).with_name(name)) for name in (
+        code = {name: sha256(Path(__file__).parent / name) for name in (
             'pool_probe.py', 'pool_probe_cache.py', 'temporal.py', 'native.py', 'qa.py',
             'data.py', 'control.py', 'train.py', 'transfer.py', 'experiment.py',
             'prepare.py', 'mixed_diagnostics.py', '../v3/backbone.py',
