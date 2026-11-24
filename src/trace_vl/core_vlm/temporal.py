@@ -52,6 +52,8 @@ class CausalPatchPool(nn.Module):
 
     def __init__(self, hidden: int, width: int = 96):
         super().__init__()
+        # Evaluation intervention; it is not a parameter or a training recipe.
+        self.history_enabled = True
         self.norm = nn.LayerNorm(hidden)
         self.appearance = nn.Linear(hidden, width, bias=False)
         self.predict = nn.Linear(width, width, bias=False)
@@ -74,6 +76,8 @@ class CausalPatchPool(nn.Module):
         appearance = self.appearance(self.norm(patches))
         means = (appearance * valid[None, :, :, None]).sum(2) / valid.sum(-1)[:, None]
         previous = torch.cat((torch.zeros_like(means[:1]), means[:-1]), dim=0)
+        if not self.history_enabled:
+            previous = torch.zeros_like(previous)
         residual = appearance - self.predict(previous)[:, :, None, :]
         logits = self.score(residual.tanh()).squeeze(-1)
         weights = logits.masked_fill(~valid, -torch.inf).softmax(-1)
