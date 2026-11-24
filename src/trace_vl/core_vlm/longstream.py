@@ -330,7 +330,7 @@ def evaluate_source(bb, inputs, source, out, verify):
     indices, times, dropped = schedule(metadata, queries[-1]['query_time'])
     stream = metadata['streams'][0]
     hw = frame_size(stream['height'], stream['width'], inputs['pixels'], 32)
-    bank = BoundedBank(inputs['capacity'], int(digest(source['source_group'])[:8], 16))
+    bank = BoundedBank(inputs['capacity'], source.get('memory_seed', int(digest(source['source_group'])[:8], 16)))
     qa = NativeVideoQALoss(bb, mode='grid', pool_grid=(4, 4))
     evidence = queries[0].get('evidence')
     privileged = set()

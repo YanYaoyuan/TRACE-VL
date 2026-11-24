@@ -1,0 +1,18 @@
+{
+  "protocol": "assistant-reviewed-scene-order-v1",
+  "base_input_id": "3e15a2c0cb8db3d3ef3dc9ffc76d0ee5751984c168153d4efaab251ea66c20fe",
+  "reviewer": "Codex assistant exact contact-sheet inspection, not human certification",
+  "selection": "All eight sources from the fixed delayed cohort; descriptive scene labels replace compound caption questions. No model-success exclusions.",
+  "question": "Which of these two scenes was shown first in the video?",
+  "delays": [15, 60, 300],
+  "rows": [
+    {"number": 0, "source_group": "IWHN3TD8mMQ", "labels": ["Dry pasta and ingredients displayed on a kitchen counter.", "A hand seasoning a pot on the stove and operating the burner knobs."], "event_groups": [0, 1], "event_steps": [[2, 3], [1, 2]]},
+    {"number": 1, "source_group": "YUN8d87DNNY", "labels": ["A woman beside a wheelbarrow at a wooden doorway.", "Several men with long tools working in front of a barn."], "event_groups": [1, 0], "event_steps": [[1, 2], [0, 1]]},
+    {"number": 2, "source_group": "c_NlYvL96y0", "labels": ["Ballet dancers practising together in a studio.", "Close-up views of ballet shoes and empty ballet barres."], "event_groups": [1, 0], "event_steps": [[1, 2], [1, 2]]},
+    {"number": 3, "source_group": "7c5vvEn3uLk", "labels": ["A group of men with horses and ropes outdoors.", "Interview close-ups of men wearing cowboy hats."], "event_groups": [1, 0], "event_steps": [[0, 1], [0, 3]]},
+    {"number": 4, "source_group": "Mzt-E6pxuUI", "labels": ["A boy with a spray nozzle in a green pot by the sink.", "A boy lifting and pouring a small cup by the sink."], "event_groups": [1, 0], "event_steps": [[1, 2], [1, 2]]},
+    {"number": 5, "source_group": "ntJk6Rj-lRA", "labels": ["Hands measuring a strip of carpet with a tape measure.", "A hammer and nails at the edge of a carpeted stair."], "event_groups": [1, 0], "event_steps": [[1, 2], [1, 2]]},
+    {"number": 6, "source_group": "uqiooW1OAXU", "labels": ["A wide view of a desert tour facility.", "Close views of people riding camels led by men."], "event_groups": [0, 1], "event_steps": [[0, 1], [0, 1]]},
+    {"number": 7, "source_group": "kuyuhXuMPX4", "labels": ["A supplies list on screen with a snow shovel.", "A man stretching and putting on winter clothes."], "event_groups": [1, 0], "event_steps": [[1, 2], [1, 2]]}
+  ]
+}
