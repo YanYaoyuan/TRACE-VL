@@ -75,7 +75,19 @@ def run(args):
 
     def commands(extra):
         return [
-            (arm, [*tc, "--arm", arm, "--out", str(args.out / arm), *extra], [i])
+            (
+                arm,
+                [
+                    *tc,
+                    "--arm",
+                    arm,
+                    "--out",
+                    str(args.out / arm),
+                    *extra,
+                    *(["--resume-from", str(args.resume_smoke_from / arm)] if args.resume_smoke_from else []),
+                ],
+                [i],
+            )
             for i, arm in enumerate(arms)
         ]
 
@@ -108,6 +120,7 @@ def run(args):
                 "source": str(args.compare_smoke_from),
                 "updates_per_arm": 2,
                 "exact_parameter_digests_losses_sample_order_and_reads": True,
+                "mode": "original_checkpoint_migration" if args.resume_smoke_from else "fresh_replay",
             },
         )
     if [r["question_ids"] for r in metrics["reservoir"]] != [r["question_ids"] for r in metrics["learned"]]:
@@ -180,6 +193,7 @@ def main():
     p.add_argument("--updates", type=int, default=200)
     p.add_argument("--reuse-cache", type=Path)
     p.add_argument("--compare-smoke-from", type=Path)
+    p.add_argument("--resume-smoke-from", type=Path)
     run(p.parse_args())
 
 

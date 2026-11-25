@@ -135,3 +135,59 @@ def test_layout_cache_is_answer_blind_and_recomputes_for_new_observations(monkey
     assert indices == indices2 and all(torch.equal(x.tokens, y.tokens) for x, y in zip(a, b, strict=True))
     train.sample(bb, None, {**entry, "times": [[i + 0.1, i + 0.6] for i in range(8)]}, row, layouts)
     assert len(calls) == 2
+
+
+def test_checkpoint_migration_preserves_parameters_optimizer_rng_and_observations(tmp_path):
+    from trace_vl.core_vlm.train import tensor_digest
+    from trace_vl.longstream_training.train import import_checkpoint
+
+    source, original_cache, cache, out = [tmp_path / name for name in ("source", "old-cache", "cache", "out")]
+    for p in (source, original_cache, cache, out):
+        p.mkdir()
+    old = {"seed": 17, "cache": "old-cache-id", "code_sha256": "original"}
+    old["id"] = digest(old)
+    write_json(source / "run.json", old)
+    parameters = {"weight": torch.randn(5, 8)}
+    saved = {
+        "run": old["id"],
+        "update": 2,
+        "parameters": parameters,
+        "optimizer": {"state": {"exp_avg": torch.randn(5, 8)}},
+        "rng": torch.get_rng_state(),
+        "cuda_rng": torch.arange(20, dtype=torch.uint8),
+    }
+    torch.save(saved, source / "checkpoint.pt")
+    metrics = [
+        {"question_ids": ["q"], "update": i + 1, "parameters_sha256": tensor_digest(parameters)}
+        for i in range(2)
+    ]
+    (source / "metrics.jsonl").write_text("".join(json.dumps(m) + "\n" for m in metrics))
+    file = f"{digest('q')}.pt"
+    entry = {"input_id": old["cache"], "id": "q", "features": torch.randn(8, 16, 4), "times": [[0.0, 0.5]]}
+    torch.save(entry, original_cache / file)
+    entry["input_id"] = "new-cache-id"
+    torch.save(entry, cache / file)
+    proof = {
+        "sha256": sha256(cache / file),
+        "reused_from": {
+            "cache": str(original_cache),
+            "input_id": old["cache"],
+            "sha256": sha256(original_cache / file),
+        },
+    }
+    write_json((cache / file).with_suffix(".json"), proof)
+    new = {"seed": 17, "cache": "new-cache-id", "code_sha256": "optimized", "id": "new-run"}
+    import_checkpoint(source, out, new, cache, [{"id": "q"}])
+    imported = torch.load(out / "checkpoint.pt", weights_only=True)
+    assert imported["run"] == new["id"] and imported["update"] == 2
+    assert torch.equal(imported["parameters"]["weight"], parameters["weight"])
+    assert torch.equal(imported["optimizer"]["state"]["exp_avg"], saved["optimizer"]["state"]["exp_avg"])
+    assert torch.equal(imported["rng"], saved["rng"]) and torch.equal(imported["cuda_rng"], saved["cuda_rng"])
+    with pytest.raises(ValueError, match="recipe changed"):
+        import_checkpoint(source, out, {**new, "seed": 29}, cache, [{"id": "q"}])
+    entry["features"] += 1
+    torch.save(entry, cache / file)
+    proof["sha256"] = sha256(cache / file)
+    write_json((cache / file).with_suffix(".json"), proof)
+    with pytest.raises(ValueError, match="observations differ"):
+        import_checkpoint(source, out, new, cache, [{"id": "q"}])

@@ -25,6 +25,7 @@ CUDA_VISIBLE_DEVICES= "$py" -m pytest -q tests/test_longstream_training.py tests
 extra=()
 [[ -z "${TRACE_REUSE_CACHE:-}" ]] || extra+=(--reuse-cache "$TRACE_REUSE_CACHE")
 [[ -z "${TRACE_COMPARE_SMOKE_FROM:-}" ]] || extra+=(--compare-smoke-from "$TRACE_COMPARE_SMOKE_FROM")
+[[ -z "${TRACE_RESUME_SMOKE_FROM:-}" ]] || extra+=(--resume-smoke-from "$TRACE_RESUME_SMOKE_FROM")
 "$py" -m trace_vl.longstream_training.run --out "$out" \
     --data "${TRACE_DATA:-/data/yyy/tracevl-data/trained-reader-20261125-001}" \
     --model /data/yyy/tracevl-data/core-pool-probe-2efc7cc/model \

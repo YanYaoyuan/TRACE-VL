@@ -92,6 +92,71 @@ def gradient_norm(parameters):
     return float(torch.stack(squares).double().sum().sqrt()) if squares else 0.0
 
 
+def import_checkpoint(source, out, identity, cache, training):
+    """Migrate an existing optimizer/RNG state; never substitute a new replay.
+
+    Only execution code and the provenance-retagged visual cache may differ.
+    Every observation used by the imported prefix must be a verified copy of
+    the original cache. Original files are read-only and remain intact.
+    """
+    old = json.loads((source / "run.json").read_text())
+    if identity.get("checkpoint_origin", {}).get("sha256", sha256(source / "checkpoint.pt")) != sha256(
+        source / "checkpoint.pt"
+    ):
+        raise ValueError("checkpoint source bytes changed")
+    if old["id"] != digest({k: v for k, v in old.items() if k != "id"}):
+        raise ValueError("checkpoint source run identity corrupted")
+    for key in identity.keys() - {"id", "cache", "code_sha256", "checkpoint_origin"}:
+        if old.get(key) != identity[key]:
+            raise ValueError(f"checkpoint continuation recipe changed: {key}")
+    saved = torch.load(source / "checkpoint.pt", map_location="cpu", weights_only=True)
+    metrics = [json.loads(s) for s in (source / "metrics.jsonl").read_text().splitlines()]
+    if (
+        saved["run"] != old["id"]
+        or len(metrics) != saved["update"]
+        or saved["update"] != 2
+        or tensor_digest(saved["parameters"]) != metrics[-1]["parameters_sha256"]
+    ):
+        raise ValueError("checkpoint prefix or parameter digest changed")
+    by_id = {r["id"]: r for r in training}
+    for record in metrics:
+        for question in record["question_ids"]:
+            if question not in by_id:
+                raise ValueError("checkpoint sample is outside current training fold")
+            path = cache / f"{digest(question)}.pt"
+            proof = json.loads(path.with_suffix(".json").read_text())
+            origin = proof["reused_from"]
+            original = Path(origin["cache"]) / path.name
+            if (
+                origin["input_id"] != old["cache"]
+                or sha256(original) != origin["sha256"]
+                or sha256(path) != proof["sha256"]
+            ):
+                raise ValueError("checkpoint observation provenance changed")
+            a, b = [torch.load(p, map_location="cpu", weights_only=True) for p in (original, path)]
+            a.pop("input_id"), b.pop("input_id")
+            af, bf = a.pop("features"), b.pop("features")
+            if not torch.equal(af, bf) or a != b:
+                raise ValueError("checkpoint observations differ")
+    saved["run"] = identity["id"]
+    torch.save(saved, out / "checkpoint.pt")
+    (out / "metrics.jsonl").write_text("".join(json.dumps(m) + "\n" for m in metrics))
+    write_json(
+        out / "checkpoint-import.json",
+        {
+            "completed": True,
+            "source": str(source),
+            "source_run_id": old["id"],
+            "source_checkpoint_sha256": sha256(source / "checkpoint.pt"),
+            "update": saved["update"],
+            "parameters_sha256": tensor_digest(saved["parameters"]),
+            "optimizer_and_rng_preserved": True,
+            "exact_original_observations": True,
+            "mode": "checkpoint_migration_not_fresh_replay",
+        },
+    )
+
+
 def run(args):
     args.out.mkdir(parents=True, exist_ok=True)
     da = json.loads((args.data / "data-audit.json").read_text())
@@ -122,6 +187,11 @@ def run(args):
         "code_sha256": sha256(__file__),
         "selector_code_sha256": sha256(Path(__file__).with_name("selection.py")),
     }
+    if getattr(args, "resume_from", None):
+        identity["checkpoint_origin"] = {
+            "source": str(args.resume_from),
+            "sha256": sha256(args.resume_from / "checkpoint.pt"),
+        }
     identity["id"] = digest(identity)
     ensure_run_manifest(args.out / "run.json", identity)
     torch.manual_seed(17)
@@ -145,6 +215,8 @@ def run(args):
         params.update({"selector." + n: p for n, p in selector.named_parameters()})
     optimizer = torch.optim.AdamW(params.values(), lr=5e-5, weight_decay=0.0)
     checkpoint = args.out / "checkpoint.pt"
+    if getattr(args, "resume_from", None) and not checkpoint.exists():
+        import_checkpoint(args.resume_from, args.out, identity, args.cache, training)
     start = 0
     if checkpoint.exists():
         saved = torch.load(checkpoint, map_location="cpu", weights_only=True)
@@ -295,6 +367,7 @@ def main():
     p.add_argument("--arm", choices=("reservoir", "learned"), required=True)
     p.add_argument("--updates", type=int, default=200)
     p.add_argument("--stop-after", type=int)
+    p.add_argument("--resume-from", type=Path)
     run(p.parse_args())
 
 
