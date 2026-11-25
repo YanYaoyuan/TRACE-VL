@@ -81,7 +81,8 @@
         32.467532467532465
       ],
       "bootstrap_samples": 4000,
-      "seed": 7
+      "seed": 7,
+      "memory_seed_scope": "Original prespecified memory seed; historical analysis retained"
     },
     "by_delay": {
       "0": {
@@ -264,6 +265,16 @@
           }
         }
       }
+    },
+    "mean3_reservoir300_minus_text_exploratory": {
+      "reservoir_mean_accuracy_percent": 70.56277056277057,
+      "text_accuracy_percent": 54.54545454545454,
+      "delta_pp": 16.017316017316013,
+      "ci95_pp": [
+        3.896103896103895,
+        27.705627705627705
+      ],
+      "scope": "Additional exploratory comparison after the review; original predeclared single-seed analysis is retained separately"
     }
   },
   "writer_controls": {
@@ -418,5 +429,6 @@
     "promote_new_writers": false,
     "promote_uniform_or_full_bank_reader": false,
     "next": "Design and validate event continuity/question-conditioned retrieval and genuine history-dependent long-stream supervision before scaling training."
-  }
+  },
+  "review_followup": "review_followup.json"
 }

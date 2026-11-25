@@ -20,11 +20,15 @@
     "workspace_source": "DOC/experiment-reviews/bank-readout-27c35b0-20261125/independent-review.json"
   },
   "summary.json": {
-    "sha256": "374b5dd9fc87e4eeb12ae412fdd8d5a7da3dae322e77d8400718448cd57b6377",
+    "sha256": "994d4755bf7cc4ea38b6bcead81232c9351d119d44c3864b4f2ed08a62865d42",
     "workspace_source": "Derived from the SHA-verified source reports; no new inference."
   },
   "bank_readout_paired_sources.json": {
     "sha256": "13fc5b645076dca97d8814c57b1b8e28c7806e06af2bac8f123b78eea8cc3199",
     "workspace_source": "Derived from the SHA-verified source reports; no new inference."
+  },
+  "review_followup.json": {
+    "sha256": "eb218fd71460bcd753958eb7f575428371a3cd9f8951b8ae3cee919a86027300",
+    "workspace_source": "Post-hoc derivation from committed bank_readout_paired_sources.json; no new inference."
   }
 }

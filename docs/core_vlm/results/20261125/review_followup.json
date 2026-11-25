@@ -1,0 +1,56 @@
+{
+  "analysis_status": "Post-hoc review follow-up; no new inference and no confirmatory claim",
+  "input_id": "7a68f9cbb4de35fade6c384a1bca090ab74d4f3daf1e53fd394126593f1afcd5",
+  "source_count": 77,
+  "memory_seeds": [
+    "original",
+    "29",
+    "43"
+  ],
+  "bootstrap": {
+    "draws": 4000,
+    "seed": 7,
+    "unit": "source; seeds averaged within each source",
+    "row_order": "Preserved order in bank_readout_paired_sources.json"
+  },
+  "mean3_reservoir300_minus_text": {
+    "reservoir_mean_accuracy_percent": 70.56277056277057,
+    "text_accuracy_percent": 54.54545454545454,
+    "delta_pp": 16.017316017316013,
+    "ci95_pp": [
+      3.896103896103895,
+      27.705627705627705
+    ],
+    "scope": "Additional exploratory comparison after the review; original predeclared single-seed analysis is retained separately"
+  },
+  "text_and_snapshot_correctness_counts": {
+    "text_0_snapshot_0": 9,
+    "text_0_snapshot_1": 26,
+    "text_1_snapshot_0": 4,
+    "text_1_snapshot_1": 38
+  },
+  "same_read_cases": {
+    "usable_bank_at_most8_steps": 56,
+    "source_seed_cases": 231,
+    "fraction": 0.24242424242424243,
+    "basis": "all_bank actual visual_tokens<=128; membership equivalence follows from the frozen selectors, and committed token/correctness equality checked"
+  },
+  "outcome_conditioned_subset": {
+    "definition": "text wrong, privileged snapshot correct within current77-source cohort",
+    "sources": 26,
+    "distinct_from_earlier26_past_event_cohort": true,
+    "accuracy_percent": {
+      "latest8": 62.82051282051282,
+      "uniform8": 69.23076923076923,
+      "all_bank": 67.94871794871796
+    },
+    "use": "Descriptive only; not a revised primary cohort, training filter or method selection endpoint"
+  },
+  "context_shift": {
+    "training_steps": 8,
+    "training_frames": 16,
+    "all_bank_configured_step_cap": 32,
+    "all_bank_observed_max_steps": 25,
+    "interpretation": "Wider reads change both coverage and context length relative to training; null gain does not isolate the readout bottleneck."
+  }
+}

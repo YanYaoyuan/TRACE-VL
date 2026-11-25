@@ -11,6 +11,7 @@
 | [writer_controls_review.json](writer_controls_review.json) | 77源/385查询/10臂的分数、状态事件与精确重放核验记录 |
 | [bank_readout_review.json](bank_readout_review.json) | 77源/847预测的逐项复核结论 |
 | [bank_readout_paired_sources.json](bank_readout_paired_sources.json) | 全77源各臂正确性和实际读取token数；顺序与冻结输入一致 |
+| [review_followup.json](review_followup.json) | 评审后追加的三种子相对文本均值、同读取案例及事后子集统计 |
 | [validation.md](validation.md) | 本PR提交前全套CPU回归、环境限制及检查结果 |
 | [artifacts.json](artifacts.json) | 上述JSON的SHA256及工作区来源 |
 
