@@ -2,10 +2,24 @@ import math
 
 import pytest
 import torch
-from test_complementary_state import HEAD, TAIL, bb, blocks  # noqa: F401
+from test_complementary_state import HEAD, TAIL, blocks
 
 from trace_vl.b0_window40 import analysis, run
 from trace_vl.complementary_memory.state_stream import NativeStream, score
+
+
+@pytest.fixture
+def bb():
+    from test_core_vlm_native import tiny_example
+
+    backbone, _, _ = tiny_example()
+    backbone.text_config = backbone.model.config.text_config
+    backbone.layer_types = list(backbone.text_config.layer_types)
+    backbone.linear_layers, backbone.full_layers = [0], [1]
+    backbone.vision_start, backbone.vision_end = 1, 2
+    backbone.ids = lambda text: [20 + ord(text) % 20]
+    with torch.no_grad():
+        yield backbone
 
 
 @torch.no_grad()
