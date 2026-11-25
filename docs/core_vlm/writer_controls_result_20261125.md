@@ -51,6 +51,12 @@ semantic evidence. These counts alone cannot locate a unique storage/readout cau
 
 ## Decision
 
+Subsequent update: the proposed stored-bank readout diagnostic has completed
+all77targets/847predictions, with385exact original-control replays. Uniform8 and
+all-bank paired intervals both cross zero; no reader promotion. See
+[completed readout](../offline-bank-readout.md) and [current status](research_results_20261125.md).
+The paragraph below preserves the decision recorded immediately after this writer run.
+
 Keep full failures and reservoir as baseline. Investigate motion/context continuity
 and bank readout before designing a learnable memory objective. A wider stored-bank
 readout diagnostic would need explicit different-token-budget labeling and exact

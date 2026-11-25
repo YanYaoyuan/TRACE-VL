@@ -1,6 +1,7 @@
 # TRACE-VL
 
-> **当前主线（2026-11-13）**：[视频理解核心模型与实验计划](docs/core_vlm/mainline.md)。
+> **近期结果（2026-11-25）**：[架构、完整实验结果与下一阶段](docs/core_vlm/research_results_20261125.md)。
+> 当前主线与历史计划见[核心视频模型](docs/core_vlm/mainline.md)。
 > 目标是训练 VL 模型本身的视频理解能力，并与 Mage-VL / MOSS-VL 比较。
 > 冻结底座的 event-state 告警头是历史应用实验，不是基础模型成果。
 > 已有真实 GPU 试验；当前没有成立的核心架构增益。下面的 v2 概述及其日期状态保留作历史说明。

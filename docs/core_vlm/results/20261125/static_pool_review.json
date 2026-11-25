@@ -1,0 +1,215 @@
+{
+  "passed": true,
+  "questions": 2418,
+  "report_sha256": "c1d32e7362bf5f0caa9f3bfb497d30db5bcc0e9ca7207235e20211e5c3114123",
+  "prediction_sha256": {
+    "ovo/plain": "98e0857863b40ea9f9cc7c940342be92ecee777118d3296664ac0c0d12209bc3",
+    "ovo/causal_pool": "ea2059ced6a62dbf214421966ea0c82e0774e9b64e6c647dd2cccf71056d39e2",
+    "ovo/static_pool": "26381a1019dcc136454f6992c8d23ab274d606a143d31a2302ab9800545bda79",
+    "nextqa/plain": "9631a791ee17cbb8e766e1095210620fd25a37697add79c91118d0bec16c67e5",
+    "nextqa/causal_pool": "4c65d35b5822d6884fc7e382959ad6f46689db14a65d1e9acc94f01771a72823",
+    "nextqa/static_pool": "1b1883023773ff864e339709e063197768522b67e84a2d0ab3cd5a21290a3950"
+  },
+  "checked": {
+    "ovo": {
+      "n": 674,
+      "scores": {
+        "plain": {
+          "n": 674,
+          "choice_accuracy": 0.4910979228486647,
+          "strict_accuracy": 0.486646884272997,
+          "format_valid_fraction": 0.9955489614243324
+        },
+        "causal_pool": {
+          "n": 674,
+          "choice_accuracy": 0.4896142433234421,
+          "strict_accuracy": 0.486646884272997,
+          "format_valid_fraction": 0.9970326409495549
+        },
+        "static_pool": {
+          "n": 674,
+          "choice_accuracy": 0.4940652818991098,
+          "strict_accuracy": 0.4896142433234421,
+          "format_valid_fraction": 0.9955489614243324
+        }
+      },
+      "primary": {
+        "causal_pool_minus_static_pool": {
+          "n": 291,
+          "source_videos": 138,
+          "delta_pp": -0.3436426116838488,
+          "ci95_pp": [
+            -1.4814814814814814,
+            0.7692307692307693
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "static_pool_minus_plain": {
+          "n": 291,
+          "source_videos": 138,
+          "delta_pp": 0.6872852233676976,
+          "ci95_pp": [
+            0.0,
+            1.7857142857142858
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "causal_pool_minus_plain": {
+          "n": 291,
+          "source_videos": 138,
+          "delta_pp": 0.3436426116838488,
+          "ci95_pp": [
+            -0.7142857142857143,
+            1.613066475120805
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        }
+      },
+      "no_harm": {
+        "causal_pool_minus_static_pool": {
+          "n": 383,
+          "source_videos": 122,
+          "delta_pp": -0.5221932114882507,
+          "ci95_pp": [
+            -1.8135892604804522,
+            0.75
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "static_pool_minus_plain": {
+          "n": 383,
+          "source_videos": 122,
+          "delta_pp": 0.0,
+          "ci95_pp": [
+            -1.2887430405711393,
+            1.2821336760925455
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "causal_pool_minus_plain": {
+          "n": 383,
+          "source_videos": 122,
+          "delta_pp": -0.5221932114882507,
+          "ci95_pp": [
+            -1.6172506738544474,
+            0.2916095009432347
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        }
+      }
+    },
+    "nextqa": {
+      "n": 1744,
+      "scores": {
+        "plain": {
+          "n": 1744,
+          "choice_accuracy": 0.7895642201834863,
+          "strict_accuracy": 0.7895642201834863,
+          "format_valid_fraction": 1.0
+        },
+        "causal_pool": {
+          "n": 1744,
+          "choice_accuracy": 0.7947247706422018,
+          "strict_accuracy": 0.7947247706422018,
+          "format_valid_fraction": 1.0
+        },
+        "static_pool": {
+          "n": 1744,
+          "choice_accuracy": 0.7878440366972477,
+          "strict_accuracy": 0.7878440366972477,
+          "format_valid_fraction": 1.0
+        }
+      },
+      "primary": {
+        "causal_pool_minus_static_pool": {
+          "n": 555,
+          "source_videos": 181,
+          "delta_pp": 0.9009009009009009,
+          "ci95_pp": [
+            0.18281535648994515,
+            1.7475897888519247
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "static_pool_minus_plain": {
+          "n": 555,
+          "source_videos": 181,
+          "delta_pp": -0.18018018018018017,
+          "ci95_pp": [
+            -0.7784787296909416,
+            0.37880584785233745
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "causal_pool_minus_plain": {
+          "n": 555,
+          "source_videos": 181,
+          "delta_pp": 0.7207207207207207,
+          "ci95_pp": [
+            0.17301038062283736,
+            1.4815501958359103
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        }
+      },
+      "no_harm": {
+        "causal_pool_minus_static_pool": {
+          "n": 261,
+          "source_videos": 157,
+          "delta_pp": 0.0,
+          "ci95_pp": [
+            -1.1320754716981132,
+            1.1194029850746268
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "static_pool_minus_plain": {
+          "n": 261,
+          "source_videos": 157,
+          "delta_pp": 0.3831417624521073,
+          "ci95_pp": [
+            -0.7874015748031497,
+            1.6597510373443984
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "causal_pool_minus_plain": {
+          "n": 261,
+          "source_videos": 157,
+          "delta_pp": 0.3831417624521073,
+          "ci95_pp": [
+            0.0,
+            1.1904761904761905
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        }
+      }
+    }
+  },
+  "verification": "Independent raw-choice and strict-answer recomputation; all report source-video intervals and answer-change counts matched.",
+  "limits": "Single seed and reused development questions; no automatic architecture acceptance."
+}

@@ -47,6 +47,11 @@ Action39 and Object38 strata remain descriptive, without replacing the full coho
 
 ## Next experiment
 
+Subsequent update: the writer controls below have now completed. Both failed to
+demonstrate superiority; see [writer results](writer_controls_result_20261125.md)
+and the [current consolidated status](research_results_20261125.md). The following
+paragraph preserves the proposal as recorded after this baseline run.
+
 Keep all77 sources/all5 delays, same frozen reader/sampling and32/4/128 budget.
 Integrate time_coverage and spatial_change with exact shared-baseline replay;
 prespecify additional memory seeds. Record actual state, auxiliary workspace,
