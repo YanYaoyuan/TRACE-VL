@@ -1,0 +1,291 @@
+{
+  "scope": "Explicitly post hoc saved-record diagnostics, not a replacement primary or new training gate.",
+  "input": "e40fc6f3290603cf2086e0a24955d828346406a1f64cc86611d27a65c380c543",
+  "archive_sha256": "12366edbffa781c3b3c8a3e8568c79d7ac885654b34bda9c190bd191ef7e004b",
+  "reference_input": "a8a0a7c2aca226990e76fbd9840df92ef651a99fd130dec03b9a307fcdb5d23b",
+  "primary_recomputed": {
+    "nll": {
+      "sources": 77,
+      "mean": -0.1243776936789003,
+      "ci95": [
+        -0.23260157943226856,
+        -0.022047082971078866
+      ],
+      "se": 0.05348497093420583,
+      "mde80": 0.1497579186157763
+    },
+    "acc": {
+      "sources": 77,
+      "mean": 0.05627705627705627,
+      "ci95": [
+        -0.03463203463203463,
+        0.14718614718614717
+      ],
+      "se": 0.04627976409011015,
+      "mde80": 0.1295833394523084
+    }
+  },
+  "leave_one_source_out": {
+    "means_range": [
+      -0.1391074013847332,
+      -0.10282163847512603
+    ],
+    "means_by_source": {
+      "streamingbench-real:0006": -0.12696474864848192,
+      "streamingbench-real:0011": -0.12551398633640037,
+      "streamingbench-real:0012": -0.11096365157141705,
+      "streamingbench-real:0014": -0.1253631935257699,
+      "streamingbench-real:0015": -0.12072633758492764,
+      "streamingbench-real:0016": -0.11962551368195666,
+      "streamingbench-real:0017": -0.11902361070980155,
+      "streamingbench-real:0018": -0.1272701010659821,
+      "streamingbench-real:0019": -0.12593964709793765,
+      "streamingbench-real:0022": -0.13079402354650302,
+      "streamingbench-real:0024": -0.12595847503039687,
+      "streamingbench-real:0025": -0.12174807281534407,
+      "streamingbench-real:0026": -0.1354120852005754,
+      "streamingbench-real:0027": -0.11611212372331078,
+      "streamingbench-real:0028": -0.12597835520489237,
+      "streamingbench-real:0029": -0.13016042142364093,
+      "streamingbench-real:0031": -0.11977614908329329,
+      "streamingbench-real:0032": -0.12339991852567474,
+      "streamingbench-real:0033": -0.12226359686888659,
+      "streamingbench-real:0034": -0.12099890101791363,
+      "streamingbench-real:0035": -0.1285246728245581,
+      "streamingbench-real:0036": -0.12592294857570052,
+      "streamingbench-real:0037": -0.12581080730660288,
+      "streamingbench-real:0038": -0.12147482624443055,
+      "streamingbench-real:0039": -0.1255268102115975,
+      "streamingbench-real:0040": -0.1249668705626242,
+      "streamingbench-real:0041": -0.12578019743575397,
+      "streamingbench-real:0043": -0.13750840046639312,
+      "streamingbench-real:0045": -0.12164258446864357,
+      "streamingbench-real:0046": -0.12581649061550584,
+      "streamingbench-real:0047": -0.12206240850297567,
+      "streamingbench-real:0048": -0.1221663643218462,
+      "streamingbench-real:0049": -0.12643055238670337,
+      "streamingbench-real:0050": -0.11752263205230416,
+      "streamingbench-real:0051": -0.1260530830242694,
+      "streamingbench-real:0052": -0.13023836788418067,
+      "streamingbench-real:0054": -0.12579925434172406,
+      "streamingbench-real:0055": -0.12584917175375887,
+      "streamingbench-real:0056": -0.12626177099467673,
+      "streamingbench-real:0057": -0.12134275559636767,
+      "streamingbench-real:0058": -0.12122227997940238,
+      "streamingbench-real:0059": -0.12779573760261453,
+      "streamingbench-real:0060": -0.1224777453431436,
+      "streamingbench-real:0061": -0.12799791328297908,
+      "streamingbench-real:0062": -0.12817119547209344,
+      "streamingbench-real:0063": -0.10282163847512603,
+      "streamingbench-real:0064": -0.13169959753391436,
+      "streamingbench-real:0065": -0.131217027447337,
+      "streamingbench-real:0066": -0.11820931948856664,
+      "streamingbench-real:0067": -0.12799806920755355,
+      "streamingbench-real:0068": -0.12636305053094662,
+      "streamingbench-real:0069": -0.12750198490748224,
+      "streamingbench-real:0070": -0.1217548886555348,
+      "streamingbench-real:0125": -0.11940715552145995,
+      "streamingbench-real:0127": -0.12392260437362446,
+      "streamingbench-real:0140": -0.12565844891191177,
+      "streamingbench-real:0142": -0.12582928564385742,
+      "streamingbench-real:0143": -0.12889315984980823,
+      "streamingbench-real:0144": -0.10895312421720388,
+      "streamingbench-real:0145": -0.1193995871871896,
+      "streamingbench-real:0146": -0.10534464778387793,
+      "streamingbench-real:0147": -0.12696023706595727,
+      "streamingbench-real:0148": -0.13111955642885106,
+      "streamingbench-real:0150": -0.12193518064907702,
+      "streamingbench-real:0157": -0.12531776415513737,
+      "streamingbench-real:0186": -0.12614256211825445,
+      "streamingbench-real:0187": -0.11563463979563389,
+      "streamingbench-real:0188": -0.12381339203267054,
+      "streamingbench-real:0189": -0.12431966188596076,
+      "streamingbench-real:0191": -0.12146173873523419,
+      "streamingbench-real:0192": -0.12204666316168618,
+      "streamingbench-real:0193": -0.12694463039130524,
+      "streamingbench-real:0194": -0.1391074013847332,
+      "streamingbench-real:0195": -0.1372199256176578,
+      "streamingbench-real:0198": -0.12371655416249061,
+      "streamingbench-real:0199": -0.1334791649541499,
+      "streamingbench-real:0200": -0.12453099708717162
+    },
+    "influence_definition": "Largest absolute change of the source-mean NLL contrast after deletion.",
+    "most_influential_source": "streamingbench-real:0063",
+    "deleted_source_nll_difference": -1.7626378891657453,
+    "after_deletion": {
+      "sources": 76,
+      "mean": -0.10282163847512603,
+      "ci95": [
+        -0.20206233295768566,
+        -0.007879302267467877
+      ],
+      "se": 0.049597090262920356,
+      "mde80": 0.138871852736177
+    }
+  },
+  "retention_strata_300s": {
+    "retained_any_snapshot_step": {
+      "source_seed_cases": 97,
+      "sources": 61,
+      "nll": {
+        "sources": 61,
+        "mean": -0.17704693132337665,
+        "ci95": [
+          -0.3192900903291302,
+          -0.04408547209739179
+        ],
+        "se": 0.07094256139751093,
+        "mde80": 0.1986391719130306
+      },
+      "acc": {
+        "sources": 61,
+        "mean": 0.06284153005464481,
+        "ci95": [
+          -0.040983606557377046,
+          0.17486338797814205
+        ],
+        "se": 0.05580507732206378,
+        "mde80": 0.15625421650177856
+      }
+    },
+    "retained_no_snapshot_step": {
+      "source_seed_cases": 134,
+      "sources": 69,
+      "nll": {
+        "sources": 69,
+        "mean": -0.04901523935763785,
+        "ci95": [
+          -0.13712150373421145,
+          0.041521624578659294
+        ],
+        "se": 0.045916050116647074,
+        "mde80": 0.1285649403266118
+      },
+      "acc": {
+        "sources": 69,
+        "mean": 0.021739130434782608,
+        "ci95": [
+          -0.07246376811594203,
+          0.11111111111111112
+        ],
+        "se": 0.0474200647405742,
+        "mde80": 0.13277618127360774
+      }
+    }
+  },
+  "sources_in_both_retention_strata": 53,
+  "stratum_limit": "Source/seed retention is post-treatment; metrics averaged within source among seeds in that stratum. Source groups overlap across strata; no independent-group or causal retention-effect claim.",
+  "full_stream_minus_window40": {
+    "0": {
+      "nll": {
+        "sources": 77,
+        "mean": 0.03596636063736641,
+        "ci95": [
+          -0.026790306549845863,
+          0.10560224700394066
+        ],
+        "se": 0.03362385759185037,
+        "mde80": 0.09414680125718103
+      },
+      "acc": {
+        "sources": 77,
+        "mean": 0.012987012987012988,
+        "ci95": [
+          0.0,
+          0.03896103896103896
+        ],
+        "se": 0.012987012987012986,
+        "mde80": 0.03636363636363636
+      }
+    },
+    "15": {
+      "nll": {
+        "sources": 77,
+        "mean": 0.00023179663620017247,
+        "ci95": [
+          -0.06837541412536847,
+          0.07227958483186468
+        ],
+        "se": 0.0357867511151193,
+        "mde80": 0.10020290312233404
+      },
+      "acc": {
+        "sources": 77,
+        "mean": 0.0,
+        "ci95": [
+          -0.05194805194805195,
+          0.05194805194805195
+        ],
+        "se": 0.026144349280800106,
+        "mde80": 0.07320417798624029
+      }
+    },
+    "60": {
+      "nll": {
+        "sources": 77,
+        "mean": -0.10147170417100579,
+        "ci95": [
+          -0.2024680722708131,
+          0.005200364866810133
+        ],
+        "se": 0.052531936502337624,
+        "mde80": 0.14708942220654533
+      },
+      "acc": {
+        "sources": 77,
+        "mean": 0.03896103896103896,
+        "ci95": [
+          -0.03896103896103896,
+          0.12987012987012986
+        ],
+        "se": 0.04312454123329118,
+        "mde80": 0.12074871545321529
+      }
+    },
+    "180": {
+      "nll": {
+        "sources": 77,
+        "mean": -0.227529225611588,
+        "ci95": [
+          -0.38010259258903567,
+          -0.07389060440896648
+        ],
+        "se": 0.07915820516977772,
+        "mde80": 0.2216429744753776
+      },
+      "acc": {
+        "sources": 77,
+        "mean": 0.025974025974025976,
+        "ci95": [
+          -0.07792207792207792,
+          0.12987012987012986
+        ],
+        "se": 0.055380452534328675,
+        "mde80": 0.15506526709612029
+      }
+    },
+    "300": {
+      "nll": {
+        "sources": 77,
+        "mean": -0.2890424031386065,
+        "ci95": [
+          -0.43021587034421804,
+          -0.14655722496013746
+        ],
+        "se": 0.07269959431823839,
+        "mde80": 0.20355886409106747
+      },
+      "acc": {
+        "sources": 77,
+        "mean": 0.14285714285714285,
+        "ci95": [
+          0.025974025974025976,
+          0.2597402597402597
+        ],
+        "se": 0.057619339482454124,
+        "mde80": 0.16133415055087152
+      }
+    }
+  },
+  "full_stream_limit": "Saved full_stream is an unbounded, separately evolved Test A policy, not equal-budget selection headroom. Original hashes are checked; old packing digests were absent and cross-run drift of unreproduced reference arms remains unbounded."
+}
