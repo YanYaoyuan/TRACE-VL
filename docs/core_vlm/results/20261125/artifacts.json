@@ -1,0 +1,34 @@
+{
+  "causal_pool_analysis.json": {
+    "sha256": "5781aec06e10e128d57db0dd96a6bdb7b67fe69a807f932ccf16d21d9089584b",
+    "workspace_source": "DOC/experiment-reviews/causal-pool-20261124/analysis.json"
+  },
+  "static_pool_review.json": {
+    "sha256": "d9caa996d19f8e3ecd74335a233d684b5a41f5798eb9b12e68ed0964337e65a0",
+    "workspace_source": "DOC/experiment-reviews/static-pool-bfcc67d-20261124/local-independent-review.json"
+  },
+  "longstream_states_review.json": {
+    "sha256": "1ef1623aed772523880a1c45826f98505ad41358d7a968d73baf7931ee1582e3",
+    "workspace_source": "DOC/experiment-reviews/longstream-states-3dc8c83-20261125/local-independent-review.json"
+  },
+  "writer_controls_review.json": {
+    "sha256": "b07617ce1a01b49eef505db4e0a1019e831be01f6618c7127ee9a0d273fe6a34",
+    "workspace_source": "DOC/experiment-reviews/writer-controls-60bd0df-20261125/local-independent-review.json"
+  },
+  "bank_readout_review.json": {
+    "sha256": "d5e7bac8641effed660471cc86baf17c678bfce02b43a03d88f3ea9838764d47",
+    "workspace_source": "DOC/experiment-reviews/bank-readout-27c35b0-20261125/independent-review.json"
+  },
+  "summary.json": {
+    "sha256": "994d4755bf7cc4ea38b6bcead81232c9351d119d44c3864b4f2ed08a62865d42",
+    "workspace_source": "Derived from the SHA-verified source reports; no new inference."
+  },
+  "bank_readout_paired_sources.json": {
+    "sha256": "13fc5b645076dca97d8814c57b1b8e28c7806e06af2bac8f123b78eea8cc3199",
+    "workspace_source": "Derived from the SHA-verified source reports; no new inference."
+  },
+  "review_followup.json": {
+    "sha256": "eb218fd71460bcd753958eb7f575428371a3cd9f8951b8ae3cee919a86027300",
+    "workspace_source": "Post-hoc derivation from committed bank_readout_paired_sources.json; no new inference."
+  }
+}

@@ -1,0 +1,329 @@
+{
+  "decision": {
+    "passed": false,
+    "checks": {
+      "ovo": false,
+      "nextqa": false
+    },
+    "rule": {
+      "gain_pp": 2.0,
+      "noninferiority_pp": 2.0
+    },
+    "meaning": "Advance only if BOTH primary endpoints improve and both no-harm checks pass; failure can mean insufficient precision, not necessarily degradation."
+  },
+  "benchmarks": {
+    "ovo": {
+      "scores": {
+        "plain": {
+          "n": 674,
+          "choice_accuracy": 0.4910979228486647,
+          "strict_accuracy": 0.486646884272997,
+          "format_valid_fraction": 0.9955489614243324
+        },
+        "causal_pool": {
+          "n": 674,
+          "choice_accuracy": 0.4896142433234421,
+          "strict_accuracy": 0.486646884272997,
+          "format_valid_fraction": 0.9970326409495549
+        }
+      },
+      "primary": {
+        "n": 291,
+        "source_videos": 138,
+        "delta_pp": 0.3436426116838488,
+        "ci95_pp": [
+          -0.6993620414673045,
+          1.6738867052674593
+        ],
+        "bootstrap_samples": 4000,
+        "seed": 7,
+        "unit": "source-video cluster"
+      },
+      "no_harm": {
+        "n": 383,
+        "source_videos": 122,
+        "delta_pp": -0.5221932114882507,
+        "ci95_pp": [
+          -1.6219530156859856,
+          0.49019607843137253
+        ],
+        "bootstrap_samples": 4000,
+        "seed": 7,
+        "unit": "source-video cluster"
+      },
+      "all": {
+        "n": 674,
+        "source_videos": 260,
+        "delta_pp": -0.14836795252225518,
+        "ci95_pp": [
+          -0.9216944345976604,
+          0.6269592476489029
+        ],
+        "bootstrap_samples": 4000,
+        "seed": 7,
+        "unit": "source-video cluster"
+      },
+      "tasks": {
+        "ACR": {
+          "n": 49,
+          "source_videos": 16,
+          "delta_pp": 0.0,
+          "ci95_pp": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "ASI": {
+          "n": 80,
+          "source_videos": 80,
+          "delta_pp": 0.0,
+          "ci95_pp": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "ATR": {
+          "n": 53,
+          "source_videos": 35,
+          "delta_pp": -1.8867924528301887,
+          "ci95_pp": [
+            -6.153846153846154,
+            0.0
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "EPM": {
+          "n": 142,
+          "source_videos": 33,
+          "delta_pp": 0.0,
+          "ci95_pp": [
+            -1.9483702571937864,
+            2.1432425488180895
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "FPD": {
+          "n": 50,
+          "source_videos": 20,
+          "delta_pp": 0.0,
+          "ci95_pp": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "HLD": {
+          "n": 69,
+          "source_videos": 41,
+          "delta_pp": 1.4492753623188406,
+          "ci95_pp": [
+            0.0,
+            4.6875
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "OCR": {
+          "n": 74,
+          "source_videos": 25,
+          "delta_pp": 0.0,
+          "ci95_pp": [
+            -4.109589041095891,
+            3.7974683544303796
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "OJR": {
+          "n": 69,
+          "source_videos": 32,
+          "delta_pp": 0.0,
+          "ci95_pp": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "STU": {
+          "n": 88,
+          "source_videos": 32,
+          "delta_pp": -1.1363636363636365,
+          "ci95_pp": [
+            -4.040404040404041,
+            0.0
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        }
+      }
+    },
+    "nextqa": {
+      "scores": {
+        "plain": {
+          "n": 1744,
+          "choice_accuracy": 0.7895642201834863,
+          "strict_accuracy": 0.7895642201834863,
+          "format_valid_fraction": 1.0
+        },
+        "causal_pool": {
+          "n": 1744,
+          "choice_accuracy": 0.7947247706422018,
+          "strict_accuracy": 0.7947247706422018,
+          "format_valid_fraction": 1.0
+        }
+      },
+      "primary": {
+        "n": 555,
+        "source_videos": 181,
+        "delta_pp": 0.7207207207207207,
+        "ci95_pp": [
+          0.1718213058419244,
+          1.4788115287191075
+        ],
+        "bootstrap_samples": 4000,
+        "seed": 7,
+        "unit": "source-video cluster"
+      },
+      "no_harm": {
+        "n": 261,
+        "source_videos": 157,
+        "delta_pp": 0.3831417624521073,
+        "ci95_pp": [
+          0.0,
+          1.1857707509881423
+        ],
+        "bootstrap_samples": 4000,
+        "seed": 7,
+        "unit": "source-video cluster"
+      },
+      "all": {
+        "n": 1744,
+        "source_videos": 200,
+        "delta_pp": 0.5160550458715596,
+        "ci95_pp": [
+          0.1728110599078341,
+          0.9142857142857143
+        ],
+        "bootstrap_samples": 4000,
+        "seed": 7,
+        "unit": "source-video cluster"
+      },
+      "tasks": {
+        "CH": {
+          "n": 235,
+          "source_videos": 145,
+          "delta_pp": 0.0,
+          "ci95_pp": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "CW": {
+          "n": 693,
+          "source_videos": 196,
+          "delta_pp": 0.5772005772005772,
+          "ci95_pp": [
+            0.0,
+            1.289444528947228
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "DC": {
+          "n": 70,
+          "source_videos": 68,
+          "delta_pp": 1.4285714285714286,
+          "ci95_pp": [
+            0.0,
+            4.225352112676056
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "DL": {
+          "n": 92,
+          "source_videos": 91,
+          "delta_pp": 0.0,
+          "ci95_pp": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "DO": {
+          "n": 99,
+          "source_videos": 82,
+          "delta_pp": 0.0,
+          "ci95_pp": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "TC": {
+          "n": 231,
+          "source_videos": 125,
+          "delta_pp": 0.4329004329004329,
+          "ci95_pp": [
+            0.0,
+            1.3824884792626728
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "TN": {
+          "n": 307,
+          "source_videos": 143,
+          "delta_pp": 0.9771986970684039,
+          "ci95_pp": [
+            0.0,
+            2.2801302931596092
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        },
+        "TP": {
+          "n": 17,
+          "source_videos": 17,
+          "delta_pp": 0.0,
+          "ci95_pp": [
+            0.0,
+            0.0
+          ],
+          "bootstrap_samples": 4000,
+          "seed": 7,
+          "unit": "source-video cluster"
+        }
+      }
+    }
+  },
+  "next_action": "Inspect the paired benchmark endpoints before any new training recipe or scale change."
+}

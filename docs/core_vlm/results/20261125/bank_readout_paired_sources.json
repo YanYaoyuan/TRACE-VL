@@ -1,0 +1,2316 @@
+{
+  "scope": "Offline bank reconstruction/readout diagnostic, all77 frozen targets at300s and all3reservoir memory seeds. Exact original prompts/options/gold and actual stored bank membership; only pre-target frames. Reconstruct original pooled values by verified original RGB pairs; re-encoding explicitly allowed OFFLINE. Original latest8/128token outputs, text and privileged snapshot must exactly replay. Uniform8 same read budget, all_bank up to32steps/512tokens is a separately labeled larger-read-budget diagnostic. Not a streaming-memory/latency, equal-budget fullbank method, official benchmark or training result. One frozen PlainLoRA2500; fp32 letter head over bf16 hidden primary, bf16 secondary. No new reserved sources, correctness filtering, audio/subtitles, or post-target frames. Shared offline reconstruction cache is diagnostic infrastructure, not a deployable memory bank.",
+  "input_id": "7a68f9cbb4de35fade6c384a1bca090ab74d4f3daf1e53fd394126593f1afcd5",
+  "rows": [
+    {
+      "id": "Real-Time Visual Understanding_sample_6_2/delay300",
+      "source_group": "streamingbench-real:0006",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 160,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 192,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 176
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_11_2/delay300",
+      "source_group": "streamingbench-real:0011",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 128,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 128,
+        "43_latest8": 48,
+        "43_uniform8": 48,
+        "43_all_bank": 48
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_12_2/delay300",
+      "source_group": "streamingbench-real:0012",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 0,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 128,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 128,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 128
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_14_2/delay300",
+      "source_group": "streamingbench-real:0014",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 96,
+        "original_uniform8": 96,
+        "original_all_bank": 96,
+        "29_latest8": 64,
+        "29_uniform8": 64,
+        "29_all_bank": 64,
+        "43_latest8": 96,
+        "43_uniform8": 96,
+        "43_all_bank": 96
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_15_1/delay300",
+      "source_group": "streamingbench-real:0015",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 144,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 160,
+        "43_latest8": 96,
+        "43_uniform8": 96,
+        "43_all_bank": 96
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_16_3/delay300",
+      "source_group": "streamingbench-real:0016",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 0,
+        "43_uniform8": 1,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 272,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 320,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 288
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_17_2/delay300",
+      "source_group": "streamingbench-real:0017",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 0,
+        "original_uniform8": 1,
+        "original_all_bank": 0,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 144,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 208,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 208
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_18_2/delay300",
+      "source_group": "streamingbench-real:0018",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 224,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 160,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 128
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_19_3/delay300",
+      "source_group": "streamingbench-real:0019",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 224,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 288,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 256
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_22_1/delay300",
+      "source_group": "streamingbench-real:0022",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 0,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 48,
+        "original_uniform8": 48,
+        "original_all_bank": 48,
+        "29_latest8": 96,
+        "29_uniform8": 96,
+        "29_all_bank": 96,
+        "43_latest8": 112,
+        "43_uniform8": 112,
+        "43_all_bank": 112
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_24_1/delay300",
+      "source_group": "streamingbench-real:0024",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 112,
+        "original_uniform8": 112,
+        "original_all_bank": 112,
+        "29_latest8": 96,
+        "29_uniform8": 96,
+        "29_all_bank": 96,
+        "43_latest8": 112,
+        "43_uniform8": 112,
+        "43_all_bank": 112
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_25_3/delay300",
+      "source_group": "streamingbench-real:0025",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 224,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 208,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 176
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_26_1/delay300",
+      "source_group": "streamingbench-real:0026",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 176,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 240,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 160
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_27_1/delay300",
+      "source_group": "streamingbench-real:0027",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 96,
+        "original_uniform8": 96,
+        "original_all_bank": 96,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 192,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 176
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_28_2/delay300",
+      "source_group": "streamingbench-real:0028",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 288,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 208,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 272
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_29_2/delay300",
+      "source_group": "streamingbench-real:0029",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 128,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 176,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 208
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_31_3/delay300",
+      "source_group": "streamingbench-real:0031",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 160,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 144,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 144
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_32_1/delay300",
+      "source_group": "streamingbench-real:0032",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 208,
+        "29_latest8": 80,
+        "29_uniform8": 80,
+        "29_all_bank": 80,
+        "43_latest8": 112,
+        "43_uniform8": 112,
+        "43_all_bank": 112
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_33_1/delay300",
+      "source_group": "streamingbench-real:0033",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 160,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 256,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 208
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_34_3/delay300",
+      "source_group": "streamingbench-real:0034",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 256,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 256,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 240
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_35_1/delay300",
+      "source_group": "streamingbench-real:0035",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 208,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 240,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 176
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_36_2/delay300",
+      "source_group": "streamingbench-real:0036",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 240,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 288,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 240
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_37_1/delay300",
+      "source_group": "streamingbench-real:0037",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 160,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 160,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 256
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_38_1/delay300",
+      "source_group": "streamingbench-real:0038",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 0,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 0,
+        "29_uniform8": 1,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 1,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 96,
+        "original_uniform8": 96,
+        "original_all_bank": 96,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 208,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 192
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_39_2/delay300",
+      "source_group": "streamingbench-real:0039",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 128,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 144,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 160
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_40_2/delay300",
+      "source_group": "streamingbench-real:0040",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 0,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 256,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 176,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 240
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_41_3/delay300",
+      "source_group": "streamingbench-real:0041",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 96,
+        "original_uniform8": 96,
+        "original_all_bank": 96,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 128,
+        "43_latest8": 112,
+        "43_uniform8": 112,
+        "43_all_bank": 112
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_43_3/delay300",
+      "source_group": "streamingbench-real:0043",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 1,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 304,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 272,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 320
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_45_2/delay300",
+      "source_group": "streamingbench-real:0045",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 112,
+        "original_uniform8": 112,
+        "original_all_bank": 112,
+        "29_latest8": 112,
+        "29_uniform8": 112,
+        "29_all_bank": 112,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 144
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_46_1/delay300",
+      "source_group": "streamingbench-real:0046",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 48,
+        "original_uniform8": 48,
+        "original_all_bank": 48,
+        "29_latest8": 112,
+        "29_uniform8": 112,
+        "29_all_bank": 112,
+        "43_latest8": 80,
+        "43_uniform8": 80,
+        "43_all_bank": 80
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_47_2/delay300",
+      "source_group": "streamingbench-real:0047",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 0,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 144,
+        "29_latest8": 96,
+        "29_uniform8": 96,
+        "29_all_bank": 96,
+        "43_latest8": 112,
+        "43_uniform8": 112,
+        "43_all_bank": 112
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_48_2/delay300",
+      "source_group": "streamingbench-real:0048",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 96,
+        "original_uniform8": 96,
+        "original_all_bank": 96,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 128,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 144
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_49_2/delay300",
+      "source_group": "streamingbench-real:0049",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 192,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 224,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 144
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_50_2/delay300",
+      "source_group": "streamingbench-real:0050",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 1,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 176,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 144,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 192
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_51_2/delay300",
+      "source_group": "streamingbench-real:0051",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 0,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 80,
+        "original_uniform8": 80,
+        "original_all_bank": 80,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 192,
+        "43_latest8": 80,
+        "43_uniform8": 80,
+        "43_all_bank": 80
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_52_2/delay300",
+      "source_group": "streamingbench-real:0052",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 0,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 192,
+        "29_latest8": 112,
+        "29_uniform8": 112,
+        "29_all_bank": 112,
+        "43_latest8": 96,
+        "43_uniform8": 96,
+        "43_all_bank": 96
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_54_2/delay300",
+      "source_group": "streamingbench-real:0054",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 96,
+        "original_uniform8": 96,
+        "original_all_bank": 96,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 160,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 224
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_55_2/delay300",
+      "source_group": "streamingbench-real:0055",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 176,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 176,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 224
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_56_3/delay300",
+      "source_group": "streamingbench-real:0056",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 224,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 272,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 352
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_57_2/delay300",
+      "source_group": "streamingbench-real:0057",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 224,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 224,
+        "43_latest8": 112,
+        "43_uniform8": 112,
+        "43_all_bank": 112
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_58_2/delay300",
+      "source_group": "streamingbench-real:0058",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 144,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 176,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 176
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_59_2/delay300",
+      "source_group": "streamingbench-real:0059",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 0,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 112,
+        "original_uniform8": 112,
+        "original_all_bank": 112,
+        "29_latest8": 96,
+        "29_uniform8": 96,
+        "29_all_bank": 96,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 192
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_60_2/delay300",
+      "source_group": "streamingbench-real:0060",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 192,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 208,
+        "43_latest8": 96,
+        "43_uniform8": 96,
+        "43_all_bank": 96
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_61_2/delay300",
+      "source_group": "streamingbench-real:0061",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 0,
+        "original_latest8": 1,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 144,
+        "29_latest8": 112,
+        "29_uniform8": 112,
+        "29_all_bank": 112,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 192
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_62_3/delay300",
+      "source_group": "streamingbench-real:0062",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 0,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 256,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 304,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 240
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_63_2/delay300",
+      "source_group": "streamingbench-real:0063",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 0,
+        "original_all_bank": 1,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 160,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 160,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 192
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_64_2/delay300",
+      "source_group": "streamingbench-real:0064",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 80,
+        "original_uniform8": 80,
+        "original_all_bank": 80,
+        "29_latest8": 112,
+        "29_uniform8": 112,
+        "29_all_bank": 112,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 192
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_65_2/delay300",
+      "source_group": "streamingbench-real:0065",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 0,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 176,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 160,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 128
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_66_2/delay300",
+      "source_group": "streamingbench-real:0066",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 176,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 176,
+        "43_latest8": 112,
+        "43_uniform8": 112,
+        "43_all_bank": 112
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_67_2/delay300",
+      "source_group": "streamingbench-real:0067",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 1,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 144,
+        "29_latest8": 112,
+        "29_uniform8": 112,
+        "29_all_bank": 112,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 208
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_68_2/delay300",
+      "source_group": "streamingbench-real:0068",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 176,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 192,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 144
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_69_2/delay300",
+      "source_group": "streamingbench-real:0069",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 128,
+        "29_latest8": 80,
+        "29_uniform8": 80,
+        "29_all_bank": 80,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 144
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_70_2/delay300",
+      "source_group": "streamingbench-real:0070",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 208,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 224,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 160
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_125_3/delay300",
+      "source_group": "streamingbench-real:0125",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 1,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 272,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 288,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 304
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_127_2/delay300",
+      "source_group": "streamingbench-real:0127",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 272,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 160,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 240
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_140_3/delay300",
+      "source_group": "streamingbench-real:0140",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 160,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 224,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 192
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_142_2/delay300",
+      "source_group": "streamingbench-real:0142",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 128,
+        "29_latest8": 96,
+        "29_uniform8": 96,
+        "29_all_bank": 96,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 208
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_143_3/delay300",
+      "source_group": "streamingbench-real:0143",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 0,
+        "29_uniform8": 1,
+        "29_all_bank": 0,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 256,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 320,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 272
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_144_3/delay300",
+      "source_group": "streamingbench-real:0144",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 320,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 384,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 272
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_145_4/delay300",
+      "source_group": "streamingbench-real:0145",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 272,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 256,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 240
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_146_3/delay300",
+      "source_group": "streamingbench-real:0146",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 288,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 128,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 224
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_147_3/delay300",
+      "source_group": "streamingbench-real:0147",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 192,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 224,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 192
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_148_4/delay300",
+      "source_group": "streamingbench-real:0148",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 240,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 320,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 352
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_150_2/delay300",
+      "source_group": "streamingbench-real:0150",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 192,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 240,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 288
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_157_2/delay300",
+      "source_group": "streamingbench-real:0157",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 160,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 192,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 160
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_186_2/delay300",
+      "source_group": "streamingbench-real:0186",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 208,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 128,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 240
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_187_3/delay300",
+      "source_group": "streamingbench-real:0187",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 0,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 224,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 176,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 272
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_188_2/delay300",
+      "source_group": "streamingbench-real:0188",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 0,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 1,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 384,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 336,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 336
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_189_2/delay300",
+      "source_group": "streamingbench-real:0189",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 0,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 0,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 352,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 272,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 304
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_191_2/delay300",
+      "source_group": "streamingbench-real:0191",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 1,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 240,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 160,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 160
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_192_2/delay300",
+      "source_group": "streamingbench-real:0192",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 288,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 240,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 192
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_193_3/delay300",
+      "source_group": "streamingbench-real:0193",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 0,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 400,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 352,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 352
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_194_4/delay300",
+      "source_group": "streamingbench-real:0194",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 368,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 336,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 320
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_195_2/delay300",
+      "source_group": "streamingbench-real:0195",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 0,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 176,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 240,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 208
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_198_2/delay300",
+      "source_group": "streamingbench-real:0198",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 208,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 224,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 304
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_199_4/delay300",
+      "source_group": "streamingbench-real:0199",
+      "correct_fp32": {
+        "text_only": 0,
+        "protected_snapshot8": 1,
+        "original_latest8": 0,
+        "original_uniform8": 0,
+        "original_all_bank": 0,
+        "29_latest8": 0,
+        "29_uniform8": 0,
+        "29_all_bank": 0,
+        "43_latest8": 0,
+        "43_uniform8": 0,
+        "43_all_bank": 0
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 368,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 400,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 400
+      }
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_200_2/delay300",
+      "source_group": "streamingbench-real:0200",
+      "correct_fp32": {
+        "text_only": 1,
+        "protected_snapshot8": 1,
+        "original_latest8": 1,
+        "original_uniform8": 1,
+        "original_all_bank": 1,
+        "29_latest8": 1,
+        "29_uniform8": 1,
+        "29_all_bank": 1,
+        "43_latest8": 1,
+        "43_uniform8": 1,
+        "43_all_bank": 1
+      },
+      "visual_tokens": {
+        "text_only": 0,
+        "protected_snapshot8": 128,
+        "original_latest8": 128,
+        "original_uniform8": 128,
+        "original_all_bank": 192,
+        "29_latest8": 128,
+        "29_uniform8": 128,
+        "29_all_bank": 256,
+        "43_latest8": 128,
+        "43_uniform8": 128,
+        "43_all_bank": 176
+      }
+    }
+  ]
+}

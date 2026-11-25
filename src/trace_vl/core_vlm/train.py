@@ -32,6 +32,7 @@ from trace_vl.v3.tracking import Tracker, enabled_from_env
 
 from .control import checkpoint_identity
 from .data import decode_observation, read_split, sha256
+from .feature_cache import SharedVisionSamples
 from .native import NativeLayout, NativeVideoQALoss, check_native_forward, encode_native, prepare_native
 from .preservation import original_answer_logits
 from .qa import VisualStep
@@ -276,7 +277,10 @@ def run(args):
     if rank == 0:
         lock = (out / ".train.lock").open("a")
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        configuration = {k: v for k, v in vars(args).items() if k not in {"out", "stop_after"}}
+        excluded = {"out", "stop_after"}
+        if not getattr(args, "feature_cache", None):
+            excluded.add("feature_cache")
+        configuration = {k: v for k, v in vars(args).items() if k not in excluded}
         paths = sorted({r["video"] for r in rows})
         with ThreadPoolExecutor(8) as pool:
             videos = dict(zip(paths, pool.map(sha256, paths), strict=True))
@@ -293,11 +297,14 @@ def run(args):
                     "code": {name: sha256(Path(__file__).parent / name)
                              for name in ("train.py", "native.py", "qa.py", "data.py", "control.py", "temporal.py", "preservation.py",
                                           "../v3/backbone.py", "../v3/positions.py", "../v3/run_io.py")}}
+        if getattr(args, "feature_cache", None):
+            identity["code"]["feature_cache.py"] = sha256(Path(__file__).with_name("feature_cache.py"))
         identity["id"] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         ensure_run_manifest(out / "run.json", identity)
     if world > 1:
         dist.barrier()
-    run_id = json.loads((out / "run.json").read_text())["id"]
+    run_record = json.loads((out / "run.json").read_text())
+    run_id = run_record["id"]
     previous = latest_checkpoint(out, run_id)
     if previous and checked_checkpoint(previous, run_id)["update"] == args.updates:
         if rank == 0:
@@ -325,6 +332,9 @@ def run(args):
             n: p for n, p in params.items() if "lora_" in n}),
             "temporal": getattr(args, "temporal", "none"),
             "trainable_parameters": sum(p.numel() for p in params.values())}
+        if hasattr(getattr(net, "temporal", None), "history_enabled"):
+            initial["temporal_history_enabled"] = net.temporal.history_enabled
+            initial["predictor_sha256"] = tensor_digest({"predict.weight": net.temporal.predict.weight})
         ensure_run_manifest(out / "initialization.json", {"id": run_id, **initial})
     # Temporal construction consumes random numbers; keep subsequent stochastic
     # LM operations on the same stream in the two fresh-base arms.
@@ -333,7 +343,10 @@ def run(args):
     optimizer = torch.optim.AdamW(list(params.values()), lr=args.lr, weight_decay=0.)
     start, metrics = (0, []) if previous is None else restore_checkpoint(previous, run_id, params, optimizer, rank, world)
     wrapped = DDP(net, device_ids=[local], broadcast_buffers=False) if world > 1 else net
-    samples = Samples(bb, args)
+    if getattr(args, "feature_cache", None):
+        samples = SharedVisionSamples(bb, args, rows, run_record)
+    else:
+        samples = Samples(bb, args)
     tracker = Tracker()
     if rank == 0:
         # Drop any log suffix beyond the restored checkpoint before appending.
@@ -420,6 +433,10 @@ def run(args):
                  "peak_reserved_gib_max": float(memory[1]) / 2**30,
                  "temporal_gradient_norm_after_clip": temporal_norm,
                  "peak_allocated_gib_rank0": torch.cuda.max_memory_allocated() / 2**30}
+        if getattr(args, "feature_cache", None):
+            entry.update(vision_cache_hits_rank0=samples.hits, vision_cache_writes_rank0=samples.writes)
+        if hasattr(getattr(net, "temporal", None), "history_enabled"):
+            entry["temporal_history_enabled"] = net.temporal.history_enabled
         metrics.append(entry)
         if rank == 0:
             entry["samples_per_second"] = batch_size / entry["seconds_per_update"]
@@ -456,7 +473,7 @@ def main():
     for name in ("model", "manifest", "out"):
         p.add_argument(f"--{name}", required=True)
     p.add_argument("--mode", choices=("full", "grid"), default="grid")
-    p.add_argument("--temporal", choices=("none", "causal"), default="none")
+    p.add_argument("--temporal", choices=("none", "causal", "causal-pool", "static-pool"), default="none")
     p.add_argument("--preservation-teacher", action="store_true")
     p.add_argument("--preservation-weight", type=float, default=0.)
     p.add_argument("--preservation-temperature", type=float, default=2.)
@@ -474,6 +491,7 @@ def main():
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--save-every", type=int, default=100)
     p.add_argument("--cache-mb", type=int, default=512)
+    p.add_argument("--feature-cache", help="directory for shared, identity-checked frozen visual features")
     p.add_argument("--timestamp-policy", choices=("strict", "native-index-fps"), default="strict")
     p.add_argument("--native-check", action="store_true")
     p.add_argument("--stop-after", type=int, help="checkpoint early; preserves the original total-update schedule")

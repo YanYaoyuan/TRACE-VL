@@ -45,9 +45,11 @@ def audit_training(root, target, *, arms=None, config_differences=()):
         state = torch.load(checkpoint / 'training.pt', map_location='cpu', weights_only=True)
         if tensor_digest({k: v for k, v in state['parameters'].items() if 'lora_' in k}) == initial[name]['lora_sha256']:
             raise ValueError('LoRA did not change')
-        if arms[name] == 'causal':
-            up = state['parameters'].get('temporal.up.weight')
-            if up is None or not torch.isfinite(up).all() or not up.count_nonzero():
+        if arms[name] != 'none':
+            parameter = {'causal': 'up.weight', 'causal-pool': 'score.weight',
+                         'static-pool': 'score.weight'}[arms[name]]
+            scores = state['parameters'].get(f'temporal.{parameter}')
+            if scores is None or not torch.isfinite(scores).all() or not scores.count_nonzero():
                 raise ValueError('temporal residual did not learn')
             if any(x['temporal_gradient_norm_after_clip'] <= 0 for x in logs[name]):
                 raise ValueError('temporal QA gradients missing')

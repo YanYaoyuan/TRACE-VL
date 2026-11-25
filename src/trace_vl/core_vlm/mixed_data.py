@@ -49,7 +49,7 @@ def resolve_general_data(cfg):
     return directory
 
 
-def frozen_external(directory):
+def frozen_external(directory, *, verify_media=True):
     directory = Path(directory)
     complete = json.loads((directory / 'complete.json').read_text())
     if set(complete['manifests']) != {'ovo', 'nextqa'}:
@@ -58,9 +58,10 @@ def frozen_external(directory):
                     **complete['audit_files']}.items():
         if sha256(directory / name) != h:
             raise ValueError('external population/audit changed')
-    for p, h in complete['videos'].items():
-        if sha256(p) != h:
-            raise ValueError('external media changed')
+    if verify_media:
+        for p, h in complete['videos'].items():
+            if sha256(p) != h:
+                raise ValueError('external media changed')
     return {k: directory / f'{k}.jsonl' for k in complete['manifests']}, complete
 
 

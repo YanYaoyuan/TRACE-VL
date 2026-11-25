@@ -1,0 +1,39 @@
+{
+  "completed": true,
+  "targets": 77,
+  "predictions": 847,
+  "exact_controls": 385,
+  "offline_reconstruction_calls": 3190,
+  "paired": {
+    "uniform8": {
+      "delta_pp": 2.1645021645021645,
+      "ci95_pp": [
+        -1.731601731601732,
+        6.0606060606060606
+      ],
+      "same_read_budget": true
+    },
+    "all_bank": {
+      "delta_pp": -0.432900432900433,
+      "ci95_pp": [
+        -3.896103896103896,
+        3.0303030303030303
+      ],
+      "same_read_budget": false
+    }
+  },
+  "scores": {
+    "29_all_bank": 55,
+    "29_latest8": 53,
+    "29_uniform8": 58,
+    "43_all_bank": 53,
+    "43_latest8": 53,
+    "43_uniform8": 55,
+    "original_all_bank": 54,
+    "original_latest8": 57,
+    "original_uniform8": 55,
+    "protected_snapshot8": 64,
+    "text_only": 42
+  },
+  "scope": "Offline bank reconstruction/readout diagnostic, all77 frozen targets at300s and all3reservoir memory seeds. Exact original prompts/options/gold and actual stored bank membership; only pre-target frames. Reconstruct original pooled values by verified original RGB pairs; re-encoding explicitly allowed OFFLINE. Original latest8/128token outputs, text and privileged snapshot must exactly replay. Uniform8 same read budget, all_bank up to32steps/512tokens is a separately labeled larger-read-budget diagnostic. Not a streaming-memory/latency, equal-budget fullbank method, official benchmark or training result. One frozen PlainLoRA2500; fp32 letter head over bf16 hidden primary, bf16 secondary. No new reserved sources, correctness filtering, audio/subtitles, or post-target frames. Shared offline reconstruction cache is diagnostic infrastructure, not a deployable memory bank."
+}

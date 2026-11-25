@@ -1,0 +1,206 @@
+{
+  "passed": true,
+  "questions": 385,
+  "targets": 77,
+  "sources": 77,
+  "all250_source_selection_independently_recomputed": true,
+  "candidate_data_id": "9b9843072468d7e1b01abb3ce9f9badf5455d9f10d3e5559d4149100b5b753be",
+  "input_id": "090db3b555dd368f8d7478a2de7195408a4aa6788e451e02636fc4d91cc59e4b",
+  "revision": "3dc8c83fe2ee803307996befac5be45d976e4af2",
+  "by_delay": {
+    "0": {
+      "questions": 77,
+      "sources": 77,
+      "scores": {
+        "text_only": {
+          "correct_fp32": 42,
+          "correct_bf16": 42,
+          "empty_reads": 77
+        },
+        "recent8_now": {
+          "correct_fp32": 64,
+          "correct_bf16": 64,
+          "empty_reads": 0
+        },
+        "fifo_time8": {
+          "correct_fp32": 64,
+          "correct_bf16": 64,
+          "empty_reads": 0
+        },
+        "reservoir_time8": {
+          "correct_fp32": 63,
+          "correct_bf16": 63,
+          "empty_reads": 0
+        },
+        "prefix_time8": {
+          "correct_fp32": 65,
+          "correct_bf16": 66,
+          "empty_reads": 0
+        },
+        "protected_snapshot8": {
+          "correct_fp32": 64,
+          "correct_bf16": 64,
+          "empty_reads": 0
+        }
+      }
+    },
+    "15": {
+      "questions": 77,
+      "sources": 77,
+      "scores": {
+        "text_only": {
+          "correct_fp32": 42,
+          "correct_bf16": 42,
+          "empty_reads": 77
+        },
+        "recent8_now": {
+          "correct_fp32": 56,
+          "correct_bf16": 56,
+          "empty_reads": 0
+        },
+        "fifo_time8": {
+          "correct_fp32": 64,
+          "correct_bf16": 64,
+          "empty_reads": 0
+        },
+        "reservoir_time8": {
+          "correct_fp32": 55,
+          "correct_bf16": 55,
+          "empty_reads": 0
+        },
+        "prefix_time8": {
+          "correct_fp32": 40,
+          "correct_bf16": 40,
+          "empty_reads": 0
+        },
+        "protected_snapshot8": {
+          "correct_fp32": 64,
+          "correct_bf16": 64,
+          "empty_reads": 0
+        }
+      }
+    },
+    "60": {
+      "questions": 77,
+      "sources": 77,
+      "scores": {
+        "text_only": {
+          "correct_fp32": 42,
+          "correct_bf16": 42,
+          "empty_reads": 77
+        },
+        "recent8_now": {
+          "correct_fp32": 49,
+          "correct_bf16": 48,
+          "empty_reads": 0
+        },
+        "fifo_time8": {
+          "correct_fp32": 42,
+          "correct_bf16": 42,
+          "empty_reads": 77
+        },
+        "reservoir_time8": {
+          "correct_fp32": 55,
+          "correct_bf16": 54,
+          "empty_reads": 0
+        },
+        "prefix_time8": {
+          "correct_fp32": 40,
+          "correct_bf16": 40,
+          "empty_reads": 0
+        },
+        "protected_snapshot8": {
+          "correct_fp32": 64,
+          "correct_bf16": 64,
+          "empty_reads": 0
+        }
+      }
+    },
+    "180": {
+      "questions": 77,
+      "sources": 77,
+      "scores": {
+        "text_only": {
+          "correct_fp32": 42,
+          "correct_bf16": 42,
+          "empty_reads": 77
+        },
+        "recent8_now": {
+          "correct_fp32": 49,
+          "correct_bf16": 49,
+          "empty_reads": 0
+        },
+        "fifo_time8": {
+          "correct_fp32": 42,
+          "correct_bf16": 42,
+          "empty_reads": 77
+        },
+        "reservoir_time8": {
+          "correct_fp32": 54,
+          "correct_bf16": 54,
+          "empty_reads": 0
+        },
+        "prefix_time8": {
+          "correct_fp32": 40,
+          "correct_bf16": 40,
+          "empty_reads": 0
+        },
+        "protected_snapshot8": {
+          "correct_fp32": 64,
+          "correct_bf16": 64,
+          "empty_reads": 0
+        }
+      }
+    },
+    "300": {
+      "questions": 77,
+      "sources": 77,
+      "scores": {
+        "text_only": {
+          "correct_fp32": 42,
+          "correct_bf16": 42,
+          "empty_reads": 77
+        },
+        "recent8_now": {
+          "correct_fp32": 43,
+          "correct_bf16": 43,
+          "empty_reads": 0
+        },
+        "fifo_time8": {
+          "correct_fp32": 42,
+          "correct_bf16": 42,
+          "empty_reads": 77
+        },
+        "reservoir_time8": {
+          "correct_fp32": 57,
+          "correct_bf16": 56,
+          "empty_reads": 0
+        },
+        "prefix_time8": {
+          "correct_fp32": 40,
+          "correct_bf16": 40,
+          "empty_reads": 0
+        },
+        "protected_snapshot8": {
+          "correct_fp32": 64,
+          "correct_bf16": 64,
+          "empty_reads": 0
+        }
+      }
+    }
+  },
+  "precision_changes": 24,
+  "stream_encoder_calls": 39028,
+  "verification_extra_encoder_calls": 6,
+  "native_parity_proofs": 6,
+  "maximum_policy_payload_and_fixed_metadata_bytes": {
+    "fifo": 2952576,
+    "reservoir": 2952576,
+    "prefix": 656128,
+    "recent8_now": 656128,
+    "protected_snapshot8": 1312256
+  },
+  "report_sha256": "f2cd9ec0c4c401cca7af35c1093dfa453dfb1700c2b7688dd668ece50da6dd88",
+  "archive_sha256": "98459c2f386e734917529bf9ace54a2f14d96c825f6aaf94433540370acaf439",
+  "scope": "Selection/source/code/model/PTS, seed/bank/read/counters/logits/scores replayed. RGB references checked against log consistency, not another decode of all frames. Semantic evidence not certified. Single frozen model/one memory seed, development diagnostic."
+}

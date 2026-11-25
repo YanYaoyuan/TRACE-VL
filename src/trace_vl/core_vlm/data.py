@@ -69,25 +69,77 @@ def read_split(path: Path, split: str) -> list[dict]:
     return rows
 
 
-def decode_observation(row: dict, *, steps: int, pixels: int, timeout: int = 180):
-    if type(steps) is not int or steps < 1 or type(pixels) is not int or pixels < 1024:
-        raise ValueError("positive steps and at least 1024 pixels required")
-    video = Path(row["video"])
+def recent_indices(times, indices, steps, hz, endpoint):
+    """Use the latest available PTS at each fixed-rate slot, dropping duplicate frames."""
+    end_tick = math.floor(endpoint * hz)
+    end_tick -= 1 - end_tick % 2  # consume only completed pairs on the video clock
+    ticks = np.arange(end_tick - 2 * steps + 1, end_tick + 1)
+    slots = ticks[ticks >= 0] / hz
+    slots = slots[slots >= times[indices[0]]]
+    chosen = np.unique(indices[np.searchsorted(times[indices], slots, side="right") - 1])
+    if len(chosen) < 2:
+        return indices[-2:]
+    return chosen[len(chosen) % 2:]
+
+
+def probe_video(video, timeout):
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-threads", "1", "-select_streams", "v:0", "-show_frames",
          "-show_entries", "stream=width,height,avg_frame_rate:frame=best_effort_timestamp_time",
          "-of", "json", str(video)], check=True, capture_output=True, timeout=timeout)
-    metadata = json.loads(probe.stdout)
+    return json.loads(probe.stdout)
+
+
+def presentation_frames(frames, *, drop_bad_pts):
+    """Keep original decoder frame numbers when filtering timestamps."""
+    values = [frame.get("best_effort_timestamp_time") for frame in frames]
+    pts = np.array([np.nan if value in (None, "N/A") else float(value) for value in values])
+    finite = np.isfinite(pts)
+    if not len(pts) or not finite[0]:
+        raise ValueError("video requires a finite first presentation timestamp")
+    if drop_bad_pts:
+        # A retained frame must be later than every finite timestamp already
+        # seen in decoder order. Reordering frames can leak across a cutoff.
+        high_water = np.maximum.accumulate(np.where(finite, pts, -np.inf))
+        keep = finite & (pts > np.concatenate(([-np.inf], high_water[:-1])))
+    else:
+        if not finite.all() or (np.diff(pts) <= 0).any():
+            raise ValueError("video requires finite strictly increasing presentation timestamps")
+        keep = finite
+    return pts, keep
+
+
+def decode_frame_indices(video, chosen, height, width, timeout, *, stop_after_selection=False):
+    expression = "+".join(f"eq(n\\,{int(i)})" for i in chosen)
+    decoded = subprocess.run(
+        ["ffmpeg", "-v", "error", "-xerror", "-nostdin", "-threads", "1", "-noautorotate",
+         "-i", str(video), "-map", "0:v:0", "-vf", f"select={expression},scale={width}:{height}",
+         "-vsync", "0", *(["-frames:v", str(len(chosen))] if stop_after_selection else []),
+         "-filter_threads", "1", "-threads", "1", "-pix_fmt", "rgb24",
+         "-f", "rawvideo", "pipe:1"], check=True, capture_output=True, timeout=timeout)
+    expected = len(chosen) * height * width * 3
+    if len(decoded.stdout) != expected:
+        raise ValueError(f"decoded byte count {len(decoded.stdout)} != expected {expected}")
+    return np.frombuffer(decoded.stdout, dtype=np.uint8).reshape(-1, height, width, 3)
+
+
+def decode_observation(row: dict, *, steps: int, pixels: int, timeout: int = 180,
+                       recent_hz: float | None = None, media=None, drop_bad_pts: bool = False):
+    if type(steps) is not int or steps < 1 or type(pixels) is not int or pixels < 1024:
+        raise ValueError("positive steps and at least 1024 pixels required")
+    video = Path(row["video"])
+    if media is None:
+        metadata = probe_video(video, timeout)
+    else:
+        video, metadata, media_hash = media
     frames, stream = metadata["frames"], metadata["streams"][0]
-    pts = np.array([float(f["best_effort_timestamp_time"]) for f in frames])
-    if not len(pts) or not np.isfinite(pts).all() or (np.diff(pts) <= 0).any():
-        raise ValueError("video requires finite strictly increasing presentation timestamps")
+    pts, keep = presentation_frames(frames, drop_bad_pts=drop_bad_pts)
     origin = float(pts[0])
     times = pts - origin
     observation = row.get("observation", {})
     start = float(observation.get("start", 0.))
     end = observation.get("end", "video_end")
-    end = float(times[-1]) if end == "video_end" else float(end)
+    end = float(times[np.flatnonzero(keep)[-1]]) if end == "video_end" else float(end)
     query = row.get("query_time")
     if query is None:
         if row.get("protocol") != "offline":
@@ -96,33 +148,36 @@ def decode_observation(row: dict, *, steps: int, pixels: int, timeout: int = 180
     query = float(query)
     if not all(math.isfinite(x) for x in (start, end, query)) or not 0 <= start <= end or query < start:
         raise ValueError("invalid observation/query bounds")
-    indices = np.flatnonzero((times >= start) & (times <= min(end, query)))
-    if len(indices) < 2 * steps:
-        raise ValueError(f"need {2 * steps} distinct causal frames, found {len(indices)}")
-    chosen = indices[np.linspace(0, len(indices) - 1, 2 * steps).round().astype(int)]
+    indices = np.flatnonzero(keep & (times >= start) & (times <= min(end, query)))
+    if recent_hz is None:
+        if len(indices) < 2 * steps:
+            raise ValueError(f"need {2 * steps} distinct causal frames, found {len(indices)}")
+        chosen = indices[np.linspace(0, len(indices) - 1, 2 * steps).round().astype(int)]
+    else:
+        if not math.isfinite(recent_hz) or recent_hz <= 0:
+            raise ValueError("recent_hz must be positive and finite")
+        if len(indices) < 2:
+            raise ValueError(f"need two distinct causal frames, found {len(indices)}")
+        chosen = recent_indices(times, indices, steps, recent_hz, min(end, query))
     h, w = frame_size(stream["height"], stream["width"], pixels, 32)
-    expression = "+".join(f"eq(n\\,{int(i)})" for i in chosen)
-    decoded = subprocess.run(
-        ["ffmpeg", "-v", "error", "-xerror", "-nostdin", "-threads", "1", "-noautorotate",
-         "-i", str(video), "-map", "0:v:0", "-vf", f"select={expression},scale={w}:{h}",
-         "-vsync", "0", "-filter_threads", "1", "-threads", "1", "-pix_fmt", "rgb24",
-         "-f", "rawvideo", "pipe:1"], check=True, capture_output=True, timeout=timeout)
-    expected = 2 * steps * h * w * 3
-    if len(decoded.stdout) != expected:
-        raise ValueError(f"decoded byte count {len(decoded.stdout)} != expected {expected}")
-    images = np.frombuffer(decoded.stdout, dtype=np.uint8).reshape(steps, 2, h, w, 3).copy()
-    actual = times[chosen].reshape(steps, 2)
+    images = decode_frame_indices(video, chosen, h, w, timeout,
+                                  stop_after_selection=recent_hz is not None).reshape(-1, 2, h, w, 3).copy()
+    actual = times[chosen].reshape(-1, 2)
     resolved = {**row, "query_time": query}
     try:
         source_fps = float(Fraction(stream.get("avg_frame_rate", "0/1")))
     except (ValueError, ZeroDivisionError):
         source_fps = 0.
-    audit = {"video_sha256": sha256(video), "pts_origin": origin,
+    audit = {"video_sha256": sha256(video) if media is None else media_hash, "pts_origin": origin,
              "frame_indices": chosen.tolist(), "frame_times": actual.tolist(),
              "frame_hw": [h, w], "query_time": query,
              "source_fps": source_fps, "source_frame_count": len(pts),
              "decoded_rgb_sha256": hashlib.sha256(images.tobytes()).hexdigest(),
-             "sampling": "uniform-frame-index-within-observation-v1"}
+             "sampling": ("uniform-frame-index-within-observation-v1" if recent_hz is None
+                          else {"policy": "latest-pts-at-fixed-recent-slots-v1", "hz": recent_hz})}
+    if drop_bad_pts:
+        audit["timestamp_filter"] = {"policy": "monotone-decoder-order-v1",
+                                     "source_frames": len(pts), "dropped_frames": int((~keep).sum())}
     return images, actual, resolved, audit
 
 
