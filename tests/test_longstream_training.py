@@ -9,6 +9,15 @@ from trace_vl.longstream_training.prepare import prepare, validate
 from trace_vl.longstream_training.selection import QuestionSelector, retained_indices
 
 
+@pytest.fixture(autouse=True)
+def fixture_disk_reserve(monkeypatch):
+    # Tiny staging fixtures run on /tmp, which may have less than the production
+    # 30GiB reserve. Mock capacity only in tests; keep the actual /data guard.
+    from trace_vl.longstream_training import prepare as module
+
+    monkeypatch.setattr(module.shutil, "disk_usage", lambda path: SimpleNamespace(free=1 << 40))
+
+
 def test_question_blind_reservoir_reproducible_bounded_and_retains_recent():
     times = [float(i) for i in range(400)]
     a = retained_indices(times, seed=17)
