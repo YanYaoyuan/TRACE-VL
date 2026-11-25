@@ -7,6 +7,8 @@ deliberately not part of this probe.
 
 from __future__ import annotations
 
+import operator
+
 import torch
 
 
@@ -29,7 +31,12 @@ def probe(select, *, hidden=64, bank=36, count=8, concepts=12, trials=64, seed=0
         a, b = torch.randperm(concepts, generator=generator)[:2].tolist()
         picked = []
         for concept in (a, b):
-            indices = [int(i) for i in select(features, times, codes[concept], 2.0 * bank)]
+            try:
+                indices = [operator.index(i) for i in select(features, times, codes[concept], 2.0 * bank)]
+            except TypeError as error:
+                raise ValueError("selector must return integer bank indices") from error
+            if any(i < 0 or i >= bank for i in indices):
+                raise ValueError("selector returned an index outside the bank")
             if len(indices) != count or len(set(indices)) != count:
                 raise ValueError("selector violated its read budget")
             relevant = set((labels == concept).nonzero().flatten().tolist())

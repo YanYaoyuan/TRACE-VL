@@ -158,3 +158,29 @@ def test_score_question_packs_every_control_through_the_native_path(monkeypatch)
     assert tokens["latest8"] == tokens["blank:latest8"] == 128 and tokens["all_bank"] == 576
     assert set(logits) == {"text_only", *reads, *(f"blank:{k}" for k in reads)}
     assert all(len(v) == 2 for v in logits.values())
+
+
+@pytest.mark.parametrize("invalid", [-1, 36, 40])
+def test_behavior_probe_rejects_indices_outside_the_bank(invalid):
+    def select(_features, _times, _query, _query_time):
+        return [*range(7), invalid]
+
+    with pytest.raises(ValueError, match="outside the bank"):
+        behavior.probe(select)
+
+
+def test_behavior_probe_rejects_nonintegral_indices_without_truncating():
+    def select(_features, _times, _query, _query_time):
+        return [i + 0.25 for i in range(8)]
+
+    with pytest.raises(ValueError, match="integer bank indices"):
+        behavior.probe(select)
+
+
+def test_behavior_probe_rejects_perfect_recall_with_invalid_filler():
+    def select(features, _times, query, _query_time):
+        relevant = (features.mean(1) @ query).topk(3).indices.tolist()
+        return relevant + [36, 37, 38, 39, 40]
+
+    with pytest.raises(ValueError, match="outside the bank"):
+        behavior.probe(select)
