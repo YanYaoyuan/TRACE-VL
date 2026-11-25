@@ -8,12 +8,13 @@ import json
 from fractions import Fraction
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from trace_vl.core_vlm.control import checkpoint_identity
 from trace_vl.core_vlm.data import presentation_frames, probe_video, sha256
-from trace_vl.core_vlm.longstream import schedule, stream_pixels, verify_native_step
-from trace_vl.core_vlm.native import prepare_native
+from trace_vl.core_vlm.longstream import schedule, stream_pixels
+from trace_vl.core_vlm.native import check_native_forward, prepare_native
 from trace_vl.core_vlm.prepare import digest, write_json
 from trace_vl.core_vlm.qa import VisualStep, grid_pool
 from trace_vl.core_vlm.train import sample_indices
@@ -88,10 +89,17 @@ def build(args):
                 if len(batch) < 8 and index + 1 < len(times):
                     continue
                 with torch.no_grad():
-                    prepared = [bb.preprocess(frames) for _, frames in batch]
-                    grid = prepared[0][1].clone()
-                    grid[0, 0] = len(batch)
-                    dense = bb.encode(torch.cat([p[0] for p in prepared]), grid)
+                    images = np.stack([f for _, f in batch])
+                    prepared = bb.processor.video_processor(
+                        videos=[images.reshape(-1, *images.shape[2:])],
+                        do_sample_frames=False,
+                        do_resize=False,
+                        return_tensors="pt",
+                    )
+                    grid = prepared["video_grid_thw"]
+                    if grid.shape != (1, 3) or int(grid[0, 0]) != len(batch):
+                        raise ValueError("processor changed temporal batching")
+                    dense = bb.encode(prepared["pixel_values_videos"], grid)
                     shape = bb.merged_grid(grid)
                     chunks = dense.split(shape[0] * shape[1])
                     for (i, frames), feature in zip(batch, chunks, strict=True):
@@ -99,26 +107,37 @@ def build(args):
                         if i in keep:
                             kept[i] = grid_pool(feature, shape, (4, 4))[0].cpu().clone()
                             rgb[i] = hashlib.sha256(frames.tobytes()).hexdigest()
-                        if i == 0:
-                            pair = tuple(times[0].tolist())
-                            native_audit = {
-                                "source_fps": float(Fraction(stream["avg_frame_rate"])),
-                                "source_frame_count": len(meta["frames"]),
-                                "frame_indices": indices[:2].tolist(),
-                                "decoded_rgb_sha256": hashlib.sha256(frames[None].tobytes()).hexdigest(),
-                            }
-                            safe = {**row, "answer": 0}
-                            layout = prepare_native(
-                                bb.processor,
-                                frames[None],
-                                times[:1],
-                                safe,
-                                native_audit,
-                                allow_native_timestamp_approximation=True,
-                            )
-                            parity = verify_native_step(
-                                bb, layout, VisualStep(feature, shape, pair[-1], pair), safe
-                            )
+                    if batch[0][0] == 0:
+                        # BF16 GEMMs can round differently for one step versus
+                        # eight. Compare the bridge with native forward on the
+                        # SAME complete temporal batch; never relax tolerance.
+                        images = np.stack([f for _, f in batch])
+                        bt = times[: len(batch)]
+                        native_audit = {
+                            "source_fps": float(Fraction(stream["avg_frame_rate"])),
+                            "source_frame_count": len(meta["frames"]),
+                            "frame_indices": indices[: 2 * len(batch)].tolist(),
+                            "decoded_rgb_sha256": hashlib.sha256(images.tobytes()).hexdigest(),
+                        }
+                        safe = {**row, "answer": 0}
+                        layout = prepare_native(
+                            bb.processor,
+                            images,
+                            bt,
+                            safe,
+                            native_audit,
+                            allow_native_timestamp_approximation=True,
+                        )
+                        if not torch.equal(
+                            layout.inputs["pixel_values_videos"], prepared["pixel_values_videos"]
+                        ):
+                            raise ValueError("native and cached batch preprocessing differ")
+                        raw = [
+                            VisualStep(f, shape, float(t[-1]), tuple(t.tolist()))
+                            for f, t in zip(chunks, bt, strict=True)
+                        ]
+                        parity = check_native_forward(bb, layout, raw, {**safe, "native_layout": layout})
+                        parity["matched_temporal_batch_steps"] = len(batch)
                 batch = []
         finally:
             pixels.close()
