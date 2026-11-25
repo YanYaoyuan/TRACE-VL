@@ -49,6 +49,13 @@ def test_prefetch_bounds_residency_propagates_failure_and_closes_decoder():
         with pytest.raises(ValueError, match="decoder error"):
             next(iterator)
 
+    def cannot_open():
+        raise OSError("decoder open failed")
+
+    with prefetch(cannot_open) as iterator:
+        with pytest.raises(OSError, match="open failed"):
+            next(iterator)
+
 
 def test_legacy_cache_reuse_preserves_all_tensor_and_causal_metadata(tmp_path):
     source = tmp_path / "old"
@@ -101,6 +108,7 @@ def test_layout_cache_is_answer_blind_and_recomputes_for_new_observations(monkey
     from trace_vl.longstream_training import train
 
     bb, _, _ = tiny_example()
+    bb.processor = object()
     entry = {
         "features": torch.randn(8, 16, 32),
         "times": [[i, i + 0.5] for i in range(8)],

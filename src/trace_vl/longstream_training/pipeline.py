@@ -49,8 +49,9 @@ def prefetch(factory, *, depth=2):
                 pass
 
     def produce():
-        iterator = iter(factory())
+        iterator = None
         try:
+            iterator = iter(factory())
             for value in iterator:
                 if stopped.is_set():
                     break
