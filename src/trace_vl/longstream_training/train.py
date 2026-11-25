@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import time
+from collections import OrderedDict
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,7 +28,7 @@ from .prepare import rows
 from .selection import QuestionSelector
 
 
-def sample(bb, selector, entry, row):
+def sample(bb, selector, entry, row, layouts=None):
     # Selection sees no answer or evidence annotations.
     features = entry["features"].to(bb.device)
     ends = [pair[-1] for pair in entry["times"]]
@@ -52,9 +53,20 @@ def sample(bb, selector, entry, row):
         "answer": 0,
         "query_time": row["query_time"],
     }
-    layout = prepare_native(
-        bb.processor, images, times, safe, audit, allow_native_timestamp_approximation=True
-    )
+    layout_key = digest([safe, audit, entry["hw"], times.tolist()])
+    if layouts is not None and layout_key in layouts:
+        layout = layouts.pop(layout_key)
+    else:
+        layout = prepare_native(
+            bb.processor, images, times, safe, audit, allow_native_timestamp_approximation=True
+        )
+        # Cached visual tensors are used below; zero-pixel processor outputs
+        # are needed only for native packing, never for another vision encode.
+        layout.inputs.pop("pixel_values_videos", None)
+    if layouts is not None:
+        layouts[layout_key] = layout
+        if len(layouts) > 1024:
+            layouts.popitem(last=False)
     steps = [
         expand_pooled(
             SimpleNamespace(tokens=value, grid=tuple(entry["grid"]), end=pair[-1], times=tuple(pair))
@@ -72,6 +84,12 @@ def sample(bb, selector, entry, row):
         },
         chosen,
     )
+
+
+def gradient_norm(parameters):
+    """One host synchronization per group; preserve optimizer/clipping math."""
+    squares = [p.grad.float().square().sum() for p in parameters if p.grad is not None]
+    return float(torch.stack(squares).double().sum().sqrt()) if squares else 0.0
 
 
 def run(args):
@@ -152,6 +170,7 @@ def run(args):
             },
         )
     end = min(args.updates, args.stop_after or args.updates)
+    layouts = OrderedDict()
     for update in range(start, end):
         begin = time.monotonic()
         optimizer.zero_grad(set_to_none=True)
@@ -174,7 +193,7 @@ def run(args):
             entry = torch.load(path, map_location="cpu", weights_only=True)
             if entry["input_id"] != ci["id"]:
                 raise ValueError("wrong feature identity")
-            steps, record, selected = sample(bb, selector, entry, row)
+            steps, record, selected = sample(bb, selector, entry, row, layouts)
             loss, info = net(steps, record)
             if not torch.isfinite(loss) or info["visual_tokens_total"] > 128:
                 raise ValueError("nonfinite/budget")
@@ -182,22 +201,8 @@ def run(args):
             ids.append(row["id"])
             losses.append(float(loss.detach()))
             reads.append(selected)
-        lm_grad = (
-            sum(
-                float(p.grad.float().square().sum())
-                for n, p in params.items()
-                if not n.startswith("selector.") and p.grad is not None
-            )
-            ** 0.5
-        )
-        selector_grad = (
-            sum(
-                float(p.grad.float().square().sum())
-                for n, p in params.items()
-                if n.startswith("selector.") and p.grad is not None
-            )
-            ** 0.5
-        )
+        lm_grad = gradient_norm(p for n, p in params.items() if not n.startswith("selector."))
+        selector_grad = gradient_norm(p for n, p in params.items() if n.startswith("selector."))
         if not math.isfinite(lm_grad) or lm_grad <= 0:
             raise ValueError("no finite LM QA gradient")
         if selector is not None and (not math.isfinite(selector_grad) or selector_grad <= 0):
@@ -250,7 +255,7 @@ def run(args):
     with torch.no_grad():
         for row in dev:
             entry = torch.load(args.cache / f"{digest(row['id'])}.pt", map_location="cpu", weights_only=True)
-            steps, record, selected = sample(bb, selector, entry, row)
+            steps, record, selected = sample(bb, selector, entry, row, layouts)
             embeds, positions, *_ = net.prefix(steps, record)
             hidden = bb.lm(embeds, positions, cache=None, use_cache=False)[0, -1].float()
             candidates = [bb.ids(chr(65 + i)) for i in range(len(row["options"]))]

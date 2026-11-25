@@ -53,6 +53,8 @@ def run(args):
         "--model",
         str(args.model),
     ]
+    if getattr(args, "reuse_cache", None):
+        cc += ["--reuse-cache", str(args.reuse_cache)]
     run_jobs([(f"cache-smoke-{i}", [*cc, "--shard", str(i), "--smoke"], [i]) for i in range(2)], env, logs)
     tc = [
         sys.executable,
@@ -157,6 +159,7 @@ def main():
     for name in ("data", "out", "model", "adapter"):
         p.add_argument("--" + name, type=Path, required=True)
     p.add_argument("--updates", type=int, default=200)
+    p.add_argument("--reuse-cache", type=Path)
     run(p.parse_args())
 
 
