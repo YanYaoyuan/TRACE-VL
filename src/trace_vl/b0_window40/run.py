@@ -140,7 +140,7 @@ def evaluate_source(bb, inputs, source, args, auxiliary):
                                             seed=test_a.memory_seed(source["source_group"], 17))
     recent, snapshots, completed = deque(maxlen=8), {}, []
     parity_parts, parity, encoded = ([], [], []), None, 0
-    seconds = {"vision": 0., "lm_step_all_streams": 0., "questions": 0., "packing_audit": 0.}
+    seconds = {"vision": 0., "lm_and_budget_audit_all_streams": 0., "questions": 0., "packing_audit": 0.}
     maxima = {name: {"steady_steps": 0, "before_eviction_steps": 0, "steady_kv_bytes": 0} for name in live}
     state_bytes = {}
     counter = PositionCounter()
@@ -176,6 +176,8 @@ def evaluate_source(bb, inputs, source, args, auxiliary):
             checks["reservoir17"] = reproduction(aux_prediction, old["predictions"]["reservoir17:S1K1"], q["answer"])
         if run(live["window8"]) != predictions["window8"]:
             raise RuntimeError("question re-answer is not deterministic")
+        if run(live["window40"]) != predictions["window40"]:
+            raise RuntimeError("window40 re-answer is not deterministic")
         for name, stream in live.items():
             stream.verify(before[name])
         tail_positions = PositionCounter(live["window8"].counter.pos).text(len(tail), bb.device)
@@ -240,7 +242,7 @@ def evaluate_source(bb, inputs, source, args, auxiliary):
                 if previous != audit["state_bytes"]:
                     raise ValueError("recurrent state bytes grew with time")
             torch.cuda.synchronize()
-            seconds["lm_step_all_streams"] += time.monotonic() - started
+            seconds["lm_and_budget_audit_all_streams"] += time.monotonic() - started
             if parity is None:
                 pair = tuple(float(t) for t in times[i])
                 for store, item in zip(parity_parts, (block, VisualStep(dense, shape, end, pair), frames), strict=True):
@@ -333,6 +335,10 @@ def report(args):
             raise ValueError("all 77 sources/385 questions required")
         result["analysis"] = analysis.analyze(rows, refs)
         result["outcome"] = analysis.outcome(result["analysis"])
+        for name in by_arm:
+            changes = [row["reproduction"][name]["gold_nll_change"] for row in rows if name in row["reproduction"]]
+            by_arm[name]["mean_gold_nll_change"] = float(np.mean(changes))
+            by_arm[name]["max_abs_gold_nll_change"] = max(abs(v) for v in changes)
         budget = {}
         for delay in sorted({r["delay_seconds"] for r in rows}):
             subset = [r for r in rows if r["delay_seconds"] == delay]

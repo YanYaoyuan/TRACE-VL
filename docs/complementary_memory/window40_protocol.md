@@ -52,7 +52,7 @@ failure. Reused Reservoir seeds not rerun still have unbounded cross-run drift;
 the all-source window8 check is empirical provenance evidence, not proof for them.
 
 Each query scores disposable forks. Snapshot/verify every live cache and recurrent
-state around all queries; re-answer window8 deterministically. The original native
+state around all queries; re-answer both windows deterministically. The original native
 eight-step parity check must pass its unchanged **0.5** gap gate with exact packing.
 This short check does not bound long-stream numerical drift.
 
@@ -93,7 +93,10 @@ Full report requires every source and query: **77 / 385**, 770 new window predic
 vectors plus ten auxiliary reproduction vectors on smoke sources. Never filter on
 outcomes or target-step retention. Resume only identical sealed inputs/code. Store
 individual per-question reproduction gaps/choice changes, all actual budget audits,
-per-source timings and CUDA peak. Report max and quantiles of reproduction gaps.
+per-source timings and CUDA peak. Live LM-step timing includes per-step budget/state
+audits and must not be compared to Test A's LM-only timing. Report max and quantiles
+of reproduction gaps, and mean/max-absolute NLL drift per reproduced arm in the full
+report only (including auxiliary seed17); smoke exposes none of those NLL values.
 Independently verify archive hashes and source-paired math before publishing results.
 
 These are anchored, reused development questions; five delays repeat the same fact.
