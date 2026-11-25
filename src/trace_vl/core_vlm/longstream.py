@@ -302,8 +302,10 @@ def text_answer(bb, query, video_hash):
 
 
 @torch.no_grad()
-def answer(bb, qa, selected, query, metadata, hw, video_hash):
-    if not selected or len(selected) > 8 or any(s.end > query['query_time'] for s in selected):
+def answer(bb, qa, selected, query, metadata, hw, video_hash, *, max_read_steps=8):
+    if max_read_steps not in (8, 32):
+        raise ValueError('only standard8 or explicit offline32-step diagnostic budgets supported')
+    if not selected or len(selected) > max_read_steps or any(s.end > query['query_time'] for s in selected):
         raise ValueError('invalid bounded/causal read')
     # Only placeholder positions are constructed with zeros. These pixels NEVER
     # enter the vision tower; genuine streamed feature hashes are recorded below.
@@ -325,7 +327,7 @@ def answer(bb, qa, selected, query, metadata, hw, video_hash):
     logits = bb.logits(hidden)[0, 0, [i[0] for i in candidates]].float()
     choice = int(logits.argmax())
     fp32 = bb.lm_head.weight[[i[0] for i in candidates]].float() @ hidden[0, 0].float()
-    if info['visual_tokens_total'] != len(selected) * 16 or info['visual_tokens_total'] > 128:
+    if info['visual_tokens_total'] != len(selected) * 16 or info['visual_tokens_total'] > 16 * max_read_steps:
         raise ValueError('read budget exceeded')
     return {'choice': choice, 'choice_fp32': int(fp32.argmax()), 'option_logits': logits.tolist(),
             'option_logits_fp32': fp32.tolist(),
