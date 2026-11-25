@@ -83,6 +83,15 @@ def test_factors_change_only_the_declared_component(bb):
     items = blocks(12)
     stream = feed(NativeStream(bb, HEAD, "reservoir", recent=3, capacity=4), items)
     donor = replay(bb, HEAD, items[-3:])
+    # A tiny GDN can forget the omitted prefix exactly, so natural replay is
+    # not guaranteed to produce a different state. This test checks the swap
+    # mechanism, not memory quality: create an explicitly distinct donor.
+    for layer_index in bb.linear_layers:
+        layer = donor.cache.layers[layer_index]
+        for name in ("recurrent_states", "conv_states"):
+            states = getattr(layer, name)
+            for key, value in states.items():
+                states[key] = value.clone() + 0.25
     full, no_kv = stream.fork(), stream.fork(history=False)
     swapped = stream.fork(state_from=donor)
     assert all(torch.equal(a, b) for a, b in zip(state_tensors(bb, full), state_tensors(bb, no_kv), strict=True))
