@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
 from collections import OrderedDict
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from trace_vl.core_vlm.control import checkpoint_identity
@@ -39,7 +41,7 @@ def code_identity():
 def versions():
     import transformers
 
-    return {"torch": torch.__version__, "transformers": transformers.__version__}
+    return {"torch": torch.__version__, "transformers": transformers.__version__, "numpy": np.__version__}
 
 
 def load_inputs(args):
@@ -90,10 +92,12 @@ def freeze(args):
         if (saved["inputs"] != ref["id"] or saved["id"] != row["id"]
                 or saved["source_group"] != row["source_group"] or saved["gold"] != row["answer"]):
             raise ValueError("reference score identity changed")
-        if row["task"] not in ("before", "after"):
+        if row["task"] not in ("before", "after") or len(row["options"]) != 2:
             raise ValueError("unexpected task")
         questions.append({"id": row["id"], "source_group": row["source_group"], "gold": row["answer"],
-                          "task": row["task"], "reads": reads, "reference_score_sha256": sha256(path)})
+                          "task": row["task"], "query_time": row["query_time"],
+                          "bank_times": [[float(t) for t in pair] for pair in entry["times"]],
+                          "reads": reads, "reference_score_sha256": sha256(path)})
     value = {"protocol": "nested-reader-budget-v1", "reference_input": ref["id"],
              "reference_report_sha256": REFERENCE_REPORT_SHA, "dev_sha256": ref["dev_sha256"],
              "model": ref["model"], "adapter_sha256": ref["adapter_sha256"], "cache": ref["cache"],
@@ -150,11 +154,15 @@ def validate_record(record, question, inputs):
     names = {"text_only", *question["reads"], *("blank:" + n for n in question["reads"])}
     if (not record["completed"] or record["inputs"] != inputs["id"] or record["id"] != question["id"]
             or record["source_group"] != question["source_group"] or record["gold"] != question["gold"]
+            or record["task"] != question["task"] or record["weights"] != "start"
             or set(record["logits"]) != names or set(record["visual_tokens"]) != names):
         raise ValueError("score identity or policy coverage changed")
     if any(record["visual_tokens"][n] != policies.expected_tokens(n) for n in names):
         raise ValueError("stored score budget changed")
-    if record["anchor_max_logit_gap"] > REPRODUCTION_TOLERANCE:
+    if any(len(logits) != 2 or not all(math.isfinite(v) for v in logits)
+           for logits in record["logits"].values()):
+        raise ValueError("invalid option logits")
+    if not math.isfinite(record["anchor_max_logit_gap"]) or record["anchor_max_logit_gap"] > REPRODUCTION_TOLERANCE:
         raise ValueError("reference anchor mismatch")
 
 
@@ -198,7 +206,7 @@ def worker(args):
                 for a, b in pairs}
         if max(gaps.values()) > REPRODUCTION_TOLERANCE:
             raise ValueError(f"reference logits not reproduced: {gaps}")
-        value = {"completed": True, "inputs": inputs["id"], "reference_input": ref["id"],
+        value = {"completed": True, "inputs": inputs["id"], "reference_input": ref["id"], "weights": "start",
                  "id": row["id"], "source_group": row["source_group"], "gold": row["answer"], "task": row["task"],
                  "logits": logits, "visual_tokens": tokens, "timings": timing,
                  "text_only_total_seconds": text_seconds, "anchor_max_logit_gap": max(gaps.values()),
