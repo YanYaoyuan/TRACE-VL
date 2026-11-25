@@ -2,7 +2,6 @@ import math
 
 import pytest
 import torch
-
 from test_complementary_state import HEAD, TAIL, bb, blocks  # noqa: F401
 
 from trace_vl.b0_window40 import analysis, run

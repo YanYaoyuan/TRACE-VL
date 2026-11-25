@@ -69,6 +69,12 @@ total-byte match. Window8 retains 8 steps. The append-one/evict-one path transie
 holds at most 41/9 steps respectively. Report logical pre-eviction maxima and steady
 maxima separately from measured peak CUDA memory. Recurrent bytes must stay bounded.
 
+At each delay report how many sources retain the original target's last snapshot
+step in window40, and how many retain any of the eight snapshot steps. Also report
+the three-seed mean target-last-step retention rate of the reference Reservoir.
+These are timestamp/index audits, not semantic evidence certification or a source
+filter. Early prefixes may hold fewer than 40 steps; report actual counts.
+
 ## Execution and reporting
 
 Isolated branch, immutable source archive and new run directory. GPUs **2–3**, after

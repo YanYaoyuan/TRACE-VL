@@ -346,6 +346,20 @@ def report(args):
                                         for key in ("kv_steps", "kv_tokens", "kv_bytes", "state_bytes")}
                                  for name, values in arms.items()}
         result["mean_budgets"] = budget
+        retention = {}
+        for delay in sorted({r["delay_seconds"] for r in rows}):
+            subset = [r for r in rows if r["delay_seconds"] == delay]
+            retention[str(delay)] = {
+                "sources": len(subset),
+                "window40_contains_target_last_step": sum(
+                    r["snapshot_steps"][-1] in r["streams"]["window40"]["recent"] for r in subset),
+                "window40_contains_any_snapshot_step": sum(
+                    bool(set(r["snapshot_steps"]) & set(r["streams"]["window40"]["recent"])) for r in subset),
+                "reference_reservoir_mean_target_last_step_rate": sum(
+                    sum(r["snapshot_steps"][-1] in set(refs[r["id"]]["streams"][f"reservoir{s}"]["history"]
+                                                        + refs[r["id"]]["streams"][f"reservoir{s}"]["recent"])
+                        for s in analysis.SEEDS) / len(analysis.SEEDS) for r in subset) / len(subset)}
+        result["target_step_retention"] = retention
     write_json(args.out / ("smoke-ok.json" if args.smoke else "report.json"), result)
 
 
