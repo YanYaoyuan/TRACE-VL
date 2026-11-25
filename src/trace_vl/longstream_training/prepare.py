@@ -74,14 +74,15 @@ def prepare(args):
 
     def stage(row):
         source = Path(row["video"]).resolve(strict=True)
-        before = source.stat()
+        stat = source.stat()
+        before = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
         checksum = sha256(source)
         if checksum in prior_hashes:
             raise ValueError("known prior QA training bytes; stop before changing frozen cohort")
         dest = args.out / "media" / f"{checksum}{source.suffix.lower()}"
         dest.parent.mkdir(exist_ok=True)
         if not dest.exists():
-            if shutil.disk_usage(args.out).free < before.st_size + (30 << 30):
+            if shutil.disk_usage(args.out).free < stat.st_size + (30 << 30):
                 raise ValueError("insufficient staging disk reserve")
             temp = dest.with_suffix(dest.suffix + ".partial")
             try:
@@ -91,7 +92,9 @@ def prepare(args):
                 temp.replace(dest)
             finally:
                 temp.unlink(missing_ok=True)
-        if sha256(dest) != checksum or source.stat() != before:
+        after = source.stat()
+        signature = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        if sha256(dest) != checksum or signature != before:
             raise ValueError("source/destination changed")
         return {**row, "video": str(dest), "media_sha256": checksum}
 
