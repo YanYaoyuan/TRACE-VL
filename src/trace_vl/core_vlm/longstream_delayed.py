@@ -207,7 +207,7 @@ def prepare(args):
 
 
 @torch.no_grad()
-def evaluate_source(bb, inputs, source, out, verify):
+def evaluate_source(bb, inputs, source, out, verify, extension=None):
     if sha256(source["video"]) != source["video_sha256"] or sha256(source["metadata"]) != source["metadata_sha256"]:
         raise ValueError("staged source changed")
     metadata = json.loads(Path(source["metadata"]).read_text())
@@ -224,6 +224,12 @@ def evaluate_source(bb, inputs, source, out, verify):
     encoded = 0
     started = time.monotonic()
 
+    def audit_memory():
+        result = memory_audit(bank, snapshots)
+        if extension is not None:
+            result["writer_controls"] = extension.audit()
+        return result
+
     def dispatch(event):
         when, kind, identity = event
         if kind == 0:
@@ -232,16 +238,17 @@ def evaluate_source(bb, inputs, source, out, verify):
             snapshots[identity] = list(bank.recent)
             if any(s.end > when for s in snapshots[identity]):
                 raise ValueError("snapshot saw target future")
-            memory_audit(bank, snapshots)
+            audit_memory()
             return
         q = queries[identity]
         if encoded != q["planned_encoder_calls"]:
             raise ValueError("question saw wrong prefix encode count")
-        before = memory_audit(bank, snapshots)
+        before = audit_memory()
         predictions = {}
-        for arm in ARMS:
+        for arm in (*ARMS, *(extension.arms if extension is not None else ())):
             selected = (snapshots[q["target_id"]] if arm == "protected_snapshot8" else
-                        [] if arm == "text_only" else read_steps(bank, arm, q["target_time"]))
+                        [] if arm == "text_only" else read_steps(bank, arm, q["target_time"]) if arm in ARMS
+                        else extension.read(arm, q["target_time"]))
             p = (longstream.answer(bb, qa, selected, q, metadata, hw, source["video_sha256"]) if selected
                  else longstream.text_answer(bb, q, source["video_sha256"]))
             if arm not in ("text_only", "recent8_now") and any(s.end > q["target_time"] for s in selected):
@@ -260,7 +267,7 @@ def evaluate_source(bb, inputs, source, out, verify):
             replay["empty_visual_memory"] = False
             if replay != predictions["protected_snapshot8"]:
                 raise ValueError("fresh no-KV question replay changed output")
-        if memory_audit(bank, snapshots) != before:
+        if audit_memory() != before:
             raise ValueError("read mutated stored state")
         result = {"id": q["id"], "target_id": q["target_id"], "input_id": inputs["id"],
                   "source_group": source["source_group"], "gold": q["answer"],
@@ -295,9 +302,12 @@ def evaluate_source(bb, inputs, source, out, verify):
                            longstream.verify_native_step(bb, layout, raw, record))
                 del raw, layout, record
             pooled = grid_pool(dense, shape, (4, 4))[0].detach().clone()
-            bank.append(longstream.StoredStep(pooled, shape, pair, tuple(int(x) for x in indices[2*i:2*i+2]),
-                                             hashlib.sha256(frames.tobytes()).hexdigest()))
-            memory_audit(bank, snapshots)
+            observation = longstream.StoredStep(pooled, shape, pair, tuple(int(x) for x in indices[2*i:2*i+2]),
+                                                hashlib.sha256(frames.tobytes()).hexdigest())
+            bank.append(observation)
+            if extension is not None:
+                extension.append(observation)
+            audit_memory()
             events.due(pair[-1], inclusive=True)
             if i % 30 == 0:
                 write_json(out / f"progress-{os.environ.get('CUDA_VISIBLE_DEVICES', 'cpu')}.json",
@@ -306,18 +316,21 @@ def evaluate_source(bb, inputs, source, out, verify):
         events.due(float("inf"), inclusive=True)
     finally:
         pixels.close()
+        if extension is not None:
+            extension.close()
     if len(results) != len(queries) or events.cursor != len(events.events):
         raise ValueError("source did not finish all fixed queries/events")
     write_json(out / "sources" / f"{digest(source['source_group'])}.json", {
         "completed": True, "input_id": inputs["id"], "source": source["source_group"],
         "queries": [r["id"] for r in results], "stream_encoder_calls": encoded, "sampled_steps": len(times),
         "dropped_bad_pts_frames": dropped, "verification_extra_encoder_calls": int(verify),
-        "snapshot_and_text_delay_invariance_passed": True, "final_memory": memory_audit(bank, snapshots),
+        "snapshot_and_text_delay_invariance_passed": True, "final_memory": audit_memory(),
         "peak_two_frame_rgb_buffer_bytes": 2 * hw[0] * hw[1] * 3,
-        "shared_input_pts_index_bytes": len(metadata["frames"]) * 8})
+        "shared_input_pts_index_bytes": len(metadata["frames"]) * 8,
+        **({"extension_trace": extension.receipt()} if extension is not None else {})})
 
 
-def worker(args):
+def worker(args, extension_factory=None):
     if not 0 <= args.shard < 4:
         raise ValueError("invalid shard")
     inputs = json.loads((args.out / "inputs.json").read_text())
@@ -343,11 +356,12 @@ def worker(args):
             if old["input_id"] != inputs["id"] or not old["completed"]:
                 raise ValueError("completed source belongs to another run")
             continue
-        evaluate_source(bb, inputs, source, args.out, verify=number == 0)
+        extension = extension_factory(source, args.out) if extension_factory is not None else None
+        evaluate_source(bb, inputs, source, args.out, verify=number == 0, extension=extension)
 
 
-def validate_predictions(result, query):
-    if set(result["predictions"]) != set(ARMS):
+def validate_predictions(result, query, arms=ARMS):
+    if set(result["predictions"]) != set(arms):
         raise ValueError("missing or extra prediction arm")
     for arm, p in result["predictions"].items():
         cutoff = query["query_time"] if arm == "recent8_now" else query["target_time"]
@@ -361,14 +375,14 @@ def validate_predictions(result, query):
                 raise ValueError("candidate logit scoring failed")
 
 
-def scores(rows):
+def scores(rows, arms=ARMS):
     return {arm: {"correct_fp32": sum(r["predictions"][arm]["choice_fp32"] == r["gold"] for r in rows),
                   "correct_bf16": sum(r["predictions"][arm]["choice"] == r["gold"] for r in rows),
                   "empty_reads": sum(r["predictions"][arm]["empty_visual_memory"] for r in rows)}
-            for arm in ARMS}
+            for arm in arms}
 
 
-def report(args):
+def report(args, arms=ARMS, output_path=None):
     inputs = json.loads((args.out / "inputs.json").read_text())
     if inputs["delayed_source_code_sha256"] != sha256(__file__):
         raise ValueError("report source changed")
@@ -389,7 +403,7 @@ def report(args):
                     or r["target_encoder_calls"] != q["target_encoder_calls"]
                     or r["memory"]["seen"] != q["planned_encoder_calls"]):
                 raise ValueError("fixed question identity or causal encode count failed")
-            validate_predictions(r, q)
+            validate_predictions(r, q, arms=arms)
             for arm, p in r["predictions"].items():
                 key = (q["target_id"], arm)
                 if arm in ("text_only", "protected_snapshot8"):
@@ -400,7 +414,7 @@ def report(args):
                     precision.append({"id": r["id"], "arm": arm, "bf16": p["choice"], "fp32": p["choice_fp32"]})
             rows.append(r)
     by_delay = {str(d): {"questions": len(subset), "sources": len({r["source_group"] for r in subset}),
-                        "scores": scores(subset)}
+                        "scores": scores(subset, arms=arms)}
                 for d in DELAYS if (subset := [r for r in rows if r["delay_seconds"] == d])}
     matched = {}
     # Fixed common populations, rather than comparing9/9 to3/3 as if iid.
@@ -410,13 +424,13 @@ def report(args):
         matched[str(endpoint)] = {
             "target_ids": sorted(targets), "targets": len(targets),
             "sources": len({r["source_group"] for r in all_matched}),
-            "delays": {str(d): {"questions": len(subset), "scores": scores(subset)}
+            "delays": {str(d): {"questions": len(subset), "scores": scores(subset, arms=arms)}
                        for d in DELAYS if d <= endpoint
                        and (subset := [r for r in all_matched if r["delay_seconds"] == d])}}
     if not args.smoke and any(by_delay[k]["questions"] != v["questions"] or by_delay[k]["sources"] != v["sources"]
                               for k, v in inputs["cohorts"].items()):
         raise ValueError("full report population differs from availability-only cohorts")
-    write_json(args.out / ("smoke-ok.json" if args.smoke else "report.json"), {
+    write_json(output_path or args.out / ("smoke-ok.json" if args.smoke else "report.json"), {
         "completed": True, "smoke": args.smoke, "input_id": inputs["id"], "scope": SCOPE,
         "questions": len(rows), "source_videos": len(selected), "original_targets": len({r["target_id"] for r in rows}),
         "primary_score": inputs["primary_score"], "by_delay": by_delay, "matched_cohorts": matched,

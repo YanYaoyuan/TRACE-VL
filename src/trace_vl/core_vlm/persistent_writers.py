@@ -24,11 +24,12 @@ class PersistentWriter:
     archive, question, answer, target timestamp or hidden descriptor cache exists.
     """
 
-    def __init__(self, policy: str, capacity: int = 32):
+    def __init__(self, policy: str, capacity: int = 32, *, on_eviction=None):
         if policy not in ('time_coverage', 'spatial_change'):
             raise ValueError('unknown persistent writer policy')
         if type(capacity) is not int or capacity < 4:
             raise ValueError('at least four historical slots required')
+        self.on_eviction = on_eviction
         self.policy = policy
         self.capacity = capacity
         self.history: list[StoredStep] = []
@@ -73,6 +74,11 @@ class PersistentWriter:
             costs = [round(float(v), 6) for v in excess]
         # Oldest interior timestamp is the final deterministic tie breaker.
         remove = min(range(1, len(candidates)-1), key=lambda i: (costs[i-1], spans[i-1], candidates[i].end))
+        if self.on_eviction is not None:
+            self.on_eviction({"policy": self.policy, "old_seen": self.old_seen+1,
+                              "candidates": [{"indices": list(s.indices), "times": list(s.times)} for s in candidates],
+                              "interior_costs": costs, "interior_spans": spans, "removed_position": remove,
+                              "removed_indices": list(candidates[remove].indices)})
         return [s for i, s in enumerate(candidates) if i != remove]
 
     @torch.no_grad()
