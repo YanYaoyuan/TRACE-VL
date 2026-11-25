@@ -91,6 +91,25 @@ def run(args):
             raise ValueError("real selector smoke failed")
         if not json.loads((args.out / a / "restore-audit.json").read_text())["completed"]:
             raise ValueError("reload failed")
+    if getattr(args, "compare_smoke_from", None):
+        for a in arms:
+            old = [
+                json.loads(s)
+                for s in (args.compare_smoke_from / a / "metrics.jsonl").read_text().splitlines()
+            ][:2]
+            for previous, current in zip(old, metrics[a], strict=True):
+                for key in ("question_ids", "selected_bank_indices", "parameters_sha256", "loss"):
+                    if previous[key] != current[key]:
+                        raise ValueError(f"optimized smoke differs from original: {a}/{key}")
+        write_json(
+            args.out / "original-smoke-equivalence.json",
+            {
+                "completed": True,
+                "source": str(args.compare_smoke_from),
+                "updates_per_arm": 2,
+                "exact_parameter_digests_losses_sample_order_and_reads": True,
+            },
+        )
     if [r["question_ids"] for r in metrics["reservoir"]] != [r["question_ids"] for r in metrics["learned"]]:
         raise ValueError("matched sample prefix changed")
     write_json(
@@ -160,6 +179,7 @@ def main():
         p.add_argument("--" + name, type=Path, required=True)
     p.add_argument("--updates", type=int, default=200)
     p.add_argument("--reuse-cache", type=Path)
+    p.add_argument("--compare-smoke-from", type=Path)
     run(p.parse_args())
 
 

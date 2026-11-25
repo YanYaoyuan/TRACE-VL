@@ -24,6 +24,7 @@ export TRACE_WANDB=0 TRACE_SWANLAB=0
 CUDA_VISIBLE_DEVICES= "$py" -m pytest -q tests/test_longstream_training.py tests/test_training_pipeline.py tests/test_core_vlm_native.py tests/test_core_longstream.py
 extra=()
 [[ -z "${TRACE_REUSE_CACHE:-}" ]] || extra+=(--reuse-cache "$TRACE_REUSE_CACHE")
+[[ -z "${TRACE_COMPARE_SMOKE_FROM:-}" ]] || extra+=(--compare-smoke-from "$TRACE_COMPARE_SMOKE_FROM")
 "$py" -m trace_vl.longstream_training.run --out "$out" \
     --data "${TRACE_DATA:-/data/yyy/tracevl-data/trained-reader-20261125-001}" \
     --model /data/yyy/tracevl-data/core-pool-probe-2efc7cc/model \
