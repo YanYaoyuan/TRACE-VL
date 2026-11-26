@@ -1,0 +1,30 @@
+{
+  "completed": true,
+  "input_id": "563398c855fa3df2e676cc96e29e87b3765dc3922c69ec8c42ae4eeffe98fcca",
+  "candidates": 250,
+  "old_media_hashed": 250,
+  "staged_bytes": 85643895263,
+  "byte_overlap": {
+    "training": [],
+    "old_development": []
+  },
+  "duplicate_candidate_groups": [],
+  "invalid_header_samples": [],
+  "byte_disjoint_unique_candidates": 250,
+  "header_eligibility": {
+    "strict_action_object": {
+      "sources_header_eligible": 87,
+      "metadata_rows": 98,
+      "scope": "Header-only upper bound; full PTS and evidence visibility still unverified."
+    },
+    "broader_perception": {
+      "sources_header_eligible": 139,
+      "metadata_rows": 197,
+      "scope": "Header-only upper bound; full PTS and evidence visibility still unverified."
+    }
+  },
+  "quality_evaluation": false,
+  "model_calls": 0,
+  "full_pts_verified": false,
+  "underlying_source_independence_verified": false
+}
