@@ -1,0 +1,249 @@
+{
+  "inference_revision": "aeea1d9bf7950f0c1977f19f3b05ee1fdc661610",
+  "artifact": {
+    "stage": "completed",
+    "remote": "/data/yyy/tracevl-runs/reservoir-capacity-aeea1d9-001/reports.tar.gz",
+    "bytes": 1151353,
+    "sha256": "7a01e86b6b580e6197d5d5b157c979f46d9a7074f331c21998488be118ce7c5f",
+    "report_sha256": "b8e938b73d97387c445a8c4f25e47996af5b51a48149f7c2ed99880177abf857",
+    "phase_receipts": {
+      "smoke": {
+        "stage": "completed",
+        "inputs": "de153d253208ee07bacb21d4feb1b7435c4df3f717f4ef0ca2164a735d5a0707",
+        "phase": "smoke",
+        "started_unix": 1795667376.6675656,
+        "ceiling_seconds": 3600,
+        "cost_sha256": "eb6003a52ce49c2c8b2fea9cbbb52c3ac0366e28ee9472a79f2f76bf434880c8",
+        "completed_unix": 1795668702.1780767,
+        "report": "smoke-ok.json",
+        "report_sha256": "a15984d869bad39c0038be83db7d69a0cea8d4bd74ca2750b2a706d20c0b3a0f",
+        "archive": "smoke-reports.tar.gz",
+        "archive_sha256": "8ff92dc00cec84d90dc9cd593e3f4b9eb529a08a706cea25e9c65b7c078302b2"
+      },
+      "full": {
+        "stage": "completed",
+        "inputs": "de153d253208ee07bacb21d4feb1b7435c4df3f717f4ef0ca2164a735d5a0707",
+        "phase": "full",
+        "started_unix": 1795668702.1794934,
+        "ceiling_seconds": 15600,
+        "completed_unix": 1795678418.501833,
+        "report": "report.json",
+        "report_sha256": "b8e938b73d97387c445a8c4f25e47996af5b51a48149f7c2ed99880177abf857",
+        "archive": "reports.tar.gz",
+        "archive_sha256": "7a01e86b6b580e6197d5d5b157c979f46d9a7074f331c21998488be118ce7c5f"
+      }
+    }
+  },
+  "launch": {
+    "pid": 3502471,
+    "root": "/data/yyy/tracevl-runs/reservoir-capacity-aeea1d9-001",
+    "revision": "aeea1d9bf7950f0c1977f19f3b05ee1fdc661610",
+    "inputs": "de153d253208ee07bacb21d4feb1b7435c4df3f717f4ef0ca2164a735d5a0707",
+    "ci_receipt_sha256": "f080f1f0875935515391e4c6c1da605ced2a3368baba29f0f6abf943aefb5a0b",
+    "peer_review_receipt_sha256": "4eaa0c09f90f385e4a99227d8f658dd47b175acd3457d4f7fca165dedf3442e5",
+    "gpu_before": "0, 40441, 0, 0\n1, 40441, 0, 0\n2, 40441, 0, 0\n3, 40441, 0, 0\n",
+    "gpu_ids": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "launched_unix": 1795667356.8200402,
+    "mode": "smoke then cost-gated full, 3600/15600s watchdogs in pinned code"
+  },
+  "run_status": {
+    "stage": "completed",
+    "inputs": "de153d253208ee07bacb21d4feb1b7435c4df3f717f4ef0ca2164a735d5a0707",
+    "completed_unix": 1795678418.5031452,
+    "report_sha256": "b8e938b73d97387c445a8c4f25e47996af5b51a48149f7c2ed99880177abf857",
+    "archive_sha256": "7a01e86b6b580e6197d5d5b157c979f46d9a7074f331c21998488be118ce7c5f"
+  },
+  "cost_review": {
+    "inputs": "de153d253208ee07bacb21d4feb1b7435c4df3f717f4ef0ca2164a735d5a0707",
+    "remaining_shards": [
+      {
+        "shard": 0,
+        "sources": 20,
+        "steps": 9722,
+        "questions": 100,
+        "component_seconds": 8656.917683637232,
+        "conservative_seconds": 10269.19677895066
+      },
+      {
+        "shard": 1,
+        "sources": 19,
+        "steps": 9202,
+        "questions": 95,
+        "component_seconds": 8194.527990559354,
+        "conservative_seconds": 9727.933922393917
+      },
+      {
+        "shard": 2,
+        "sources": 18,
+        "steps": 9075,
+        "questions": 90,
+        "component_seconds": 8074.63732096626,
+        "conservative_seconds": 9588.749145535046
+      },
+      {
+        "shard": 3,
+        "sources": 18,
+        "steps": 9404,
+        "questions": 90,
+        "component_seconds": 8361.360422051486,
+        "conservative_seconds": 9925.348861109094
+      }
+    ],
+    "component_wall_seconds": 8656.917683637232,
+    "conservative_wall_seconds": 10269.19677895066,
+    "full_ceiling_seconds": 15600,
+    "within_ceiling": true,
+    "per_step_components": {
+      "vision": 0.03419523853980578,
+      "packing_audit": 0.0009092324949227847,
+      "lm_r32": 0.42117301397312146,
+      "lm_r128": 0.41522130248523675
+    },
+    "per_query_components_three_seeds": {
+      "answer_r32": 0.46050179125741125,
+      "answer_r128": 0.4538391192443669,
+      "question_verification": 0.9277238057926297
+    },
+    "max_per_step_components": {
+      "vision": 0.03560994697682973,
+      "packing_audit": 0.0009112746178691567,
+      "lm_r32": 0.42293141199783846,
+      "lm_r128": 0.4161045394609627
+    },
+    "max_per_query_components_three_seeds": {
+      "answer_r32": 0.46424974519759415,
+      "answer_r128": 0.455453497171402,
+      "question_verification": 0.9305263677611947
+    },
+    "residual_seconds_per_step": 0.14754226638129342,
+    "startup_allowance_seconds": 17.601067752577364,
+    "report_bundle_allowance_seconds": 120,
+    "first_answer_lm_seconds_per_query_seed": {
+      "R32": 0.15350059708580374,
+      "R128": 0.15127970641478897
+    },
+    "scope": "Measured two-source extrapolation, not a deadline guarantee. Max-source component rates plus scaled residual, conservative startup and 120s reporting allowance; actual watchdog enforces the ceiling."
+  },
+  "independent_cost_formula_verified": true,
+  "ci": {
+    "headRefOid": "aeea1d9bf7950f0c1977f19f3b05ee1fdc661610",
+    "statusCheckRollup": [
+      {
+        "__typename": "CheckRun",
+        "completedAt": "2026-11-26T03:50:21Z",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/YanYaoyuan/TRACE-VL/actions/runs/45751046155/job/139678625523",
+        "name": "cpu",
+        "startedAt": "2026-11-26T03:46:34Z",
+        "status": "COMPLETED",
+        "workflowName": "tests"
+      },
+      {
+        "__typename": "CheckRun",
+        "completedAt": "2026-11-26T03:50:54Z",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/YanYaoyuan/TRACE-VL/actions/runs/45751041184/job/139678608441",
+        "name": "cpu",
+        "startedAt": "2026-11-26T03:46:31Z",
+        "status": "COMPLETED",
+        "workflowName": "tests"
+      }
+    ],
+    "verified_unix": 1795667349.0134363
+  },
+  "peer_review": {
+    "revision": "aeea1d9bf7950f0c1977f19f3b05ee1fdc661610",
+    "reviewed_revision": "ce3b294336beb9373ddb8e20b6251842e97639d8",
+    "review_comment": "https://github.com/YanYaoyuan/TRACE-VL/pull/15#issuecomment-7181990483",
+    "approval_kind": "conditional: reviewer has no objection to smoke with watchdog item 1 fixed",
+    "condition": "shield timeout/interrupt cleanup from a second signal without disabling the successful phase watchdog",
+    "condition_resolution_commit": "aeea1d9bf7950f0c1977f19f3b05ee1fdc661610",
+    "condition_resolution_evidence": "A100 Ruff passed, 26 CPU tests passed including poll-before-alarm cleanup and reporting-after-success expiry; exact-head hosted CI passed",
+    "approved_before_smoke": true,
+    "recorded_unix": 1795665135.0210037,
+    "note": "This records conditional clearance and verified resolution; it does not claim the reviewer separately reviewed the fix commit."
+  },
+  "worker_timing": {
+    "smoke": {
+      "status": "completed",
+      "workers": {
+        "smoke-0": {
+          "pid": 3502823,
+          "gpu_ids": [
+            0
+          ],
+          "started_unix": 1795667383.2895005,
+          "exit_code": 0,
+          "completed_unix": 1795667746.0863383,
+          "wall_seconds": 362.79683780670166
+        },
+        "smoke-1": {
+          "pid": 3502824,
+          "gpu_ids": [
+            1
+          ],
+          "started_unix": 1795667383.290302,
+          "exit_code": 0,
+          "completed_unix": 1795668701.9023902,
+          "wall_seconds": 1318.6120882034302
+        }
+      },
+      "started_unix": 1795667383.2888403,
+      "finished_unix": 1795668701.9026742,
+      "elapsed_seconds": 1318.6138345077634
+    },
+    "full": {
+      "status": "completed",
+      "workers": {
+        "full-0": {
+          "pid": 3519874,
+          "gpu_ids": [
+            0
+          ],
+          "started_unix": 1795668707.6039588,
+          "exit_code": 0,
+          "completed_unix": 1795678417.281674,
+          "wall_seconds": 9709.677715063095
+        },
+        "full-1": {
+          "pid": 3519875,
+          "gpu_ids": [
+            1
+          ],
+          "started_unix": 1795668707.6047523,
+          "exit_code": 0,
+          "completed_unix": 1795677901.0254703,
+          "wall_seconds": 9193.420717954636
+        },
+        "full-2": {
+          "pid": 3519876,
+          "gpu_ids": [
+            2
+          ],
+          "started_unix": 1795668707.6055698,
+          "exit_code": 0,
+          "completed_unix": 1795677800.891991,
+          "wall_seconds": 9093.286421060562
+        },
+        "full-3": {
+          "pid": 3519877,
+          "gpu_ids": [
+            3
+          ],
+          "started_unix": 1795668707.6064115,
+          "exit_code": 0,
+          "completed_unix": 1795678116.3511498,
+          "wall_seconds": 9408.744738340378
+        }
+      },
+      "started_unix": 1795668707.603289,
+      "finished_unix": 1795678417.282113,
+      "elapsed_seconds": 9709.678824642673
+    }
+  }
+}
