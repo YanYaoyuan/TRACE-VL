@@ -1,0 +1,9 @@
+{
+  "completed": true,
+  "passed": true,
+  "input_id": "103a329d1054403a3f6c3795820533f8f33643d960b2389bd5fabd95eff43c5e",
+  "sources": 2,
+  "steps_per_source": 16,
+  "quality_evaluation": false,
+  "peak_allocated_gib": 8.804028987884521
+}
