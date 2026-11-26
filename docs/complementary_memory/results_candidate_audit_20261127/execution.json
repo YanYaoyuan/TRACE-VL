@@ -1,0 +1,108 @@
+{
+  "launch": {
+    "pid": 105630,
+    "root": "/data/yyy/tracevl-runs/candidate-media-audit-556181c-001",
+    "revision": "556181c7a6c61737464004fbd911e12ddbc4868b",
+    "preflight_input": "563398c855fa3df2e676cc96e29e87b3765dc3922c69ec8c42ae4eeffe98fcca",
+    "planned_new_bytes": 85643895263,
+    "planned_old_hash_bytes": 46258083176,
+    "launched_unix": 1795713370.5129304,
+    "ceiling_seconds": 3600,
+    "gpu_execution": false,
+    "model_calls": 0
+  },
+  "status": {
+    "stage": "completed",
+    "started_unix": 1795713369.9173539,
+    "ceiling_seconds": 3600,
+    "input_id": "563398c855fa3df2e676cc96e29e87b3765dc3922c69ec8c42ae4eeffe98fcca",
+    "report_sha256": "86453c5a03e44cdb56586737f794f09cb6bc30cfaf550a1c24ac21db53ac2454",
+    "finished_unix": 1795714392.7184715
+  },
+  "jobs": {
+    "status": "completed",
+    "workers": {
+      "old-hashes": {
+        "pid": 105651,
+        "gpu_ids": [],
+        "started_unix": 1795713370.708607,
+        "exit_code": 0,
+        "completed_unix": 1795713543.3707952,
+        "wall_seconds": 172.66218829154968
+      },
+      "stage-0": {
+        "pid": 105652,
+        "gpu_ids": [],
+        "started_unix": 1795713370.709422,
+        "exit_code": 0,
+        "completed_unix": 1795714392.414628,
+        "wall_seconds": 1021.7052059173584
+      },
+      "stage-1": {
+        "pid": 105653,
+        "gpu_ids": [],
+        "started_unix": 1795713370.7102196,
+        "exit_code": 0,
+        "completed_unix": 1795714338.9137905,
+        "wall_seconds": 968.2035708427429
+      }
+    },
+    "started_unix": 1795713370.7079296,
+    "finished_unix": 1795714392.4343204,
+    "elapsed_seconds": 1021.7263921257108
+  },
+  "artifact": {
+    "root": "/data/yyy/tracevl-runs/candidate-media-audit-556181c-001",
+    "remote": "/data/yyy/tracevl-runs/candidate-media-audit-556181c-001/reports.tar.gz",
+    "bytes": 846147,
+    "sha256": "ed846b951341949311bf14e1af3e46e395f31384d4230cb14358cca71e100fb4",
+    "report_sha256": "86453c5a03e44cdb56586737f794f09cb6bc30cfaf550a1c24ac21db53ac2454"
+  },
+  "ci": {
+    "headRefOid": "556181c7a6c61737464004fbd911e12ddbc4868b",
+    "statusCheckRollup": [
+      {
+        "__typename": "CheckRun",
+        "completedAt": "2026-11-26T17:15:32Z",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/YanYaoyuan/TRACE-VL/actions/runs/45865416148/job/140066863704",
+        "name": "cpu",
+        "startedAt": "2026-11-26T17:10:27Z",
+        "status": "COMPLETED",
+        "workflowName": "tests"
+      },
+      {
+        "__typename": "CheckRun",
+        "completedAt": "2026-11-26T17:14:46Z",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/YanYaoyuan/TRACE-VL/actions/runs/45865339352/job/140066607840",
+        "name": "cpu",
+        "startedAt": "2026-11-26T17:09:57Z",
+        "status": "COMPLETED",
+        "workflowName": "tests"
+      }
+    ],
+    "checked_unix": 1795713360.07004
+  },
+  "cpu": {
+    "revision": "556181c7a6c61737464004fbd911e12ddbc4868b",
+    "root": "/data/yyy/tracevl-runs/candidate-media-audit-556181c-001",
+    "completed": true,
+    "exit_codes": {
+      "lint": 0,
+      "tests": 0,
+      "plan": 0,
+      "load_roundtrip": 0
+    },
+    "seconds": 8.919413089752197,
+    "gpu_execution": false,
+    "metadata_preflight": {
+      "id": "563398c855fa3df2e676cc96e29e87b3765dc3922c69ec8c42ae4eeffe98fcca",
+      "candidates": 250,
+      "old_media": 250,
+      "planned_bytes": 85643895263,
+      "training_unique_hashes": 20370,
+      "gpu_execution": false
+    }
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "verified": true,
+  "input_id": "563398c855fa3df2e676cc96e29e87b3765dc3922c69ec8c42ae4eeffe98fcca",
+  "archive_sha256": "ed846b951341949311bf14e1af3e46e395f31384d4230cb14358cca71e100fb4",
+  "report_sha256": "86453c5a03e44cdb56586737f794f09cb6bc30cfaf550a1c24ac21db53ac2454",
+  "script_sha256": "da96fb68e0d60222e219e8b103bc0d7ff678dafa3a5cb019a00190ce36771b9a",
+  "supervisor_sha256": "319531ce40cbecc16f4a07dc456820b044efbe3d397c68bc99a4568a52b1fc6f",
+  "protocol_sha256": "7ee33410c2fd3658be7cc7565716619a27f29a23fd26c5580b58a02baee30e20",
+  "wall_seconds": 1022.8011176586151,
+  "candidates": 250,
+  "old_hashes": 250,
+  "baseline_old77_hashes_matched": 77,
+  "training_unique_hashes": 20370,
+  "staged_bytes": 85643895263,
+  "recomputed_overlap": {
+    "training": [],
+    "old_development": []
+  },
+  "duplicate_candidate_groups": [],
+  "byte_disjoint_unique_candidates": 250,
+  "invalid_header_samples": [],
+  "header_metadata": {
+    "strict_action_object": {
+      "sources_header_eligible": 87,
+      "metadata_rows": 98,
+      "sources_with_two_or_more_different_question_ids": 11,
+      "sources_with_at_least_30s_cutoff_span": 10,
+      "scope": "Post hoc metadata counts; not certified distinct facts, full PTS, trainability, or a selected cohort."
+    },
+    "broader_perception": {
+      "sources_header_eligible": 139,
+      "metadata_rows": 197,
+      "sources_with_two_or_more_different_question_ids": 50,
+      "sources_with_at_least_30s_cutoff_span": 42,
+      "scope": "Post hoc metadata counts; not certified distinct facts, full PTS, trainability, or a selected cohort."
+    }
+  },
+  "old_development_byte_duplicate_groups": [
+    [
+      11,
+      38
+    ],
+    [
+      12,
+      29
+    ],
+    [
+      13,
+      33
+    ],
+    [
+      14,
+      40
+    ],
+    [
+      15,
+      45
+    ]
+  ],
+  "no_qa_fields_in_manifest": true,
+  "owned_processes_exited": true,
+  "scope": "Independent saved-artifact/hash/accounting verification. Extraction-time SHA/CRC were not independently reread from staged85.64GB; header availability is not full PTS or underlying-source independence."
+}
