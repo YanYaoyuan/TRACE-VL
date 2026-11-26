@@ -63,6 +63,17 @@ explicit resample-expansion checks validate the vectorized cluster estimators.
 retains the original intervals alongside both alternatives. Future uncertainty
 analysis should use media-identity groups and disclose remaining provenance limits.
 
+The [portable reproduction script](results_candidate_audit_20261127/reproduce_cluster_sensitivity.py)
+loads only saved records and NumPy, with explicit input roots; it imports no model
+code. Use the verified input/report/question trees from the four completed runs:
+
+```bash
+python reproduce_cluster_sensitivity.py --test-a-root TEST_A --b0-root B0 \
+  --protected-root PROTECTED --capacity-root CAPACITY --out cluster_sensitivity.json
+```
+
+The two weighting schemes and all15,000 expansion checks are in that script.
+
 ## Execution and provenance
 
 Data-audit inference/source revision: `556181c7a6c61737464004fbd911e12ddbc4868b`.
