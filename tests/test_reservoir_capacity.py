@@ -144,3 +144,31 @@ def test_failed_worker_stops_peer_and_records_completed_timing(tmp_path):
     data = json.loads(receipt.read_text())
     assert data["workers"]["failure"]["exit_code"] == 2
     assert not Path(f"/proc/{data['workers']['peer']['pid']}").exists()
+
+
+def test_successful_jobs_leave_phase_alarm_armed_for_reporting(tmp_path):
+    with pytest.raises(BudgetExceeded):
+        with budget(.6) as deadline:
+            run_jobs([("fast", [sys.executable, "-c", "pass"], [])], os.environ.copy(),
+                     tmp_path / "logs", deadline, tmp_path / "jobs.json")
+            time.sleep(1)
+
+
+def test_poll_timeout_shields_cleanup_from_later_alarm(tmp_path):
+    # The monotonic deadline intentionally wins, then the alarm would fire
+    # during cleanup. A TERM-ignoring worker requires the final KILL.
+    receipt = tmp_path / "jobs.json"
+    command = "import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(30)"
+    try:
+        with pytest.raises(BudgetExceeded):
+            with budget(.7) as deadline:
+                run_jobs([("stubborn", [sys.executable, "-c", command], [])], os.environ.copy(),
+                         tmp_path / "logs", deadline - .4, receipt, cleanup_grace=.5)
+        pid = json.loads(receipt.read_text())["workers"]["stubborn"]["pid"]
+        assert not Path(f"/proc/{pid}").exists()
+    finally:
+        if receipt.exists():
+            data = json.loads(receipt.read_text())
+            pid = data.get("workers", {}).get("stubborn", {}).get("pid")
+            if pid and Path(f"/proc/{pid}").exists():
+                os.killpg(pid, 9)

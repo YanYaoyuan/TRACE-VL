@@ -43,7 +43,7 @@ def budget(seconds):
             signal.signal(s, handler)
 
 
-def run_jobs(jobs, env, log_root, deadline, receipt):
+def run_jobs(jobs, env, log_root, deadline, receipt, *, cleanup_grace=10):
     """All groups are born here with start_new_session; never discover/kill user jobs."""
     Path(log_root).mkdir(parents=True, exist_ok=True)
     active, handles, records = [], [], {}
@@ -85,23 +85,39 @@ def run_jobs(jobs, env, log_root, deadline, receipt):
         state.update(status="held_or_failed", error=f"{type(exc).__name__}: {exc}")
         raise
     finally:
-        # TERM then KILL only groups whose direct leader is still our unreaped child.
-        for _, child in active:
-            if child.poll() is None:
-                try:
-                    os.killpg(child.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-        grace = time.monotonic() + 10
-        for _, child in active:
+        if active:
+            # On failure, shield the entire TERM/wait/KILL sequence. Disarming
+            # unconditionally would remove the phase alarm after a SUCCESSFUL
+            # GPU check, leaving subsequent workers/reporting unbounded.
+            signals = {signal.SIGALRM, signal.SIGTERM, signal.SIGINT}
+            old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, signals)
+            handlers = {s: signal.getsignal(s) for s in signals}
             try:
-                child.wait(timeout=max(.01, grace - time.monotonic()))
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(child.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                child.wait(timeout=5)
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                for s in signals:
+                    signal.signal(s, signal.SIG_IGN)
+                for _, child in active:
+                    if child.poll() is None:
+                        try:
+                            os.killpg(child.pid, signal.SIGTERM)
+                        except ProcessLookupError:
+                            pass
+                grace = time.monotonic() + cleanup_grace
+                for _, child in active:
+                    try:
+                        child.wait(timeout=max(.01, grace - time.monotonic()))
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(child.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        child.wait(timeout=5)
+            finally:
+                # Discard pending cleanup-time signals while ignored; our
+                # original exception still marks the phase incomplete.
+                signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+                for s, handler in handlers.items():
+                    signal.signal(s, handler)
         state.update(finished_unix=time.time(), elapsed_seconds=time.monotonic() - started)
         atomic_json(receipt, state)
         for log in handles:

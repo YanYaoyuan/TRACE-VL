@@ -69,6 +69,8 @@ GPU check, worker/model startup, reporting and bundling; CPU preflight/identity
 sealing precedes phase clocks. The main-thread alarm and monotonic worker deadline
 are enforced, not just recorded. Cleanup sends TERM only to explicitly launched
 process groups, allows a shared 10 s cleanup grace, then KILLs surviving owned groups.
+Cleanup is signal-shielded so a later alarm/interrupt cannot abort TERM/wait/KILL.
+Successful GPU checks/workers leave the phase alarm armed for reporting/bundling.
 Other user jobs are never discovered or terminated. Interrupted/expired/failed
 phases are incomplete and cannot reset their deadline in the same run directory.
 
