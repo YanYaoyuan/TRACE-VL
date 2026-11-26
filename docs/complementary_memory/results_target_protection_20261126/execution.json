@@ -1,0 +1,183 @@
+{
+  "continuation-launch.json": {
+    "pid": 3293115,
+    "root": "/data/yyy/tracevl-runs/target-protected32-9ee2d8f-001",
+    "revision": "9ee2d8f4634e776aa939d7ec9fa64a9ff20977cb",
+    "inputs": "9e393a4c3ae549364baa6d7227bf93e24a69d82725c560c3e6413fe910501d0e",
+    "driver_sha256": "81cd794ddba9f44467f0daac03fc5a51cf78a6208a651a1a637d7b0dc6140895",
+    "launched_unix": 1795656399.1061912,
+    "mode": "two-source smoke -> measured cost review -> full77 on four GPUs"
+  },
+  "continuation-status.json": {
+    "stage": "completed",
+    "revision": "9ee2d8f4634e776aa939d7ec9fa64a9ff20977cb",
+    "inputs": "9e393a4c3ae549364baa6d7227bf93e24a69d82725c560c3e6413fe910501d0e",
+    "updated_unix": 1795662780.6600637,
+    "full_status": {
+      "stage": "completed",
+      "updated_unix": 1795662780.65984,
+      "report_sha256": "9cf46c5bf8968e596f6f0d5241d91c514906568cee15950193bd1e886b213a28",
+      "archive_sha256": "62529c213ac5242dcad063d456dd5ae3dcb04bebb882bb36024aa2aaff06aaed"
+    }
+  },
+  "full-driver-status.json": {
+    "stage": "completed",
+    "updated_unix": 1795662780.65984,
+    "report_sha256": "9cf46c5bf8968e596f6f0d5241d91c514906568cee15950193bd1e886b213a28",
+    "archive_sha256": "62529c213ac5242dcad063d456dd5ae3dcb04bebb882bb36024aa2aaff06aaed"
+  },
+  "cost-review.json": {
+    "inputs": "9e393a4c3ae549364baa6d7227bf93e24a69d82725c560c3e6413fe910501d0e",
+    "revision": "9ee2d8f4634e776aa939d7ec9fa64a9ff20977cb",
+    "smoke_sources": 2,
+    "smoke_steps": 1625,
+    "smoke_queries": 10,
+    "smoke_wall_seconds": 1007.5632660388947,
+    "seconds_per_vision_step": 0.03754362973628136,
+    "seconds_per_packing_audit_step": 0.0010815142708329054,
+    "seconds_per_lm_plus_budget_audit_stream_step": 0.1423897816207833,
+    "seconds_per_smoke_query_conservative_for_full": 1.0924004645086824,
+    "remaining_shards": [
+      {
+        "shard": 0,
+        "sources": 20,
+        "steps": 9722,
+        "queries": 100,
+        "component_seconds": 4637.694067239799
+      },
+      {
+        "shard": 1,
+        "sources": 19,
+        "steps": 9202,
+        "queries": 95,
+        "component_seconds": 4390.018930705134
+      },
+      {
+        "shard": 2,
+        "sources": 18,
+        "steps": 9075,
+        "queries": 90,
+        "component_seconds": 4325.401028296169
+      },
+      {
+        "shard": 3,
+        "sources": 18,
+        "steps": 9404,
+        "queries": 90,
+        "component_seconds": 4478.647415134223
+      }
+    ],
+    "component_wall_seconds": 4637.694067239799,
+    "conservative_wall_seconds": 6391.993597808765,
+    "startup_decode_other_residual_smoke_seconds": 228.2646478265524,
+    "max_reproduction_gap": 0.0,
+    "max_parity_gap": 0.14737510681152344,
+    "peak_allocated_gib": 9.21522569656372,
+    "caveat": "Two endpoint smoke sources only. Full uses 3live streams versus 4 in smoke; question cost is conservatively unscaled. Residual includes startup/decode/parity/other overhead and is conservatively scaled by steps. Shared-host contention is unknown; not a deadline."
+  },
+  "automatic-cost-review.json": {
+    "review_mode": "Pre-authorized deterministic integrity and measured-cost review by the Codex continuation controller",
+    "owner_authorization": "Prepare and rundirectly on A100; full 77-source experiment after smoke validation/cost review",
+    "cost_sha256": "890e5839e9a33cedc141effa3771c7aa1dbccd1b5f9b779ad8120588bd95e482",
+    "remaining_sources": 75,
+    "remaining_questions": 375,
+    "full_live_streams_per_worker": 3,
+    "gpu_ids": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "component_wall_hours": 1.2882483520110553,
+    "conservative_wall_hours": 1.7755537771691015,
+    "scope": "Same sealed experiment; no outcome inspection, no budget expansion, no algorithmic speedup claim. Current GPU memory is rechecked by the full driver.",
+    "reviewed_unix": 1795657104.8462064
+  },
+  "per-gpu-timing.json": {
+    "scope": "Observed launcher START/DONE per GPU/shard, polled every second; wall times have up to one polling interval observation error. Includes model startup. Not an algorithmic speedup comparison.",
+    "workers": {
+      "smoke-0": {
+        "pid": 3326462,
+        "gpu": 0,
+        "start_observed_unix": 1795657126.9673748,
+        "done_observed_unix": 1795657144.0001292,
+        "observed_wall_seconds": 17.03275442123413
+      },
+      "smoke-1": {
+        "pid": 3326463,
+        "gpu": 1,
+        "start_observed_unix": 1795657126.9673748,
+        "done_observed_unix": 1795657145.0016618,
+        "observed_wall_seconds": 18.034286975860596
+      },
+      "full-0": {
+        "pid": 3327909,
+        "gpu": 0,
+        "start_observed_unix": 1795657145.0016618,
+        "done_observed_unix": 1795662779.5969517,
+        "observed_wall_seconds": 5634.595289945602
+      },
+      "full-1": {
+        "pid": 3327910,
+        "gpu": 1,
+        "start_observed_unix": 1795657145.0016618,
+        "done_observed_unix": 1795662371.711822,
+        "observed_wall_seconds": 5226.710160255432
+      },
+      "full-2": {
+        "pid": 3327911,
+        "gpu": 2,
+        "start_observed_unix": 1795657145.0016618,
+        "done_observed_unix": 1795662252.4822803,
+        "observed_wall_seconds": 5107.480618476868
+      },
+      "full-3": {
+        "pid": 3327912,
+        "gpu": 3,
+        "start_observed_unix": 1795657145.0016618,
+        "done_observed_unix": 1795662578.1135683,
+        "observed_wall_seconds": 5433.111906528473
+      }
+    },
+    "launcher_started_unix": 1795657104.9339714,
+    "gpu_before": "0, 39892\n1, 39892\n2, 39892\n3, 39892\n",
+    "launcher_completed_unix": 1795662780.599196,
+    "gpu_after": "0, 0,0\n1, 0, 0\n2, 0, 0\n3, 0, 0\n"
+  },
+  "ci": {
+    "headRefOid": "9ee2d8f4634e776aa939d7ec9fa64a9ff20977cb",
+    "statusCheckRollup": [
+      {
+        "__typename": "CheckRun",
+        "completedAt": "2026-11-26T01:20:28Z",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/YanYaoyuan/TRACE-VL/actions/runs/45734714811/job/139625037226",
+        "name": "cpu",
+        "startedAt": "2026-11-26T01:17:12Z",
+        "status": "COMPLETED",
+        "workflowName": "tests"
+      },
+      {
+        "__typename": "CheckRun",
+        "completedAt": "2026-11-26T01:21:05Z",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/YanYaoyuan/TRACE-VL/actions/runs/45734681206/job/139624929577",
+        "name": "cpu",
+        "startedAt": "2026-11-26T01:16:56Z",
+        "status": "COMPLETED",
+        "workflowName": "tests"
+      }
+    ],
+    "verified_unix": 1795656092.0990107
+  },
+  "artifact": {
+    "sources": 77,
+    "questions": 385,
+    "stage": "completed",
+    "remote": "/data/yyy/tracevl-runs/target-protected32-9ee2d8f-001/reports.tar.gz",
+    "bytes": 910663,
+    "sha256": "62529c213ac5242dcad063d456dd5ae3dcb04bebb882bb36024aa2aaff06aaed",
+    "report_sha256": "9cf46c5bf8968e596f6f0d5241d91c514906568cee15950193bd1e886b213a28"
+  },
+  "cost_review_limitation": "Controller checked finite positive cost and exact remaining work, but enforced no hard duration ceiling. The reviewer requested a ceiling; it was not implemented for this run. Do not retrospectively claim that gate passed."
+}
