@@ -115,7 +115,8 @@ def plan(args):
         raise ValueError("expected the existing20,370 unique training media hashes")
     value = {"protocol": "streaming-candidate-byte-header-audit-v1", "csv_sha256": CSV_SHA,
              "development_sha256": DEV_SHA, "training_manifest_sha256": sha(args.training),
-             "training_hashes": hashes, "candidates": candidates, "old_media": old, "archives": archives,
+             "training_hashes": hashes, "candidates": candidates,
+             "old_media": {str(k): v for k, v in old.items()}, "archives": archives,
              "staged_bytes_planned": total, "ceiling_seconds": SECONDS,
              "code_sha256": sha(__file__), "supervisor_sha256": sha(Path(sys.modules[budget.__module__].__file__)),
              "protocol_sha256": sha(Path(__file__).parents[1] / "docs/complementary_memory/streaming_candidate_audit.md"),
@@ -268,7 +269,7 @@ def run(args):
             jobs += [(f"stage-{s}", [*command, "--role", "candidates", "--shard", str(s)], []) for s in range(2)]
             env = {**os.environ, "CUDA_VISIBLE_DEVICES": "", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
             run_jobs(jobs, env, args.out / "logs", deadline, args.out / "jobs.json")
-            report = summarize(args.out)
+            summarize(args.out)
             status.update(stage="completed", input_id=value["id"], report_sha256=sha(args.out / "report.json"))
     except BaseException as exc:
         status.update(stage="held_or_failed", error=f"{type(exc).__name__}: {exc}")
