@@ -1,0 +1,42 @@
+{
+  "verified": true,
+  "input_id": "103a329d1054403a3f6c3795820533f8f33643d960b2389bd5fabd95eff43c5e",
+  "archive_sha256": "0638f242b89413ccb51b34bbdb168eb74e2383540038046865830d3fb28bc044",
+  "report_sha256": "1e7b4e5cff7c67d7f95b4f0c1522990df721a800f4cba661d0a8ecd8d5e1eb81",
+  "source_code_files_verified": 148,
+  "source_cases": 2,
+  "variant_cases": 4,
+  "wall_seconds": 42.386791467666626,
+  "max_option_logit_gap": 0.1614208221435547,
+  "peak_allocated_gib": 8.804028987884521,
+  "cases": [
+    {
+      "source": "streamingbench-real:0199",
+      "variant": "fine32",
+      "max_option_logit_gap": 0.03907012939453125,
+      "readout_kv_tokens": 394
+    },
+    {
+      "source": "streamingbench-real:0199",
+      "variant": "coarse128",
+      "max_option_logit_gap": 0.1614208221435547,
+      "readout_kv_tokens": 298
+    },
+    {
+      "source": "streamingbench-real:0024",
+      "variant": "fine32",
+      "max_option_logit_gap": 0.1255512237548828,
+      "readout_kv_tokens": 394
+    },
+    {
+      "source": "streamingbench-real:0024",
+      "variant": "coarse128",
+      "max_option_logit_gap": 0.07158279418945312,
+      "readout_kv_tokens": 298
+    }
+  ],
+  "processes_exited": true,
+  "gpus_released_at_check": true,
+  "quality_evaluation": false,
+  "scope": "Saved-artifact/hash/gate/accounting verification; not independent re-inference, long-stream stability, quality or novelty evidence."
+}

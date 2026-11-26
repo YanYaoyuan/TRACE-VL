@@ -1,0 +1,107 @@
+{
+  "launch": {
+    "pid": 80334,
+    "root": "/data/yyy/tracevl-runs/delayed-history-real-a2a21e8-001",
+    "revision": "a2a21e826847453721769697977e45fe08489303",
+    "gpu_ids": [
+      0
+    ],
+    "gpu_before": "0, 40441, 0, 0\n1, 40441, 0, 0\n2, 40441, 0, 0\n3, 40441, 0, 0\n",
+    "launched_unix": 1795711411.4449162,
+    "ceiling_seconds": 900,
+    "peer_review_received": false,
+    "quality_evaluation": false,
+    "source_archive_sha256": "c6367eb2812008a13b0ed4023afcaf1af6b46ce79ac999f57df322965ee5a8bf"
+  },
+  "status": {
+    "stage": "completed",
+    "started_unix": 1795711412.8153214,
+    "ceiling_seconds": 900,
+    "input_id": "103a329d1054403a3f6c3795820533f8f33643d960b2389bd5fabd95eff43c5e",
+    "report_sha256": "1e7b4e5cff7c67d7f95b4f0c1522990df721a800f4cba661d0a8ecd8d5e1eb81",
+    "finished_unix": 1795711455.202113
+  },
+  "worker": {
+    "status": "completed",
+    "workers": {
+      "mechanics": {
+        "pid": 80495,
+        "gpu_ids": [
+          0
+        ],
+        "started_unix": 1795711423.8799133,
+        "exit_code": 0,
+        "completed_unix": 1795711455.200748,
+        "wall_seconds": 31.320834636688232
+      }
+    },
+    "started_unix": 1795711423.8792942,
+    "finished_unix": 1795711455.2010047,
+    "elapsed_seconds": 31.32171105314046
+  },
+  "gpu_check": {
+    "status": "completed",
+    "workers": {
+      "gpu-check": {
+        "pid": 80451,
+        "gpu_ids": [
+          0
+        ],
+        "started_unix": 1795711421.6689053,
+        "exit_code": 0,
+        "completed_unix": 1795711423.877905,
+        "wall_seconds": 2.2089996337890625
+      }
+    },
+    "started_unix": 1795711421.6682441,
+    "finished_unix": 1795711423.8783948,
+    "elapsed_seconds": 2.2101515317335725
+  },
+  "artifact": {
+    "root": "/data/yyy/tracevl-runs/delayed-history-real-a2a21e8-001",
+    "remote": "/data/yyy/tracevl-runs/delayed-history-real-a2a21e8-001/mechanics-reports.tar.gz",
+    "bytes": 35148,
+    "sha256": "0638f242b89413ccb51b34bbdb168eb74e2383540038046865830d3fb28bc044",
+    "report_sha256": "1e7b4e5cff7c67d7f95b4f0c1522990df721a800f4cba661d0a8ecd8d5e1eb81"
+  },
+  "ci": {
+    "headRefOid": "a2a21e826847453721769697977e45fe08489303",
+    "statusCheckRollup": [
+      {
+        "__typename": "CheckRun",
+        "completedAt": "2026-11-26T16:39:42Z",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/YanYaoyuan/TRACE-VL/actions/runs/45860085070/job/140048521820",
+        "name": "cpu",
+        "startedAt": "2026-11-26T16:35:00Z",
+        "status": "COMPLETED",
+        "workflowName": "tests"
+      },
+      {
+        "__typename": "CheckRun",
+        "completedAt": "2026-11-26T16:39:37Z",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/YanYaoyuan/TRACE-VL/actions/runs/45860078234/job/140048498277",
+        "name": "cpu",
+        "startedAt": "2026-11-26T16:34:57Z",
+        "status": "COMPLETED",
+        "workflowName": "tests"
+      }
+    ],
+    "checked_unix": 1795711399.834336
+  },
+  "execution_decision": {
+    "peer_review_received": false,
+    "coordination_comment": 7197998623,
+    "scope": "Owner-authorized engineering-only audit; self-reviewed causal boundary, independent native reference and owned-group watchdog. No quality promotion.",
+    "unchanged_revision": "a2a21e826847453721769697977e45fe08489303",
+    "ceiling_seconds": 900,
+    "original_smoke_sources": 2,
+    "steps_each": 16,
+    "question": "fixed synthetic placeholder prompt",
+    "gpu_ids": [
+      0
+    ],
+    "created_unix": 1795711399.8345077
+  }
+}
