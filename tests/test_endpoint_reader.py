@@ -20,8 +20,8 @@ def bb():
     backbone.text_config = backbone.model.config.text_config
     backbone.full_layers, backbone.linear_layers = [1], [0]
     backbone.vision_start, backbone.vision_end = 1, 2
-    get_peft_model(backbone.model, LoraConfig(r=2, lora_alpha=4, lora_dropout=0,
-                                             target_modules=["q_proj", "v_proj"]))
+    backbone.peft = get_peft_model(backbone.model, LoraConfig(r=2, lora_alpha=4, lora_dropout=0,
+                                                            target_modules=["q_proj", "v_proj"]))
     backbone.model.eval()
     return backbone
 
@@ -146,3 +146,25 @@ def test_failed_update_closes_episode_without_reusing_partial_gradients(bb):
         reader.train_step([(TAIL, ANSWER)], optimizer, max_answer_tokens=1)
     with pytest.raises(RuntimeError, match="closed"):
         reader.answer_loss(TAIL, ANSWER)
+
+
+def test_source_checkpoint_resume_matches_uninterrupted_adam_updates(bb, tmp_path, monkeypatch):
+    from trace_vl.core_vlm.train import restore_checkpoint, save_checkpoint, tensor_digest
+
+    # CPU CI exercises actual checkpoint/Adam/LoRA recovery. Runtime uses CUDA RNG.
+    monkeypatch.setattr(torch.cuda, 'get_rng_state', torch.get_rng_state)
+    monkeypatch.setattr(torch.cuda, 'set_rng_state', torch.set_rng_state)
+    params = {n: p for n, p in bb.model.named_parameters() if p.requires_grad}
+    optimizer = torch.optim.AdamW(list(params.values()), lr=.001, weight_decay=0.)
+    first = episode(bb, blocks(8))
+    metrics = [first.train_step([(TAIL, ANSWER)], optimizer)]
+    save_checkpoint(tmp_path, 1, 'resume-test', bb, params, optimizer, 0, 1, metrics)
+    episode(bb, blocks(9)).train_step([([13, 14], [42, 43, 2])], optimizer)
+    expected = tensor_digest(params)
+    restored_optimizer = torch.optim.AdamW(list(params.values()), lr=.001, weight_decay=0.)
+    update, recovered = restore_checkpoint(tmp_path / 'checkpoint-000001', 'resume-test',
+                                           params, restored_optimizer, 0, 1)
+    assert update == 1 and recovered == metrics
+    episode(bb, blocks(9)).train_step([([13, 14], [42, 43, 2])], restored_optimizer)
+    assert tensor_digest(params) == expected
+    assert all(int(s['step']) == 2 for s in restored_optimizer.state.values())
