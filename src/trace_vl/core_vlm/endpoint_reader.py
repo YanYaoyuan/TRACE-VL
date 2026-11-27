@@ -102,7 +102,8 @@ class EndpointReaderEpisode:
                       "query_time": self.query_time, "prefix_steps": self.stream.seen,
                       "prefix_gradients": False, "live_stream_unchanged": True}
 
-    def train_step(self, questions, optimizer, *, max_grad_norm=1., max_answer_tokens=512):
+    def train_step(self, questions, optimizer, *, max_grad_norm=1., max_answer_tokens=512,
+                   synchronize_gradients=None):
         """Mean-question CE, one optimizer update per complete source episode.
 
         Questions are (tail token IDs, gold-answer token IDs including EOS).
@@ -125,6 +126,8 @@ class EndpointReaderEpisode:
                 tokens += meta["answer_tokens"]
                 with torch.enable_grad():
                     (loss / len(questions)).backward()
+            if synchronize_gradients is not None:
+                synchronize_gradients(self.trainable)
             norm = torch.nn.utils.clip_grad_norm_(self.trainable, max_grad_norm, error_if_nonfinite=True)
             if not bool(norm > 0):
                 raise RuntimeError("answer loss produced no LoRA gradient")

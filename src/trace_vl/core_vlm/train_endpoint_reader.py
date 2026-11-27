@@ -37,7 +37,7 @@ def training_sources(rows):
     """Validate source-atomic training groups before constructing any model."""
     groups, ids, owners = {}, set(), {}
     for row in rows:
-        if (row.get('split') != 'candidate_train_pilot'
+        if (row.get('split') not in ('candidate_train_pilot', 'candidate_train_scale')
                 or row.get('endpoint_rule') != 'actual_full_video_container_end'
                 or row.get('evidence_intervals') is not None
                 or row.get('memory_necessity_verified') is not False):
@@ -102,7 +102,12 @@ def native_prompt(bb, record, frames, indices, times, fps, count, first_stamp, a
 
 def source_observations(bb, records, *, parity):
     row = records[0]
-    metadata = probe_video(row['video'], 180)
+    if 'metadata' in row:
+        if sha256(row['metadata']) != row.get('metadata_sha256'):
+            raise ValueError('cached full-frame PTS metadata differs')
+        metadata = json.loads(Path(row['metadata']).read_text())
+    else:
+        metadata = probe_video(row['video'], 180)
     pts, keep = presentation_frames(metadata['frames'], drop_bad_pts=False)
     duration = float(subprocess.check_output(
         ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of',
