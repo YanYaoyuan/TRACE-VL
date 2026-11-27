@@ -357,7 +357,7 @@ def run(args):
         def resources():
             snap = subprocess.check_output(['nvidia-smi', '--query-gpu=index,memory.free',
                                             '--format=csv,noheader,nounits'], text=True)
-            free = {int(l.split(',')[0]): int(l.split(',')[1]) for l in snap.splitlines()}
+            free = {int(line.split(',')[0]): int(line.split(',')[1]) for line in snap.splitlines()}
             if any(free[g] < 28 * 1024 for g in gpus):
                 raise ValueError('two workers need at least28GiB free per selected GPU')
             return snap
