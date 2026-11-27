@@ -23,7 +23,7 @@ Prespecified co-primary comparisons, negative NLL favoring the first named syste
 
 Under the same Reservoir policy, both trained checkpoints have identical per-question correctness at 300s; their NLL difference is only -0.001095, 95% CI [-0.006555, +0.004100]. Thus the +6.49 pp trained-system difference is not evidence that Reservoir-specific training caused the gain. It combines checkpoint and retention-policy differences. The matched-policy controls do not establish a training specialization benefit.
 
-The window-trained checkpoint's within-window NLL improvement is -0.014821, 95% exploratory CI [-0.027466, -0.003172], while accuracy drops from 52 to 51 correct. Probability calibration and classification accuracy need separate reporting. This secondary result does not rescue either co-primary comparison.
+The window-trained checkpoint's within-window NLL improvement is -0.014821, 95% exploratory CI [-0.027466, -0.003172], while accuracy drops from 52 to 51 correct. Gold-answer probability and classification accuracy need separate reporting. This secondary result does not rescue either co-primary comparison.
 
 ## Other delays and controls
 
