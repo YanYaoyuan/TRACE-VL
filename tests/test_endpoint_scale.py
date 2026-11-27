@@ -1,6 +1,7 @@
 import pytest
 import torch
-from test_endpoint_reader import ANSWER, TAIL, bb as bb, blocks, episode
+from test_endpoint_reader import ANSWER, TAIL, blocks, episode
+from test_endpoint_reader import bb as bb
 
 from trace_vl.core_vlm.train_endpoint_reader import source_observations, training_sources
 from trace_vl.core_vlm.train_endpoint_scale import source_batches
