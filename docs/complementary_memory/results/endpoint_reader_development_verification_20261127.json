@@ -1,0 +1,39 @@
+{
+  "summary": {
+    "verified": true,
+    "checked_unix": 1795791461.8358188,
+    "inputs": "b84f06c7cb1e850a37b8519358ec7830945ce17c1bb52392a7c904439cb3925c",
+    "report_sha256": "e83e083d0bb2938ce828ef403c24f7f573a90ea848a6769666890b15c627fece",
+    "source_receipts": 231,
+    "question_records": 1155,
+    "score_vectors": 4620,
+    "preserved_files_unchanged": 36,
+    "independently_recomputed_all_arms_and_intervals": true,
+    "max_numeric_difference": 0.0,
+    "independent_exact_byte_clusters": 73,
+    "gpu_worker_exit_codes": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "official_benchmark": false,
+    "exploratory_posthoc_300s_training_gain_beyond_text_only": {
+      "nll": {
+        "mean": 0.00274740469123504,
+        "ci95": [
+          -0.01733843067252176,
+          0.021757782371114264
+        ]
+      },
+      "acc": {
+        "mean": 0.0,
+        "ci95": [
+          -0.05194805194805195,
+          0.05263157894736842
+        ]
+      }
+    }
+  },
+  "verification_sha256": "385251ffcb374f63ca39b77551a75ee55c244597ecc3a029f22be285f497d7b2"
+}
