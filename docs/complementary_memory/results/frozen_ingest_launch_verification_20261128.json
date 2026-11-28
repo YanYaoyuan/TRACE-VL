@@ -1,0 +1,77 @@
+{
+  "scope": "Mechanics/launch verification only; no quality scores",
+  "runtime": "29cd6af91896174c3ee81fe076ead0aeaf35746f",
+  "evaluation_runtime": "3388f632bf9e1c63b8aa8a616498a1b8242b8ccd",
+  "training_root": "/data/yyy/tracevl-runs/frozen-ingest-29cd6af-003",
+  "checked_unix": 1795877853.563084,
+  "real_flow": {
+    "completed": true,
+    "scope": "mechanics only; old training source; no quality/benchmark claim",
+    "source_id": "xBe_gtHZiHY",
+    "source_seconds": 361.836533,
+    "prefix_steps": 362,
+    "questions": 5,
+    "initial_receipt": {
+      "run": "183ace38e7dd3aba8e22149eb1ea24700d4ce6e012e3fd96457f7bf8d5229d28",
+      "update": 64,
+      "adapter_sha256": "d60a97dee0a669ae3887da530a581510aef09b24901e11fe2b4d71c48bd0fef4",
+      "files": {
+        "training.pt": "9589e8827de95e79f0d20a448d06810ca1c5502aa14d68ec8f6770b1c4bf557b",
+        "adapter/adapter_config.json": "8f53504afdf85b14b3389c388db510a57a687ac985ffe84dd50723e28518b7ec",
+        "adapter/adapter_model.safetensors": "789690b79b4b325901d36a22327dc4bd423752f132c4c6bd0314e4b586092dcb",
+        "adapter/README.md": "8602c3e9443ede4dafba595e0b9c7bbd6bcf97fba87d9489bca799d3b68d5b91"
+      }
+    },
+    "initial_shared_vs_separate_cache_bit_identical": true,
+    "initial_shared_vs_separate_CE_gap": 0.0,
+    "source_observation_query_native_parity": 0.010033130645751953,
+    "prefix_parameters_unchanged": true,
+    "prefix_no_gradients": true,
+    "rebuilt_prefix_cache_bit_identical_after_query_update": true,
+    "query_adapter_changed": true,
+    "query_Adam_step": 65,
+    "query_checkpoint": {
+      "run": "4f0951f9fa8f8e4537202de64cd5924be1b4de0812cbf44413bc34d5937a806b",
+      "update": 1,
+      "adapter_sha256": "6ac230234cb3a98cb8e37724d05d20d838a513977dbb043b3f0f19bad6761538",
+      "files": {
+        "training.pt": "f415f1e4b595b643048d5571f302791925eaaf026c838d32ec4f1ffeaa6f2938",
+        "adapter/adapter_config.json": "8f53504afdf85b14b3389c388db510a57a687ac985ffe84dd50723e28518b7ec",
+        "adapter/adapter_model.safetensors": "14fdd51d8178ac352256ae8d0c75757ba4b18daf9c26fca4e6498107efb13e03",
+        "adapter/README.md": "8602c3e9443ede4dafba595e0b9c7bbd6bcf97fba87d9489bca799d3b68d5b91"
+      }
+    },
+    "peak_allocated_gib": 18.33443021774292,
+    "elapsed_seconds": 204.3120632171631,
+    "query_result": {
+      "questions": 5,
+      "answer_tokens": 88,
+      "mean_question_answer_ce": 1.3574028253555297,
+      "gradient_norm_before_clip": 2.65653133392334,
+      "optimizer_steps": 1,
+      "prefix_rebuild_required": true,
+      "prefix_gradients": false
+    }
+  },
+  "first_update_bridge": {
+    "passed": true,
+    "first_query_update_bit_identical": true,
+    "full_source_and_QA_schedule_identical": true
+  },
+  "first_query_adapter_sha256": {
+    "shared": "252d4b4082a55e7d1d98b879944f667f86316a9aa5ab0a4bc533899f252bf2f4",
+    "frozen": "252d4b4082a55e7d1d98b879944f667f86316a9aa5ab0a4bc533899f252bf2f4"
+  },
+  "A100_training_tests_passed": 31,
+  "A100_evaluation_tests_passed": 43,
+  "evaluation_reducer_regression": {
+    "completed": true,
+    "numeric_checks": 230,
+    "max_numeric_difference": 0.0,
+    "source": "Published final-versus-pilot predictions, relabelled only inside this numerical regression.",
+    "reference_report_sha256": "fb374c2e730cdd85fdc983762d32cc07fe43a5bbe94112ea6d323df1017b636c",
+    "model_calls": 0
+  },
+  "evaluation_queued_root": "/data/yyy/tracevl-runs/frozen-ingest-pair-eval-3388f63-001",
+  "quality_evaluated": false
+}

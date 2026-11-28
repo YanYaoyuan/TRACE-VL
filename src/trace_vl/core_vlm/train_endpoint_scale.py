@@ -50,7 +50,7 @@ def average_gradients(parameters):
 
 
 def retain_checkpoints(out, current):
-    keep = {current, current - 1, 16, 64, 128, 256}
+    keep = {current, current - 1, 1, 16, 64, 128, 256}
     for folder in out.glob('checkpoint-[0-9][0-9][0-9][0-9][0-9][0-9]'):
         if int(folder.name.split('-')[1]) not in keep:
             shutil.rmtree(folder)
@@ -85,6 +85,10 @@ def run(args):
         if not prepared['completed'] or prepared['manifest_sha256'] != args.manifest_sha256:
             raise ValueError('expanded data qualification is incomplete')
     batches = source_batches(sources, world)
+    if args.stage_updates:
+        if not 1 <= args.stage_updates <= len(batches):
+            raise ValueError('stage update count must fit the unchanged full-cohort schedule')
+        batches = batches[:args.stage_updates]
     init = Path(args.init_checkpoint)
     init_report = json.loads((init.parent / 'report.json').read_text())
     init_run = json.loads((init.parent / 'run.json').read_text())
@@ -106,6 +110,8 @@ def run(args):
                 raise ValueError('qualified PTS metadata changed')
     identity = {'protocol': 'native-endpoint-scale1024-v1', 'manifest_sha256': args.manifest_sha256,
                 'sources': len(sources), 'QA': len(rows), 'world_size': world,
+                'stage_updates': len(batches), 'stage_sources': len(batches) * world,
+                'stage_QA': sum(len(records) for batch in batches for records in batch),
                 'batch_source_ids': [[r[0]['source_id'] for r in batch] for batch in batches],
                 'QA_ids': [[r['id'] for r in records] for records in sources],
                 'initial_checkpoint': initial, 'initial_base_model': base['model_identity'],
@@ -113,6 +119,9 @@ def run(args):
                               'carry_candidate_Adam_moments': True, 'initial_Adam_steps': 64},
                 'retention': {'policy': 'reservoir', 'recent': 8, 'capacity': 32, 'seed': 17},
                 'prefix_gradients': False, 'source_objective': 'mean source of mean question answer-token CE',
+                'prefix_adapter': {'mode': 'frozen64' if args.frozen_ingest else 'shared_trainable',
+                                   'frozen_checkpoint': initial if args.frozen_ingest else None,
+                                   'separate_backbone_allocation': bool(args.frozen_ingest)},
                 'code': {name: sha256(Path(__file__).with_name(name)) for name in
                          ('train_endpoint_scale.py', 'train_endpoint_reader.py', 'endpoint_reader.py',
                           'train.py', 'native.py', 'data.py')}, 'torch': str(torch.__version__),
@@ -133,6 +142,16 @@ def run(args):
             raise ValueError('only LM LoRA parameters may train')
         if tensor_digest(params) != initial['adapter_sha256']:
             raise ValueError('loaded candidate adapter differs')
+        prefix_bb = None
+        if args.frozen_ingest:
+            prefix_bb = Backbone(BackboneConfig(name=base['model'], dtype='bfloat16', local_files_only=True),
+                                 StreamConfig(pixels_per_frame=256 * 256), device=f'cuda:{local}')
+            prefix_bb.add_lora(8, 16, dropout=0., adapter=str(init / 'adapter'))
+            prefix_bb.model.eval().requires_grad_(False)
+            frozen_lora = {name: p for name, p in prefix_bb.model.named_parameters() if 'lora_' in name}
+            if tensor_digest(frozen_lora) != initial['adapter_sha256']:
+                raise ValueError('frozen ingestion adapter differs from the original64-source candidate')
+            prefix_versions = [(id(p), p._version) for p in prefix_bb.model.parameters()]
         optimizer = torch.optim.AdamW(list(params.values()), lr=1e-5, weight_decay=0.)
         if pointer[0] is None:
             state = torch.load(init / 'training.pt', map_location='cpu', weights_only=True)
@@ -160,7 +179,8 @@ def run(args):
             atomic_text(out / f'rank-{rank}.json', json.dumps({'stage': 'source', 'update': update + 1,
                         'source_id': record_group[0]['source_id'], 'rank': rank}) + '\n')
             head, blocks, questions, audit = source_observations(bb, record_group, parity=update == start)
-            episode = EndpointReaderEpisode(bb, head, 'reservoir', recent=8, capacity=32, seed=17)
+            episode = EndpointReaderEpisode(bb, head, 'reservoir', recent=8, capacity=32, seed=17,
+                                            prefix_bb=prefix_bb)
             for block in blocks:
                 episode.append(block)
             episode.seal(record_group[0]['query_time'])
@@ -172,9 +192,14 @@ def run(args):
             if (base_versions != [(id(p), p._version) for p in bb.model.parameters() if not p.requires_grad]
                     or any(p.grad is not None for p in bb.model.parameters() if not p.requires_grad)):
                 raise ValueError('frozen base changed or received gradients')
+            if prefix_bb is not None:
+                if (prefix_versions != [(id(p), p._version) for p in prefix_bb.model.parameters()]
+                        or any(p.grad is not None or p.requires_grad for p in prefix_bb.model.parameters())):
+                    raise ValueError('fixed ingestion model changed or received gradients')
             audit.update(**result, stream=stream, rank=rank,
                          source_seconds=time.monotonic() - tick,
                          peak_allocated_gib=torch.cuda.max_memory_allocated() / 2**30)
+            audit['frozen_ingest'] = prefix_bb is not None
             gathered = [None] * world
             dist.all_gather_object(gathered, audit)
             metrics.append({'update': update + 1, 'sources': gathered,
@@ -187,14 +212,15 @@ def run(args):
                 checked_checkpoint(out / f'checkpoint-{update+1:06d}', identity['id'])
                 retain_checkpoints(out, update + 1)
                 atomic_text(out / 'progress.json', json.dumps({'stage': 'checkpointed',
-                            'completed_sources': (update + 1) * world, 'target_sources': len(sources),
+                            'completed_sources': (update + 1) * world, 'target_sources': len(batches) * world,
                             'completed_updates': update + 1, 'last_update': metrics[-1]}, indent=2) + '\n')
                 print(json.dumps({'update': update + 1, 'sources': (update + 1) * world,
                                   'slowest_source_seconds': max(m['source_seconds'] for m in gathered)}), flush=True)
             dist.barrier()
         if rank == 0:
             result = {'completed': limit == len(batches), 'completed_sources': limit * world,
-                      'target_sources': len(sources), 'stage_optimizer_updates': limit,
+                      'target_sources': len(batches) * world, 'eligible_sources': len(sources),
+                      'frozen_ingest': bool(args.frozen_ingest), 'stage_optimizer_updates': limit,
                       'initial_optimizer_updates': 64, 'run': identity['id'],
                       'last_checkpoint': f'checkpoint-{limit:06d}', 'prefix_gradients': False,
                       'held_out_evaluated': False}
@@ -212,6 +238,10 @@ def main():
     p.add_argument('--init-checkpoint', default='/data/yyy/tracevl-runs/endpoint-reader-pilot-798eee2-001/reservoir/checkpoint-000064')
     p.add_argument('--out', required=True)
     p.add_argument('--stop-after', type=int, default=0)
+    p.add_argument('--stage-updates', type=int, default=0,
+                   help='fixed first N updates of the full source schedule;0 means all')
+    p.add_argument('--frozen-ingest', action='store_true',
+                   help='separate frozen64-source ingestion backbone; train question/answer LoRA only')
     run(p.parse_args())
 
 
