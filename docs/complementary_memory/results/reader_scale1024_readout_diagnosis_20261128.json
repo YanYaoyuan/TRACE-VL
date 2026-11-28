@@ -1,0 +1,175 @@
+{
+  "completed": true,
+  "sources": 77,
+  "queries": 385,
+  "model_forward_calls": 0,
+  "CPU_native_prompt_equal_across_delays": 385,
+  "same_retained_indices_and_budgets": 385,
+  "oracle_proxy": "Reuse measured delay0 recent replay8 under verified identical prompt/target steps; an offline privileged fresh-state target replay counterfactual, not a new deployed run. Only target-window overlap is measured, not annotated evidence coverage. Live recurrent state may contain history even when retained target overlap is zero.",
+  "target_window_diagnostics": {
+    "0": {
+      "queries": 77,
+      "correct_with_oracle_only": 7,
+      "correct_with_live_only": 2,
+      "mean_target_window_steps_retained": 8.0,
+      "zero_target_window_overlap": 0
+    },
+    "15": {
+      "queries": 77,
+      "correct_with_oracle_only": 11,
+      "correct_with_live_only": 4,
+      "mean_target_window_steps_retained": 1.6883116883116882,
+      "zero_target_window_overlap": 17
+    },
+    "60": {
+      "queries": 77,
+      "correct_with_oracle_only": 12,
+      "correct_with_live_only": 3,
+      "mean_target_window_steps_retained": 1.1428571428571428,
+      "zero_target_window_overlap": 28
+    },
+    "180": {
+      "queries": 77,
+      "correct_with_oracle_only": 15,
+      "correct_with_live_only": 2,
+      "mean_target_window_steps_retained": 0.6363636363636364,
+      "zero_target_window_overlap": 41
+    },
+    "300": {
+      "queries": 77,
+      "correct_with_oracle_only": 14,
+      "correct_with_live_only": 3,
+      "mean_target_window_steps_retained": 0.4675324675324675,
+      "zero_target_window_overlap": 49
+    }
+  },
+  "regressions_180_and_300": [
+    {
+      "id": "Real-Time Visual Understanding_sample_6_2/delay180",
+      "source_group": "streamingbench-real:0006",
+      "delay": 180,
+      "old_gold_margin": 0.041141510009765625,
+      "new_gold_margin": -0.19121551513671875,
+      "target_window_steps_retained": 1,
+      "target_window_size": 8,
+      "new_oracle_target_replay_correct": true,
+      "old_oracle_target_replay_correct": true,
+      "new_control_correct": {
+        "reservoir17": false,
+        "window40": false,
+        "recent_replay8": false,
+        "text_only": true
+      },
+      "retained_step_indices_identical": true
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_22_1/delay300",
+      "source_group": "streamingbench-real:0022",
+      "delay": 300,
+      "old_gold_margin": 0.08022499084472656,
+      "new_gold_margin": -0.0021419525146484375,
+      "target_window_steps_retained": 1,
+      "target_window_size": 8,
+      "new_oracle_target_replay_correct": false,
+      "old_oracle_target_replay_correct": false,
+      "new_control_correct": {
+        "reservoir17": false,
+        "window40": true,
+        "recent_replay8": false,
+        "text_only": true
+      },
+      "retained_step_indices_identical": true
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_62_3/delay180",
+      "source_group": "streamingbench-real:0062",
+      "delay": 180,
+      "old_gold_margin": 0.12414932250976562,
+      "new_gold_margin": -0.13930130004882812,
+      "target_window_steps_retained": 0,
+      "target_window_size": 8,
+      "new_oracle_target_replay_correct": false,
+      "old_oracle_target_replay_correct": false,
+      "new_control_correct": {
+        "reservoir17": false,
+        "window40": false,
+        "recent_replay8": true,
+        "text_only": true
+      },
+      "retained_step_indices_identical": true
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_66_2/delay180",
+      "source_group": "streamingbench-real:0066",
+      "delay": 180,
+      "old_gold_margin": 0.47257232666015625,
+      "new_gold_margin": -0.24111175537109375,
+      "target_window_steps_retained": 0,
+      "target_window_size": 8,
+      "new_oracle_target_replay_correct": true,
+      "old_oracle_target_replay_correct": true,
+      "new_control_correct": {
+        "reservoir17": false,
+        "window40": false,
+        "recent_replay8": true,
+        "text_only": true
+      },
+      "retained_step_indices_identical": true
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_66_2/delay300",
+      "source_group": "streamingbench-real:0066",
+      "delay": 300,
+      "old_gold_margin": 0.28973388671875,
+      "new_gold_margin": -0.1714324951171875,
+      "target_window_steps_retained": 0,
+      "target_window_size": 8,
+      "new_oracle_target_replay_correct": true,
+      "old_oracle_target_replay_correct": true,
+      "new_control_correct": {
+        "reservoir17": false,
+        "window40": false,
+        "recent_replay8": false,
+        "text_only": true
+      },
+      "retained_step_indices_identical": true
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_67_2/delay180",
+      "source_group": "streamingbench-real:0067",
+      "delay": 180,
+      "old_gold_margin": 0.10735130310058594,
+      "new_gold_margin": -0.0479736328125,
+      "target_window_steps_retained": 0,
+      "target_window_size": 8,
+      "new_oracle_target_replay_correct": true,
+      "old_oracle_target_replay_correct": true,
+      "new_control_correct": {
+        "reservoir17": false,
+        "window40": false,
+        "recent_replay8": true,
+        "text_only": true
+      },
+      "retained_step_indices_identical": true
+    },
+    {
+      "id": "Real-Time Visual Understanding_sample_125_3/delay180",
+      "source_group": "streamingbench-real:0125",
+      "delay": 180,
+      "old_gold_margin": 0.1924285888671875,
+      "new_gold_margin": -0.17370223999023438,
+      "target_window_steps_retained": 0,
+      "target_window_size": 8,
+      "new_oracle_target_replay_correct": true,
+      "old_oracle_target_replay_correct": true,
+      "new_control_correct": {
+        "reservoir17": false,
+        "window40": false,
+        "recent_replay8": true,
+        "text_only": true
+      },
+      "retained_step_indices_identical": true
+    }
+  ],
+  "scope": "Post hoc reused-dev diagnosis, no causal writer/state/reader attribution."
+}
