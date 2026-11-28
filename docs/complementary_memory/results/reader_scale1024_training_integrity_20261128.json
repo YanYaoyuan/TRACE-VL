@@ -1,0 +1,82 @@
+{
+  "completed": true,
+  "checked_unix": 1795849230.5072136,
+  "scope": "training integrity only; no quality scores",
+  "run": "4ef952337a9ca871b9aa73a7d762ae9df399e3e4fa569cc1ec204c922e3b190c",
+  "new_sources": 1024,
+  "new_QA": 5082,
+  "stage_updates": 256,
+  "total_Adam_steps": 320,
+  "world_size": 4,
+  "final_adapter_sha256": "e14d99f76f2ae6a1e1e6c844fa4b49a58b44a182965375ce2d71e793d59daea8",
+  "final_adapter_file_sha256": "94b59b329b65aa02f9f1bdd828c471fdedbe9d393c0d94c034f4cc4dfbd9c518",
+  "retained_checkpoints": {
+    "checkpoint-000016": {
+      "run": "4ef952337a9ca871b9aa73a7d762ae9df399e3e4fa569cc1ec204c922e3b190c",
+      "update": 16,
+      "adapter_sha256": "14862eaa92a920b66a171fa06af2611d15785b19b5c819eec67a823a48a5d2d9",
+      "files": {
+        "training.pt": "a075d5f3d54508e9594305f8f4302e098fc7f6c1ce11242f909634721994a061",
+        "adapter/adapter_config.json": "8f53504afdf85b14b3389c388db510a57a687ac985ffe84dd50723e28518b7ec",
+        "adapter/adapter_model.safetensors": "6aee561ade99a5dd87f74b906d2c0c9d3a107399aba1bce673c771e8216656a6",
+        "adapter/README.md": "8602c3e9443ede4dafba595e0b9c7bbd6bcf97fba87d9489bca799d3b68d5b91"
+      }
+    },
+    "checkpoint-000064": {
+      "run": "4ef952337a9ca871b9aa73a7d762ae9df399e3e4fa569cc1ec204c922e3b190c",
+      "update": 64,
+      "adapter_sha256": "9c5f7722e3d188c1cd4a3f9680aea2134f3e48659d99f288d4dd69e3ffbcc8e8",
+      "files": {
+        "training.pt": "4b01be1f715c327c2833110e5eb9c4ed297127b8be47f5c62994ff93dd0af06a",
+        "adapter/adapter_config.json": "8f53504afdf85b14b3389c388db510a57a687ac985ffe84dd50723e28518b7ec",
+        "adapter/adapter_model.safetensors": "bacabbdbb21552c8404ca92d5b4f659f84093838f579369b2def23d2e1a349ac",
+        "adapter/README.md": "8602c3e9443ede4dafba595e0b9c7bbd6bcf97fba87d9489bca799d3b68d5b91"
+      }
+    },
+    "checkpoint-000128": {
+      "run": "4ef952337a9ca871b9aa73a7d762ae9df399e3e4fa569cc1ec204c922e3b190c",
+      "update": 128,
+      "adapter_sha256": "f718b3adb09e39df4dcec7112f440235e2698c7df0b0cd2e846ae3ebec7ee05d",
+      "files": {
+        "training.pt": "88e6c4ae980dcebd06145715692284d797bfb5aa51b49106926b9be7a35de5aa",
+        "adapter/adapter_config.json": "8f53504afdf85b14b3389c388db510a57a687ac985ffe84dd50723e28518b7ec",
+        "adapter/adapter_model.safetensors": "3d614ef7cb1618b0bc03e4ba2b7eae6681b01fae262685fa05cb5b9fcf2b6284",
+        "adapter/README.md": "8602c3e9443ede4dafba595e0b9c7bbd6bcf97fba87d9489bca799d3b68d5b91"
+      }
+    },
+    "checkpoint-000255": {
+      "run": "4ef952337a9ca871b9aa73a7d762ae9df399e3e4fa569cc1ec204c922e3b190c",
+      "update": 255,
+      "adapter_sha256": "6697c5ffa229d734a26d49231a6de1da4ed2e9abc85ae82ab7399c0db067faab",
+      "files": {
+        "training.pt": "2c77441c8cb24540e1f9c24ba0b63942a114a2063ca84d55f87c5134c1e03834",
+        "adapter/adapter_config.json": "8f53504afdf85b14b3389c388db510a57a687ac985ffe84dd50723e28518b7ec",
+        "adapter/adapter_model.safetensors": "039057c2d325c7a5bd0cb8a6d7a2c499a2c4ebd23824252e945ba4c8027cabb9",
+        "adapter/README.md": "8602c3e9443ede4dafba595e0b9c7bbd6bcf97fba87d9489bca799d3b68d5b91"
+      }
+    },
+    "checkpoint-000256": {
+      "run": "4ef952337a9ca871b9aa73a7d762ae9df399e3e4fa569cc1ec204c922e3b190c",
+      "update": 256,
+      "adapter_sha256": "e14d99f76f2ae6a1e1e6c844fa4b49a58b44a182965375ce2d71e793d59daea8",
+      "files": {
+        "training.pt": "dd015503466ffc3aced9d166f78a12450fb12b07bf876b90e1f706403bf0b112",
+        "adapter/adapter_config.json": "8f53504afdf85b14b3389c388db510a57a687ac985ffe84dd50723e28518b7ec",
+        "adapter/adapter_model.safetensors": "94b59b329b65aa02f9f1bdd828c471fdedbe9d393c0d94c034f4cc4dfbd9c518",
+        "adapter/README.md": "8602c3e9443ede4dafba595e0b9c7bbd6bcf97fba87d9489bca799d3b68d5b91"
+      }
+    }
+  },
+  "all_adapter_tensors_match_optimizer_checkpoint": true,
+  "all_source_schedule_QA_counts_match": true,
+  "all_four_rank_RNG_saved": true,
+  "prefix_gradients": false,
+  "training_dev_exact_byte_overlap": 0,
+  "peak_allocated_gib": 11.280901432037354,
+  "training_worker_seconds": 27575.739546315745,
+  "controller_seconds": 29431.00498342514,
+  "finished_unix": 1795824154.1073875,
+  "held_out_evaluated": false,
+  "manifest_sha256": "4429de41c80f3f6579b9af34983db03300d73aab9395d3d1107473355027cddc",
+  "report_sha256": "791b9b69b804f1f0ecae450050da2f4dbb6a8ec85a761da5336d39c35bb0d413"
+}
