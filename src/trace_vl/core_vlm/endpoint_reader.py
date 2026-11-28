@@ -16,11 +16,28 @@ from trace_vl.v3.backbone import functional_linear_cache
 from trace_vl.v3.positions import PositionCounter
 
 
+def _cache_signature(bb):
+    return (bb.text_config.to_dict(), tuple(bb.full_layers), tuple(bb.linear_layers), bb.hidden, bb.device, bb.dtype,
+            bb.video_token, bb.vision_start, bb.vision_end)
+
+
 class EndpointReaderEpisode:
-    def __init__(self, bb, head, policy="reservoir", *, recent=8, capacity=32, seed=0):
+    def __init__(self, bb, head, policy="reservoir", *, recent=8, capacity=32, seed=0, prefix_bb=None):
         if torch.is_inference_mode_enabled():
             raise ValueError("reader episodes need no_grad prefixes, not inference-mode tensors")
         self.bb = bb
+        self.prefix_bb = bb if prefix_bb is None else prefix_bb
+        if prefix_bb is not None:
+            if prefix_bb is bb or any(p.requires_grad for p in prefix_bb.model.parameters()):
+                raise ValueError("independent prefix backbone must be fully frozen")
+            if any(m.training for m in prefix_bb.model.modules()):
+                raise ValueError("frozen prefix backbone requires eval mode")
+            if _cache_signature(prefix_bb) != _cache_signature(bb):
+                raise ValueError("prefix and reader cache/token configurations must match")
+            storage = {p.untyped_storage().data_ptr() for p in prefix_bb.model.parameters() if p.numel()}
+            if any(p.numel() and p.untyped_storage().data_ptr() in storage for p in bb.model.parameters()):
+                raise ValueError("prefix and reader parameter storage must be independent")
+            self.prefix_signature = _cache_signature(prefix_bb)
         self.trainable = [p for n, p in bb.model.named_parameters() if p.requires_grad and "lora_" in n]
         other = [n for n, p in bb.model.named_parameters() if p.requires_grad and "lora_" not in n]
         if not self.trainable or other:
@@ -32,10 +49,11 @@ class EndpointReaderEpisode:
         self.last_end = -math.inf
         self.query_time = None
         with torch.no_grad():
-            self.stream = NativeStream(bb, head, policy, recent=recent, capacity=capacity, seed=seed)
+            self.stream = NativeStream(self.prefix_bb, head, policy, recent=recent, capacity=capacity, seed=seed)
 
     def _versions(self):
-        return tuple((id(p), p._version, p.requires_grad) for p in self.bb.model.parameters())
+        models = [self.bb.model] if self.prefix_bb is self.bb else [self.bb.model, self.prefix_bb.model]
+        return tuple((id(p), p._version, p.requires_grad) for model in models for p in model.parameters())
 
     def _check(self):
         if torch.is_inference_mode_enabled():
@@ -47,6 +65,14 @@ class EndpointReaderEpisode:
             raise RuntimeError("model parameters changed; cached prefix is stale and must be rebuilt")
         if any(m.training for m in self.bb.model.modules()):
             raise RuntimeError("model mode changed within the source episode")
+        if self.prefix_bb is not self.bb and any(m.training for m in self.prefix_bb.model.modules()):
+            self.closed = True
+            raise RuntimeError("prefix model mode changed within the source episode")
+        if self.prefix_bb is not self.bb and (
+                _cache_signature(self.prefix_bb) != self.prefix_signature
+                or _cache_signature(self.bb) != self.prefix_signature):
+            self.closed = True
+            raise RuntimeError("prefix/reader cache configuration changed within the source episode")
 
     def append(self, block):
         self._check()
